@@ -77,6 +77,8 @@ try:
         page.screenshot(path=str(out/'demo-dark.png'), full_page=True, animations='disabled')
         page.get_by_role('button', name='Próximas etapas', exact=True).click()
         page.get_by_role('heading', name='Da prévia ao envio seguro').wait_for()
+        assert page.get_by_text('Coordenar os computadores autorizados', exact=True).is_visible()
+        assert page.get_by_text('Um coletor ativo por vez e computadores autorizados de reserva', exact=False).is_visible()
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'roadmap-dark.png'), full_page=True, animations='disabled')
@@ -94,6 +96,7 @@ try:
         # School schedule remains a local preview: edit, validate, save, reload, undo.
         page.get_by_role('button', name='Agenda de coleta', exact=True).click()
         page.get_by_role('heading', name='Horários de coleta').wait_for()
+        assert page.get_by_text('Usuários e computadores autorizados usarão a mesma configuração', exact=False).is_visible()
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'schedule-initial.png'), full_page=True, animations='disabled')

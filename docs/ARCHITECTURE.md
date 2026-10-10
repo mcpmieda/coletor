@@ -56,7 +56,9 @@ um parser estruturalmente bem-sucedido não comprova integridade do relatório.
   Login expirado vira reconexão assistida, sem loop de autenticação. Nada disso
   está executando neste marco. Calendário escolar continua sendo fonte separada
   para elegibilidade das aulas e limite temporal do cálculo.
-- Três dispositivos, um líder. API concede lease curto usando seu relógio;
+- Quantidade variável de usuários e computadores autorizados, com um coletor
+  ativo por vez e os demais computadores autorizados como reservas. O cliente
+  não fixa um limite de dispositivos nem concede permissões. API concede lease curto usando seu relógio;
   cada concessão aumenta fencing token. API rejeita token vencido/antigo,
   inclusive depois de reinício, atraso de rede ou retorno do antigo líder.
 - Fila local criptografada somente após desenho/aprovação de retenção. Resposta

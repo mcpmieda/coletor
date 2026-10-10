@@ -4,7 +4,7 @@
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
   locais, contraste da UI, assets e bandeja simulada: 80 testes passaram. As correções de volume vieram de revisão parcial.
-- UI: 45 testes de labels, adaptador, erros, agenda e mascote passaram.
+- UI: 46 testes de labels, adaptador, erros, agenda e mascote passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
 - Código do launcher Windows e contrato pywebview: inspecionados/compilados,
@@ -85,3 +85,11 @@ As capturas finais incluem prévia/validação, agenda e próximas etapas nos do
 nativa no Windows. Módulo opt-in não é iniciado pelo launcher. Ícones locais são
 checados como containers ICO multirresolução e também precisam de conferência real
 na área de notificação antes de habilitar. Nenhuma tarefa ou instalação foi feita.
+
+## Quantidade variável de usuários e computadores
+
+Os textos e contratos preliminares não fixam quantidade de usuários ou PCs.
+Permanece o escopo escolar autorizado, com um coletor ativo por vez e os demais
+computadores autorizados como reservas. Teste de renderização e smoke de navegador
+cobrem a mensagem compartilhada e o plano de coordenação. Não existe cadastro,
+limite artificial de dispositivos ou mudança de permissões implementada neste marco.

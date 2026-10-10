@@ -28,9 +28,12 @@ ser promovida a revisão de servidor. Não há schoolId ou identidade inventada.
 Nenhuma API aceita esse documento neste marco.
 
 No produto futuro, a configuração pertence à escola autenticada e é compartilhada
-pelos três usuários autorizados e seus computadores. Uma alteração autorizada
+pelos usuários e computadores autorizados, em quantidade variável. Uma alteração autorizada
 vale para todos, e o login traz a última versão escolar. Credenciais e sessão
 continuam individuais. A autoridade de escola/usuário será a API, nunca o cliente.
+O contrato não fixa quantidade de usuários ou dispositivos. Continua previsto um
+coletor ativo por vez, com os demais computadores autorizados como reservas;
+a quantidade variável não concede acesso nem altera as regras de autorização.
 
 Persistência compartilhada, autorização, auditoria, versão de servidor e edição
 concorrente precisam implementação separada: leitura com revisão, escrita com

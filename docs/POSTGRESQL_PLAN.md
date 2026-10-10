@@ -201,8 +201,10 @@ a quantidade de coletas idênticas.
 
 Assumindo seis encerramentos por dia e 200 dias: 18.000 coletas de turma/ano
 para 15 turmas, ou 21.600 para 18. Com um HTML hipotético de 1 MB por turma,
-o tráfego Smecel → líder seria 18–21,6 GB/ano; três coletores independentes
-triplicariam para 54–64,8 GB.
+o tráfego Smecel → líder seria 18–21,6 GB/ano. Se N computadores coletassem
+independentemente, esse tráfego seria multiplicado por N. O desenho mantém um
+coletor ativo por vez e os demais computadores autorizados como reservas,
+sem fixar a quantidade de usuários ou dispositivos.
 
 Uma medida real do HTML amostral foi **6.653.368 bytes UTF-8**, 32 fichas e 60
 tabelas; conteúdo real não foi exportado para este repositório. Se todo relatório
@@ -210,7 +212,7 @@ tivesse esse tamanho, seriam aproximadamente 119,8–143,7 GB/ano para 15–18
 turmas com um líder. É extrapolação da amostra, não medição da escola inteira;
 tamanho HTTP comprimido pode ser bem menor que UTF-8 bruto.
 
-O lease evita a multiplicação pelos três PCs. Hash local **não evita baixar o
+O lease evita a multiplicação pelos computadores autorizados. Hash local **não evita baixar o
 HTML de novo** quando a origem não oferece uma leitura incremental confiável.
 Se o relatório anual já vem completo, compará-lo localmente detecta também
 correções antigas, sem mais chamadas ao Smecel.
@@ -333,7 +335,7 @@ Não usar um relógio do Windows como fonte da validade do lease.
   continuam sendo a autoridade para a conta. Coleta no fim de cada aula usa
   fuso IANA da escola e os horários escolhidos; ainda não estão confirmados.
   Não substituir essa agenda por polling fixo a cada N minutos. PCs de reserva usam backoff/jitter e consultam o lease perto
-  da janela de trabalho; não precisam fazer três capturas.
+  da janela de trabalho; os computadores de reserva não precisam repetir a captura.
 - Se for adotado relatório de janela curta, reconciliar histórico em cadência
   definida por custo/atraso aceitável (por exemplo, ano completo semanal e ao
   fechamento). Se a mesma resposta já é anual, não acrescentar fetch histórico.

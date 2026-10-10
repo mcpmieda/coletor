@@ -23,7 +23,7 @@ presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total d
 fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
 
 Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
-execução agendada, bandeja ativada/validada no Windows, coordenação dos três PCs, portal ou instalador.
+execução agendada, bandeja ativada/validada no Windows, coordenação dos computadores autorizados, portal ou instalador.
 A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
 O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
 exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
@@ -41,8 +41,10 @@ estão preparados separadamente, sem iniciar bandeja por padrão.
 A página Agenda de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
 versão 75, separados por dia e turno, com fuso America/Bahia editável. Salva apenas
 uma prévia neste navegador; nenhuma tarefa é executada. O escopo futuro é a escola:
-a mesma configuração para os três usuários, após login e sincronização ainda não
-implementados. Não guarda credenciais. Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
+a mesma configuração para os usuários e computadores autorizados, após login e sincronização ainda não
+implementados. A quantidade é variável; o desenho prevê um coletor ativo por vez
+e os demais computadores autorizados como reservas. Não guarda credenciais.
+Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
 
 ## Executar a prévia no desenvolvimento
 

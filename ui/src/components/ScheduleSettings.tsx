@@ -29,11 +29,11 @@ export default function ScheduleSettings() {
     try {
       const result = saveSchedule(window.localStorage, config);
       setSaved(result); setDraft(toDraft(result));
-      setNotice('Prévia salva neste navegador. Compartilhamento entre os três usuários ainda não está ativo.');
+      setNotice('Prévia salva neste navegador. Compartilhamento entre usuários e computadores autorizados ainda não está ativo.');
     } catch { setError('Não foi possível salvar neste navegador. Suas alterações continuam na tela.'); }
   }
   return <div className="schedule-page">
-    <section className="panel schedule-intro"><div className="section-heading"><div><h2>Uma agenda para a escola</h2><p>Os três usuários usarão a mesma configuração quando o login e a sincronização forem implementados.</p></div><Users size={22} className="muted" /></div><div className="schedule-notice"><StatusChip tone="warning">Automação inativa</StatusChip><p>Esta versão permite editar e salvar uma prévia local. Não abre o Smecel nem executa coletas. Na janela Windows privada, o rascunho pode ser descartado ao fechar.</p></div></section>
+    <section className="panel schedule-intro"><div className="section-heading"><div><h2>Uma agenda para a escola</h2><p>Usuários e computadores autorizados usarão a mesma configuração quando o login e a sincronização forem implementados.</p></div><Users size={22} className="muted" /></div><div className="schedule-notice"><StatusChip tone="warning">Automação inativa</StatusChip><p>Esta versão permite editar e salvar uma prévia local. Não abre o Smecel nem executa coletas. Na janela Windows privada, o rascunho pode ser descartado ao fechar.</p></div></section>
     <section className="panel schedule-editor" aria-labelledby="schedule-title"><div className="section-heading"><div><h2 id="schedule-title">Horários de coleta</h2><p>Padrão: fim de cada aula + 10 minutos e rechecagem do turno.</p></div><Clock3 size={22} className="muted" /></div>
       <div className="schedule-meta"><TextField value={draft.timezone} onChange={v => { setDraft(d => ({ ...d, timezone: v })); setError(''); setNotice(''); }}><Label>Fuso da escola</Label><Input maxLength={80} /></TextField><div><strong>Configuração escolar · versão 1</strong><p>Revisão local {saved.localRevision} · {selectedCount} dias/turnos selecionados</p><p>Compartilhamento: planejado</p></div></div>
       <div className="schedule-shifts" role="group" aria-label="Turno da agenda">{(Object.keys(SHIFTS) as Shift[]).map(s => <Button key={s} variant={s === shift ? 'primary' : 'secondary'} aria-pressed={s === shift} onPress={() => setShift(s)}>{SHIFTS[s]}</Button>)}</div>

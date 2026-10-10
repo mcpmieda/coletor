@@ -51,7 +51,8 @@ CREATE TABLE attendance.source_student_link (
 -- Validar a tripla gradebook.aluno(id,ano,student_uid) na transação existente;
 -- um vínculo de origem não cria, reassocia ou restaura studentUid.
 
--- Um líder para três PCs; a autenticação do dispositivo pertence à futura API.
+-- Um coletor ativo por vez entre computadores autorizados em quantidade variável.
+-- Os demais são reservas; a autenticação e autorização pertencem à futura API.
 CREATE TABLE attendance.collector_lease (
   school_scope text NOT NULL,
   academic_year smallint NOT NULL,
