@@ -47,8 +47,14 @@ um parser estruturalmente bem-sucedido não comprova integridade do relatório.
 - Login inicial no Ecossistema e registro de dispositivo, após aprovação de
   acesso persistente; autenticação Smecel separada em perfil Chromium exclusivo.
 - Credenciais em cofre do sistema operacional, sem tokens em código/logs/repo.
-- Agenda escolar autoritativa com fuso IANA e fim de cada aula; horários ainda
-  não conhecidos. Não usar intervalos fixos como substituto de horários escolares.
+- Agenda configurável por horários e dias da semana, com fuso IANA; horários
+  ainda não conhecidos. São gatilhos de coleta, não prova de que uma aula ocorreu.
+  No horário configurado, apenas o PC líder abre Chromium exclusivo, verifica a
+  sessão, captura, fecha e reporta. Prever Coletar agora, Pausar e tentativas
+  espaçadas, com uma coleta por vez e sem replay descontrolado de horários perdidos.
+  Login expirado vira reconexão assistida, sem loop de autenticação. Nada disso
+  está executando neste marco. Calendário escolar continua sendo fonte separada
+  para elegibilidade das aulas e limite temporal do cálculo.
 - Três dispositivos, um líder. API concede lease curto usando seu relógio;
   cada concessão aumenta fencing token. API rejeita token vencido/antigo,
   inclusive depois de reinício, atraso de rede ou retorno do antigo líder.
@@ -69,3 +75,12 @@ um parser estruturalmente bem-sucedido não comprova integridade do relatório.
 Fixtures são inteiramente sintéticas. CI e testes não fazem login Smecel, não
 registram dispositivo, não consultam dados de menores e não tocam no PostgreSQL.
 A UI não afirma “conectado” nem mostra sincronização bem-sucedida simulada.
+
+## Horário de coleta não é denominador de frequência
+
+As seis posições do parser são as seis colunas/slots visuais da fonte, não uma
+suposição de seis aulas realizadas todos os dias. A planilha de horários pode
+sugerir gatilhos diferentes por dia/turno e precisa de vigência confirmada.
+Não cortar automaticamente a sexta posição nem mudar a fórmula da frequência
+por divergência com essa planilha. A conciliação entre grade, calendário e
+semântica nativa permanece uma decisão funcional antes da integração.

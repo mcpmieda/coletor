@@ -1,0 +1,268 @@
+ESTUDO APENAS. NÃO EXECUTAR. NÃO É MIGRATION NEM CONTRATO FINAL.
+
+O usuário pediu preparar a base sem enviar ao PostgreSQL antes de definir a
+visão para pais. Este arquivo .txt só ilustra a viabilidade do modelo esparso.
+Não define papéis/grants, não abre API, não contém credenciais ou dados reais.
+Não foi aplicado nem testado contra banco. Nomes podem mudar após a decisão
+sobre informação detalhada/agregada necessária para os responsáveis.
+
+As referências reais conhecidas são gradebook.student_identity(id uuid),
+gradebook.aluno(id,ano,student_uid) e gradebook.turma(id,ano). Estes objetos não
+são criados/alterados aqui. A ligação de origem ainda exige evidência confiável.
+
+-- ESBOÇO SQL COMEÇA AQUI; texto não executável por um migration runner.
+
+CREATE SCHEMA attendance;
+REVOKE ALL ON SCHEMA attendance FROM PUBLIC;
+
+-- Contexto da turma de origem. A escola atual não vira cadastro duplicado.
+CREATE TABLE attendance.source_class (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  school_scope text NOT NULL,
+  academic_year smallint NOT NULL CHECK (academic_year BETWEEN 1900 AND 9999),
+  source_class_key text NOT NULL,
+  gradebook_class_id integer REFERENCES gradebook.turma(id) ON DELETE SET NULL,
+  content_revision bigint NOT NULL DEFAULT 0 CHECK (content_revision >= 0),
+  last_capture_sequence bigint NOT NULL DEFAULT 0 CHECK (last_capture_sequence >= 0),
+  UNIQUE (school_scope, academic_year, source_class_key),
+  CHECK (length(school_scope) BETWEEN 1 AND 80),
+  CHECK (length(source_class_key) BETWEEN 1 AND 120)
+);
+-- API confere ano/turma e invalida atalhos após reset. Uma FK simples não
+-- comprova que gradebook_class_id pertence ao academic_year indicado.
+
+-- Somente a via de chave DURÁVEL verificada. source_student_ref de uma ficha
+-- HTML não pode preencher source_student_key. Recibo pontual é outro contrato.
+CREATE TABLE attendance.source_student_link (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  school_scope text NOT NULL,
+  academic_year smallint NOT NULL CHECK (academic_year BETWEEN 1900 AND 9999),
+  source_student_key text NOT NULL,
+  student_uid uuid NOT NULL REFERENCES gradebook.student_identity(id)
+    ON UPDATE RESTRICT ON DELETE RESTRICT,
+  gradebook_student_id integer REFERENCES gradebook.aluno(id) ON DELETE SET NULL,
+  mapping_revision bigint NOT NULL CHECK (mapping_revision > 0),
+  mapping_evidence_id uuid NOT NULL,
+  verified_at timestamptz NOT NULL,
+  UNIQUE (school_scope, academic_year, source_student_key),
+  UNIQUE (id, student_uid),
+  CHECK (length(source_student_key) BETWEEN 1 AND 120)
+);
+-- Validar a tripla gradebook.aluno(id,ano,student_uid) na transação existente;
+-- um vínculo de origem não cria, reassocia ou restaura studentUid.
+
+-- Um líder para três PCs; a autenticação do dispositivo pertence à futura API.
+CREATE TABLE attendance.collector_lease (
+  school_scope text NOT NULL,
+  academic_year smallint NOT NULL,
+  holder_device_id uuid,
+  fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (school_scope, academic_year)
+);
+-- Adquirir/renovar sob lock da linha. Relógio é do banco. Nova posse incrementa
+-- fence; renovação não. Ingestão compara dono/fence/validade sob o mesmo lock.
+-- Não guardar segredo/autorização no ID público do dispositivo.
+
+-- Cabeçalho por pedido, não uma cópia do diário anual.
+CREATE TABLE attendance.capture_receipt (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  device_id uuid NOT NULL,
+  request_id uuid NOT NULL,
+  request_hash bytea NOT NULL CHECK (octet_length(request_hash) = 32),
+  source_hash bytea NOT NULL CHECK (octet_length(source_hash) = 32),
+  scope_hash bytea NOT NULL CHECK (octet_length(scope_hash) = 32),
+  fence bigint NOT NULL CHECK (fence > 0),
+  capture_sequence bigint NOT NULL CHECK (capture_sequence > 0),
+  base_revision bigint NOT NULL CHECK (base_revision >= 0),
+  resulting_revision bigint NOT NULL CHECK (resulting_revision >= base_revision),
+  parser_version text NOT NULL,
+  legend_version text NOT NULL,
+  roster_revision text NOT NULL,
+  captured_at_client timestamptz NOT NULL,
+  source_cutoff date, -- somente se comprovado; corte da origem, não relógio local
+  received_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+  result text NOT NULL CHECK (result IN ('committed','unchanged')),
+  changed_count integer NOT NULL CHECK (changed_count >= 0),
+  UNIQUE (device_id, request_id),
+  UNIQUE (id, source_class_id)
+);
+-- Falhas rejeitadas: telemetria sanitizada com prazo curto, não snapshots de
+-- menores. Repetir pedido existente devolve recibo; hash diferente é conflito.
+-- Horário capturado no PC é proveniência, não relógio confiável de concorrência.
+
+-- Definição imutável de retângulo: turma, intervalo e conjunto exato de alunos.
+-- Neste esboço, todos os seis slots do dia devem estar estruturalmente cobertos.
+CREATE TABLE attendance.coverage_scope (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  starts_on date NOT NULL,
+  ends_before date NOT NULL,
+  member_set_hash bytea NOT NULL CHECK (octet_length(member_set_hash) = 32),
+  definition_hash bytea NOT NULL CHECK (octet_length(definition_hash) = 32),
+  parser_version text NOT NULL,
+  legend_version text NOT NULL,
+  roster_revision text NOT NULL,
+  last_attempt_at timestamptz,
+  last_observed_at timestamptz,
+  last_validated_at timestamptz,
+  source_confirmed_at timestamptz,
+  last_validated_receipt_id bigint REFERENCES attendance.capture_receipt(id),
+  content_hash bytea CHECK (content_hash IS NULL OR octet_length(content_hash) = 32),
+  CHECK (starts_on < ends_before),
+  UNIQUE (source_class_id, definition_hash),
+  UNIQUE (id, source_class_id)
+);
+CREATE TABLE attendance.coverage_member (
+  scope_id bigint NOT NULL REFERENCES attendance.coverage_scope(id),
+  source_link_id bigint NOT NULL,
+  student_uid uuid NOT NULL,
+  PRIMARY KEY (scope_id, student_uid),
+  FOREIGN KEY (source_link_id, student_uid)
+    REFERENCES attendance.source_student_link(id, student_uid)
+);
+CREATE INDEX coverage_member_student_idx
+  ON attendance.coverage_member (student_uid, scope_id);
+-- Só avançar last_validated após comparar conjunto completo, versões e hashes.
+-- last_attempt pode avançar numa falha, mas não prova uma captura válida.
+-- source_confirmed_at fica NULL sem confirmação acadêmica explícita na origem.
+-- API/serviço deve assegurar que recibo, escola/ano, fonte e intervalo coincidem.
+
+-- Compartilhado pela turma. TRUE computável, FALSE sem aula, NULL desconhecido.
+-- Feriados, sábados letivos e eventos seguem a máscara nativa, não seg–sex.
+CREATE TABLE attendance.calendar_day (
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  school_date date NOT NULL,
+  lesson_1 boolean,
+  lesson_2 boolean,
+  lesson_3 boolean,
+  lesson_4 boolean,
+  lesson_5 boolean,
+  lesson_6 boolean,
+  revision bigint NOT NULL CHECK (revision > 0),
+  last_changed_receipt_id bigint NOT NULL,
+  PRIMARY KEY (source_class_id, school_date),
+  FOREIGN KEY (last_changed_receipt_id, source_class_id)
+    REFERENCES attendance.capture_receipt(id, source_class_id)
+);
+-- TRUE é elegibilidade na fonte, não evidência de chamada docente. Datas
+-- futuras são previstas; corte vem do último recibo validado da cobertura,
+-- sem regravar todas as datas. Não substitui a regra do dia corrente.
+-- O corpo não define grade de horários nem mapeia posição para componente.
+
+-- Intervalos de elegibilidade na fonte, com fronteiras por posição de aula.
+-- Início inclusivo; fim exclusivo; pares lexicográficos (data, aula).
+CREATE TABLE attendance.eligibility_span (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  student_uid uuid NOT NULL REFERENCES gradebook.student_identity(id),
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  starts_on date NOT NULL,
+  starts_lesson smallint NOT NULL CHECK (starts_lesson BETWEEN 1 AND 6),
+  ends_on date NOT NULL,
+  ends_lesson smallint NOT NULL CHECK (ends_lesson BETWEEN 1 AND 6),
+  scope_id bigint NOT NULL,
+  revision bigint NOT NULL CHECK (revision > 0),
+  last_changed_receipt_id bigint NOT NULL,
+  CHECK ((starts_on, starts_lesson) < (ends_on, ends_lesson)),
+  UNIQUE (student_uid, source_class_id, starts_on, starts_lesson),
+  FOREIGN KEY (scope_id, source_class_id)
+    REFERENCES attendance.coverage_scope(id, source_class_id),
+  FOREIGN KEY (scope_id, student_uid)
+    REFERENCES attendance.coverage_member(scope_id, student_uid),
+  FOREIGN KEY (last_changed_receipt_id, source_class_id)
+    REFERENCES attendance.capture_receipt(id, source_class_id)
+);
+-- Fim após a 6a aula: (data seguinte, 1). Não sobrepor intervalos de mesmo
+-- aluno/turma: serviço reconcilia sob lock da turma e valida antes do commit.
+-- Uma amostra parcial não autoriza apagar os intervalos de fora dela.
+
+-- Fatos esparsos. 1 = falta não justificada; 2 = falta justificada.
+-- Não há linha de presença e não há coluna nome/nascimento/MAT.
+CREATE TABLE attendance.absence (
+  student_uid uuid NOT NULL REFERENCES gradebook.student_identity(id),
+  school_date date NOT NULL,
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  lesson smallint NOT NULL CHECK (lesson BETWEEN 1 AND 6),
+  absence_kind smallint NOT NULL CHECK (absence_kind IN (1,2)),
+  revision bigint NOT NULL CHECK (revision > 0),
+  scope_id bigint NOT NULL,
+  last_changed_receipt_id bigint NOT NULL,
+  PRIMARY KEY (student_uid, school_date, source_class_id, lesson),
+  FOREIGN KEY (scope_id, source_class_id)
+    REFERENCES attendance.coverage_scope(id, source_class_id),
+  FOREIGN KEY (scope_id, student_uid)
+    REFERENCES attendance.coverage_member(scope_id, student_uid),
+  FOREIGN KEY (last_changed_receipt_id, source_class_id)
+    REFERENCES attendance.capture_receipt(id, source_class_id)
+);
+CREATE INDEX absence_class_date_idx
+  ON attendance.absence (source_class_id, school_date);
+-- API confere data dentro do ano, cobertura, calendário, matrícula e permissões.
+-- Se calendário for corrigido depois, o fato pode permanecer para rastreio,
+-- excluído dos totais elegíveis; não removê-lo silenciosamente.
+
+-- Uma entrada pequena por alteração real de ausência/calendário/elegibilidade.
+-- Não registrar corpo completo de coleta inalterada. Antes/depois são shapes
+-- fechados de códigos/datas/booleans, não HTML, nomes, documentos ou notas livres.
+CREATE TABLE attendance.change_audit (
+  receipt_id bigint NOT NULL REFERENCES attendance.capture_receipt(id),
+  ordinal integer NOT NULL CHECK (ordinal > 0),
+  entity_kind text NOT NULL CHECK (entity_kind IN ('absence','calendar','eligibility')),
+  student_uid uuid REFERENCES gradebook.student_identity(id),
+  source_class_id bigint NOT NULL REFERENCES attendance.source_class(id),
+  school_date date,
+  lesson smallint CHECK (lesson BETWEEN 1 AND 6),
+  operation text NOT NULL CHECK (operation IN ('replace','remove')),
+  before_value jsonb NOT NULL,
+  after_value jsonb,
+  reason_code text NOT NULL,
+  PRIMARY KEY (receipt_id, ordinal),
+  CHECK (octet_length(before_value::text) <= 2048),
+  CHECK (after_value IS NULL OR octet_length(after_value::text) <= 2048),
+  CHECK (before_value IS DISTINCT FROM after_value)
+);
+-- Novos fatos preservam seu lote criador; mudança/remoção conserva valor
+-- anterior. O serviço valida shapes JSON estritos por entity_kind. JSON pequeno
+-- para delta auditável não é o modelo de armazenamento do diário anual.
+
+-- Defesa em profundidade. Nenhuma policy/grant de runtime é definida aqui:
+-- revisão posterior precisa usar os papéis oficiais de ingestão/leitura.
+ALTER TABLE attendance.source_class ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.source_student_link ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.collector_lease ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.capture_receipt ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.coverage_scope ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.coverage_member ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.calendar_day ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.eligibility_span ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.absence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance.change_audit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON ALL TABLES IN SCHEMA attendance FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA attendance FROM PUBLIC;
+-- Não expor schema via Data API nem conceder anon/authenticated/service_role.
+-- Owner/BYPASSRLS podem contornar RLS: não usá-los no runtime. Identidade do
+-- aluno/responsável vem da sessão autorizada, não de auth.uid() improvisado.
+
+-- Exemplo de leitura fixa APÓS a autorização. $1 é UID resolvido no servidor:
+SELECT school_date, source_class_id, lesson, absence_kind, revision
+FROM attendance.absence
+WHERE student_uid = $1::uuid AND school_date >= $2::date AND school_date < $3::date
+ORDER BY school_date, source_class_id, lesson;
+-- Consulta separada/CTE traz calendário, elegibilidade e cobertura autorizados.
+-- Não derivar presença apenas deste SELECT vazio.
+
+-- Exemplo de UPSERT APÓS locks, CAS, validação e auditoria, no mesmo commit:
+INSERT INTO attendance.absence AS stored
+  (student_uid, school_date, source_class_id, lesson, absence_kind,
+   revision, scope_id, last_changed_receipt_id)
+VALUES ($1::uuid, $2::date, $3::bigint, $4::smallint, $5::smallint,
+        $6::bigint, $7::bigint, $8::bigint)
+ON CONFLICT (student_uid, school_date, source_class_id, lesson)
+DO UPDATE SET absence_kind = EXCLUDED.absence_kind,
+              revision = EXCLUDED.revision,
+              scope_id = EXCLUDED.scope_id,
+              last_changed_receipt_id = EXCLUDED.last_changed_receipt_id
+WHERE stored.absence_kind IS DISTINCT FROM EXCLUDED.absence_kind;
+-- Não é implementação completa de ingestão nem controla concorrência sozinho.
+-- A versão final faz set-based para lotes e trata escopo/correções explicitamente.

@@ -16,9 +16,12 @@ O navegador da nuvem não alcançou o loopback do executor (connection refused).
 O Chromium no executor foi impedido de iniciar por restrição de socket do sandbox,
 mesmo após tentativa suportada de execução com revisão. Nenhuma restrição foi
 alterada. O script `scripts/check_ui.py` está preparado para o CI Linux com fixtures
-sintéticas. Primeira execução remota confirmou carga, demo, filtros, paginação, tema escuro, navegação, limpeza e importação. Detectou overflow horizontal em viewport 390px; a correção de min-width/grid está em validação. Screenshots dessa execução foram baixados e inspecionados, sem dados reais.
+sintéticas. Primeira execução remota confirmou carga, demo, filtros, paginação, tema escuro, navegação, limpeza e importação. Detectou overflow horizontal em viewport 390px; a correção de min-width/grid passou na segunda execução. Screenshots dessa execução foram baixados e inspecionados, sem dados reais.
 
-Não afirmar fidelidade visual completa nem QA Windows até executar esses passos.
+O CI completo passou em 05d9621132894f4483ff155f74047b3bc580d71c:
+https://github.com/mcpmieda/coletor-frequencia-smecel/actions/runs/38007936337.
+
+Não afirmar equivalência pixel a pixel ao Atualizador nem QA nativo Windows.
 A referência visual é o código de UI do Atualizador 1.3.0, e não um novo conceito
 raster: foram preservados HeroUI v3, tokens de accent claro/escuro, fonte Segoe UI,
 barra lateral de 256px, marca em bloco verde, controles e navegação correspondentes.
@@ -31,3 +34,24 @@ A tela funcional foi adaptada ao diário; não contém estados de sincronizaçã
 - HTML isolado não prova `ct`, roster completo ou MAT; envio permanece bloqueado.
 - Nenhuma coleta autenticada, credencial, dispositivo, API, banco ou portal conectado.
 - Interface importa em memória; não há instalador, tray, agendamento ou failover.
+
+## Inspeção visual da UI renderizada
+
+Screenshots sintéticos do CI inspecionados: estado vazio claro, prévia clara,
+prévia escura e viewport móvel. O script verifica 1440×1000, 1240×820 (tamanho inicial previsto para a janela)
+e 390×844. Consulte a execução do commit na PR para o resultado mais recente.
+
+Comparação com os fontes de identidade do Atualizador:
+1. Paleta: tokens de accent claros/escuros exatos, verde Excel aplicado nos botões e seleção.
+2. Tipografia: família Segoe UI Variable Text/Segoe UI declarada; CI Linux usa fallback,
+   portanto a aparência exata da fonte precisa de QA no Windows.
+3. Navegação: barra lateral 256px, marca em quadrado verde e ícones Lucide lineares.
+4. Controles: Button/Chip/TextField/Select reais do HeroUI 3.2.6, sem simulação raster.
+5. Estados: claro/escuro/automático, vazio, erro, carga, prévia, filtros e paginação funcionais.
+6. Responsividade: overflow de página corrigido; a tabela conserva rolagem própria.
+
+Desvios intencionais: conteúdo e navegação próprios do coletor, sem mascote nem
+instalador, campos/alertas específicos da validação. Não foi criado conceito gráfico
+novo, pois a referência solicitada é o sistema de design existente do Atualizador.
+O texto acima da dobra identifica protótipo local e envio desativado; nenhuma
+mensagem afirma conexão ou sincronização fictícia.

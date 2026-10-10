@@ -21,12 +21,14 @@ try:
         page.on('pageerror', lambda e: errors.append(str(e)))
         page.goto(url)
         page.get_by_role('heading', name='Primeiro, conferir. Depois, sincronizar.').wait_for()
+        page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'empty-light.png'), full_page=True)
         page.get_by_role('button', name='Carregar demonstração').click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
         assert page.get_by_text('Aluno sintético 001',exact=True).count() > 0
         assert page.get_by_text('Envio indisponível neste protótipo').is_visible()
         assert page.locator('tbody tr').count() == 24
+        page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'demo-light.png'), full_page=True)
         page.get_by_role('button', name='Próxima página').click()
         assert 'Página 2 de' in page.locator('.table-footer').inner_text()
@@ -39,6 +41,7 @@ try:
         page.get_by_role('button', name='Aparência').click()
         page.get_by_role('option', name='Escura', exact=True).click()
         assert page.locator('html').get_attribute('data-theme') == 'dark'
+        page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'demo-dark.png'), full_page=True)
         page.get_by_role('button', name='Próximas etapas', exact=True).click()
         page.get_by_role('heading', name='Da prévia ao envio seguro').wait_for()
@@ -56,7 +59,12 @@ try:
         # Repeated load after error and clearing; no stale preview.
         page.get_by_role('button', name='Carregar demonstração').click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
+        page.set_viewport_size({'width':1240,'height':820})
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'desktop-window.png'), full_page=True)
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Desktop-window overflow'
         page.set_viewport_size({'width':390,'height':844})
+        page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'mobile.png'), full_page=True)
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Horizontal page overflow'
         assert page.get_by_role('button',name='Abrir HTML').is_visible()

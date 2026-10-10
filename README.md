@@ -23,6 +23,8 @@ fichas verificável; importação isolada nunca autoriza envio. Nomes não são 
 Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
 agendamento, bandeja, coordenação dos três PCs, portal ou instalador.
 A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
+O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
+exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
 
 ## Executar a prévia no desenvolvimento
 
@@ -75,6 +77,8 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 
 - [Arquitetura, fonte e próximos contratos](docs/ARCHITECTURE.md)
 - [Segurança e privacidade](docs/SECURITY.md)
+- [Estudo econômico PostgreSQL, ainda não implementado](docs/POSTGRESQL_PLAN.md)
+- [DDL apenas ilustrativo, não executar](docs/POSTGRESQL_DDL_PROPOSAL.sql.txt)
 - [Plano de PR e próximos marcos](docs/PR_PLAN.md)
 - [Fixture sintética e cobertura](fixtures/README.md)
 - [Verificação desta versão](docs/VERIFICATION.md)

@@ -12,3 +12,9 @@
 
 Este PR não autoriza merge, deploy, release, publicação de instalador ou escrita
 em produção. Nenhum workflow de implantação integra este repositório.
+
+## Limite confirmado em 10/10/2026
+
+Construir a base agora, sem mandar qualquer dado ao PostgreSQL/API. A experiência
+dos responsáveis deve ser definida antes de fechar os dados a transmitir.
+Nenhum contrato preliminar neste código é aprovação do esquema final.
