@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 import threading
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 from coletor.server import PreviewServer
 
 server = PreviewServer(0)
@@ -25,7 +25,7 @@ try:
         page.get_by_role('heading', name='Primeiro, conferir. Depois, sincronizar.').wait_for()
         fox = page.get_by_role('img', name='Raposa vermelha, mascote do coletor')
         fox.wait_for()
-        page.wait_for_function("document.querySelector('.fox-sprite')?.complete && document.querySelector('.fox-sprite').naturalWidth > 0")
+        expect(fox).to_have_js_property('complete', True)
         assert fox.evaluate('img => img.complete && img.naturalWidth > 0'), 'Missing fox sprite'
         assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
         assert page.locator('.fox-button').evaluate('el => getComputedStyle(el).animationName') == 'none'
@@ -36,11 +36,11 @@ try:
         page.get_by_role('checkbox', name='Mostrar raposa', exact=True).check()
         page.emulate_media(reduced_motion='no-preference')
         page.locator('.fox-stage[data-motion=on]').wait_for()
-        page.wait_for_function("document.querySelector('.fox-sprite')?.complete && document.querySelector('.fox-sprite').naturalWidth > 0")
+        expect(fox).to_have_js_property('complete', True)
         atlas_count = len(atlas_requests)
         page.get_by_role('button',name='Fazer carinho na raposa').click()
         assert page.locator('.fox-stage').get_attribute('data-action') == 'pet'
-        page.wait_for_function("document.querySelector('.fox-stage').dataset.pose === 'happy'")
+        expect(page.locator('.fox-stage')).to_have_attribute('data-pose', 'happy')
         assert len(atlas_requests) == atlas_count, 'Sprite animation fetched another image'
         page.get_by_role('checkbox',name='Animar mascote',exact=True).uncheck()
         assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
