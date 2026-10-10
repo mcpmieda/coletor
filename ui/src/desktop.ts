@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { isDesktopSettings } from './localSettings';
 export type DesktopActivity = 'idle' | 'reading' | 'error';
+declare global { interface Window { __coletorWindowVisible?: boolean } }
 export interface TrayBridge {
   get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: false }>;
   hide_window(): Promise<{ hidden: true } | { error: string }>;

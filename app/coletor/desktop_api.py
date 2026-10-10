@@ -27,7 +27,7 @@ class DesktopApi(PreviewApi):
         return self._reading(lambda: super(DesktopApi, self).preview_html(html, class_id, year))
 
     def get_desktop_status(self):
-        return {"tray_available": self._tray is not None and not self._tray._disposed,
+        return {"tray_available": self._tray is not None and self._tray.available(),
                 "automatic_collection": False}
 
     def hide_window(self):

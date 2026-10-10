@@ -23,6 +23,8 @@ REQUIRED_CHECKS = {
     "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
     "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed",
     "visible_ui_healthy",
+    "unregistered_tray_cannot_hide",
+    "hidden_and_minimized_panel_motion_stops",
 }
 EXTENDED_CHECKS = {
     "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
@@ -72,7 +74,7 @@ def exercise(window,args,result):
     from System import Array, Object
     from System.Drawing import Point
     from System.Reflection import BindingFlags
-    from System.Windows.Forms import MouseEventArgs, MouseButtons, Application
+    from System.Windows.Forms import MouseEventArgs, MouseButtons, Application, FormWindowState
     checks=result["checks"]
     gate=threading.Event()
     tray=window._coletor_tray
@@ -93,6 +95,10 @@ def exercise(window,args,result):
         require("native_window_visible",info["visible"] and info["edgechromium"])
         data=inspect(tray)
         require("native_tray_registered",data["registered"] and data["visible"])
+        tray._invoke(lambda:setattr(tray._notify,"Visible",False))
+        require("unregistered_tray_cannot_hide","error" in tray.hide() and inspect(tray)["window_visible"] and not tray.available())
+        tray._invoke(lambda:setattr(tray._notify,"Visible",True))
+        wait(lambda:inspect(tray)["registered"])
         wait(lambda:inspect(tray)["activity"]=="idle" and not inspect(tray)["timer"])
         require("idle_has_no_timer")
         if args.scenario=="close":
@@ -105,6 +111,9 @@ def exercise(window,args,result):
             require("same_window_after_repeated_show_hide",inspect(tray)["window_visible"] and inspect(tray)["handle"]==handle)
         settings.click(window,"Ocultar na bandeja")
         wait(lambda:not inspect(tray)["window_visible"])
+        result["hidden_document"] = bool(window.evaluate_js("document.hidden"))
+        result["hidden_panel_motion"] = window.evaluate_js("document.querySelector('.fox-stage')?.dataset.motion ?? 'absent'")
+        smoke.wait_js(window,"window.__coletorWindowVisible===false && (!document.querySelector('.fox-stage') || document.querySelector('.fox-stage').dataset.motion==='off')")
         def mouse_restore():
             flags=BindingFlags.Instance|BindingFlags.NonPublic
             for method,clicks in (("OnMouseClick",1),("OnMouseDoubleClick",2),("OnMouseDoubleClick",2)):
@@ -113,6 +122,11 @@ def exercise(window,args,result):
             if Application.OpenForms.Count != 1: smoke.fail("duplicate_native_window")
         tray._invoke(mouse_restore)
         require("left_click_and_double_click_restore_same_window",inspect(tray)["window_visible"] and inspect(tray)["handle"]==handle)
+        tray._invoke(lambda:setattr(window.native,"WindowState",FormWindowState.Minimized))
+        smoke.wait_js(window,"window.__coletorWindowVisible===false && (!document.querySelector('.fox-stage') || document.querySelector('.fox-stage').dataset.motion==='off')")
+        menu(tray._open_item)
+        smoke.wait_js(window,"window.__coletorWindowVisible===true")
+        require("hidden_and_minimized_panel_motion_stops")
         tray._invoke(lambda:tray._menu.Show(Point(window.native.Left+340,window.native.Top+250)))
         wait(lambda:bool(tray._menu.Visible))
         require("native_menu_visible")

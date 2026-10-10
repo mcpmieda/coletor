@@ -24,9 +24,10 @@ class WindowsFormsTray:
         else: callback()
 
     def _enqueue_refresh(self):
-        from System import Action
+        from System import Action, ObjectDisposedException, InvalidOperationException
         if not self._disposed and not self._form.IsDisposed:
-            self._form.BeginInvoke(Action(self._refresh))
+            try: self._form.BeginInvoke(Action(self._refresh))
+            except (ObjectDisposedException, InvalidOperationException): pass  # Window closed between the checks.
 
     def start(self):
         self._invoke(self._create)
@@ -53,6 +54,13 @@ class WindowsFormsTray:
             for item in (self._status_item, ToolStripSeparator(), self._open_item, self._hide_item, ToolStripSeparator(), self._quit_item):
                 self._menu.Items.Add(item)
             self._notify = NotifyIcon()
+            from System.Reflection import BindingFlags
+            # Visible is only a requested state. On the targeted .NET Framework
+            # 4.8, added records Shell_NotifyIcon's real registration result.
+            flags = BindingFlags.Instance | BindingFlags.NonPublic
+            self._registration_field = self._notify.GetType().GetField("added", flags)
+            if self._registration_field is None:
+                raise RuntimeError("Notification registration cannot be verified")
             self._notify.ContextMenuStrip = self._menu
             def mouse(sender, event):
                 if event.Button == MouseButtons.Left: self._open()
@@ -65,6 +73,7 @@ class WindowsFormsTray:
             self._notify.Visible = True
             self._form.FormClosed += self._closed
             self._form.VisibleChanged += self._visibility_changed
+            self._form.Resize += self._visibility_changed
         except Exception:
             self._dispose()
             raise
@@ -96,8 +105,17 @@ class WindowsFormsTray:
 
     def _visibility_changed(self, *_):
         if self._disposed: return
+        from System.Windows.Forms import FormWindowState
         self._open_item.Enabled = True
         self._hide_item.Enabled = bool(self._form.Visible)
+        # WebView2 on this host keeps document.hidden=false when Form.Hide runs.
+        # Send a boolean-only signal without waiting for JavaScript on the UI
+        # thread. Also pause the panel while the native window is minimized.
+        core = self._form.browser.webview.CoreWebView2
+        if core is not None:
+            visible = bool(self._form.Visible) and self._form.WindowState != FormWindowState.Minimized
+            core.ExecuteScriptAsync("window.__coletorWindowVisible=" + str(visible).lower()
+                + ";window.dispatchEvent(new Event('coletorwindowvisibility'));true")
 
     def _open(self, *_):
         from System.Windows.Forms import FormWindowState
@@ -107,12 +125,23 @@ class WindowsFormsTray:
         self._form.Activate()
 
     def _hide(self, *_):
-        if not self._disposed: self._form.Hide()
+        if not self._disposed and self._registration_field.GetValue(self._notify): self._form.Hide()
 
     def hide(self):
         if self._disposed: return {"error": "A bandeja não está disponível. A janela continua aberta."}
-        self._invoke(self._hide)
-        return {"hidden": True}
+        result = {"error": "A bandeja não está disponível. A janela continua aberta."}
+        def safely_hide():
+            if self._registration_field.GetValue(self._notify):
+                self._hide()
+                result.clear(); result["hidden"] = True
+        self._invoke(safely_hide)
+        return result
+
+    def available(self):
+        if self._disposed: return False
+        result = []
+        self._invoke(lambda: result.append(bool(self._registration_field.GetValue(self._notify))))
+        return bool(result and result[0])
 
     def _quit(self, *_):
         if self._disposed: return
@@ -132,6 +161,7 @@ class WindowsFormsTray:
         def detach_events():
             self._form.FormClosed -= self._closed
             self._form.VisibleChanged -= self._visibility_changed
+            self._form.Resize -= self._visibility_changed
             self._timer.Tick -= self._tick
             self._notify.MouseClick -= self._mouse
             self._notify.MouseDoubleClick -= self._mouse

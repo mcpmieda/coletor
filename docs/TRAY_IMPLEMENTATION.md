@@ -33,7 +33,7 @@ quadros existentes mudam no máximo a cada 600 ms. Animar raposa desmarcado ou
 é carregada do JSON próprio antes da criação da bandeja. Mostrar raposa desmarcado
 troca o ícone por um ícone neutro do aplicativo e interrompe animação, preservando
 os controles da janela. Preferências já salvas continuam válidas.
-O painel mantém seu repertório atual e para animação quando oculto.
+O painel mantém seu repertório atual. A visibilidade real do Form envia um sinal booleano ao WebView2, pois document.hidden permanece falso neste host. Ocultar ou minimizar desliga o timer do painel; reabrir respeita as preferências.
 
 NotifyIcon administra o registro Shell_NotifyIcon e recuperação TaskbarCreated.
 Nenhuma configuração do Explorer ou de outros aplicativos é modificada.

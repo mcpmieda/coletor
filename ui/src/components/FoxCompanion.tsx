@@ -6,7 +6,7 @@ const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para ajudar.', read
 export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
   const [preferences, setPreferences] = useState(readLocalFox);
   const [animation, setAnimation] = useState(INITIAL_FOX);
-  const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden);
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || (!document.hidden && window.__coletorWindowVisible !== false));
   const [reduced, setReduced] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [inLayout, setInLayout] = useState(() => typeof matchMedia === 'undefined' || matchMedia('(min-width: 761px)').matches);
   const [storageNotice, setStorageNotice] = useState('');
@@ -15,17 +15,18 @@ export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
   useEffect(() => {
     lastInput.current = performance.now();
     const touch = () => { lastInput.current = performance.now(); };
-    const visibility = () => setVisible(!document.hidden);
+    const visibility = () => setVisible(!document.hidden && window.__coletorWindowVisible !== false);
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const motion = () => setReduced(media.matches);
     const layout = matchMedia('(min-width: 761px)');
     const layoutChanged = () => setInLayout(layout.matches);
     layout.addEventListener('change', layoutChanged);
     document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('coletorwindowvisibility', visibility);
     window.addEventListener('pointermove', touch, { passive:true });
     window.addEventListener('keydown', touch);
     media.addEventListener('change', motion);
-    return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pointermove', touch); window.removeEventListener('keydown', touch); media.removeEventListener('change', motion); layout.removeEventListener('change',layoutChanged); };
+    return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('coletorwindowvisibility', visibility); window.removeEventListener('pointermove', touch); window.removeEventListener('keydown', touch); media.removeEventListener('change', motion); layout.removeEventListener('change',layoutChanged); };
   }, []);
   useEffect(() => {
     setAnimation(s => nextFox(s, { activity, enabled, pageVisible:visible, reducedMotion:reduced, idleMs:0, random:0 }));
