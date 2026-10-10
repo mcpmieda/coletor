@@ -42,8 +42,8 @@ export default function ScheduleSettings() {
         const day = DAYS[rule.weekday - 1];
         return <div className={`schedule-rule${rule.selected ? '' : ' schedule-rule-off'}`} key={rule.weekday}>
           <label className="schedule-day"><input type="checkbox" checked={rule.selected} onChange={e => changeRule(rule.weekday, 'selected', e.target.checked)} aria-label={`Incluir ${day} ${SHIFTS[shift]}`} /><span>{day}</span></label>
-          <TextField value={rule.timesText} onChange={v => changeRule(rule.weekday, 'timesText', v)} isDisabled={!rule.selected}><Label>Coletas</Label><Input aria-label={`Coletas ${day} ${SHIFTS[shift]}`} maxLength={150} placeholder="08:05, 09:00" /></TextField>
-          <TextField value={rule.reconciliation} onChange={v => changeRule(rule.weekday, 'reconciliation', v)} isDisabled={!rule.selected}><Label>Rechecagem</Label><Input aria-label={`Rechecagem ${day} ${SHIFTS[shift]}`} maxLength={5} placeholder="HH:MM" /></TextField>
+          <TextField value={rule.timesText} onChange={v => changeRule(rule.weekday, 'timesText', v)} isDisabled={!rule.selected}><Label>Coletas<span className="sr-only"> {day} {SHIFTS[shift]}</span></Label><Input maxLength={150} placeholder="08:05, 09:00" /></TextField>
+          <TextField value={rule.reconciliation} onChange={v => changeRule(rule.weekday, 'reconciliation', v)} isDisabled={!rule.selected}><Label>Rechecagem<span className="sr-only"> {day} {SHIFTS[shift]}</span></Label><Input maxLength={5} placeholder="HH:MM" /></TextField>
         </div>;
       })}</div>
       {error && <div className="error-message" role="alert">{error}</div>}

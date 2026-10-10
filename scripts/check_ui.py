@@ -59,6 +59,8 @@ try:
         # School schedule remains a local preview: edit, validate, save, reload, undo.
         page.get_by_role('button', name='Agenda de coleta', exact=True).click()
         page.get_by_role('heading', name='Horários de coleta').wait_for()
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'schedule-initial.png'), full_page=True)
         assert page.get_by_label('Fuso da escola').input_value() == 'America/Bahia'
         assert page.get_by_label('Coletas Sexta-feira Matutino', exact=True).input_value().startswith('08:40')
         assert not page.get_by_role('checkbox', name='Incluir Sábado Matutino').is_checked()

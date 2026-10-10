@@ -4,7 +4,7 @@
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
   locais: 40 testes passando após correções de volume identificadas em revisão parcial.
-- UI: 32 testes de labels, adaptador, erros e configuração de agenda passaram.
+- UI: 33 testes de labels, adaptador, erros e configuração de agenda passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
 - Código do launcher Windows e contrato pywebview: inspecionados/compilados,
