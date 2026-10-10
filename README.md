@@ -4,7 +4,7 @@ Coletor de frequência escolar para integração com o Ecossistema Escolar.
 
 ## Primeiro marco: prévia local, sem envio
 
-Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo a
+Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo o
 padrão de interface do Atualizador de Planilhas 1.3.0: HeroUI, Segoe UI e temas
 claro, escuro e automático. A identidade do coletor usa vermelho/bordô, conforme
 a escolha posterior do usuário.
@@ -38,7 +38,7 @@ estão preparados separadamente, sem iniciar bandeja por padrão.
 
 ## Agenda pré-configurada e editável
 
-A página Agenda de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
+A página Horários de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
 versão 75, separados por dia e turno, com fuso America/Bahia editável. Salva apenas
 uma prévia neste navegador; nenhuma tarefa é executada. O escopo futuro é a escola:
 a mesma configuração para os usuários e computadores autorizados, após login e sincronização ainda não

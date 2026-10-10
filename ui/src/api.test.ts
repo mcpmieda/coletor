@@ -32,5 +32,5 @@ test('native bridge does not fall back to network when present', async () => {
 test('network errors never claim success', async () => {
   vi.stubGlobal('window', { location: { protocol: 'http:' } });
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('internal-secret-detail')));
-  await expect(loadDemo()).rejects.toThrow('O serviço local não respondeu.');
+  await expect(loadDemo()).rejects.toThrow('O programa não respondeu.');
 });

@@ -298,8 +298,8 @@ class WindowsTray:
             self._gui.AppendMenu(menu, self._con.MF_STRING | self._con.MF_DISABLED, 0,
                                  self.controller.snapshot().tooltip)
             self._gui.AppendMenu(menu, self._con.MF_SEPARATOR, 0, "")
-            self._gui.AppendMenu(menu, self._con.MF_STRING, ID_OPEN, "&Abrir painel")
-            self._gui.AppendMenu(menu, self._con.MF_STRING, ID_QUIT, "&Sair da prévia")
+            self._gui.AppendMenu(menu, self._con.MF_STRING, ID_OPEN, "&Abrir programa")
+            self._gui.AppendMenu(menu, self._con.MF_STRING, ID_QUIT, "&Sair")
             position = self._gui.GetCursorPos()
             self._gui.SetForegroundWindow(self._hwnd)
             command = self._gui.TrackPopupMenu(menu, self._con.TPM_RETURNCMD | self._con.TPM_NONOTIFY,

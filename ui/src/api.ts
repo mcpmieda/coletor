@@ -8,9 +8,9 @@ function unwrap(body: Preview | { error: string }): Preview {
 async function request(path: string, init?: RequestInit): Promise<Preview> {
   let response: Response;
   try { response = await fetch(path, { ...init, cache: 'no-store', credentials: 'omit' }); }
-  catch { throw new Error('O serviço local não respondeu. Inicie o aplicativo e tente novamente.'); }
+  catch { throw new Error('O programa não respondeu. Feche e abra de novo.'); }
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.snapshot) throw new Error(body?.error ?? 'Não foi possível validar este diário.');
+  if (!response.ok || !body?.snapshot) throw new Error(body?.error ?? 'Não foi possível ler este diário.');
   return body as Preview;
 }
 async function nativeApi(): Promise<NativeApi | undefined> {
@@ -19,7 +19,7 @@ async function nativeApi(): Promise<NativeApi | undefined> {
   if (window.location.protocol === 'file:') {
     await new Promise<void>((resolve, reject) => {
       const ready = () => { clearTimeout(timer); resolve(); };
-      const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error('A ponte desktop não ficou pronta. Reabra o aplicativo.')); }, 4000);
+      const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error('O programa não terminou de abrir. Feche e abra de novo.')); }, 4000);
       window.addEventListener('pywebviewready', ready, { once: true });
     });
   }

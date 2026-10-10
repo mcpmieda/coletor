@@ -46,8 +46,8 @@ class AnimationTests(unittest.TestCase):
         self.assertEqual(view.frame_key, "fox-idle")
         self.assertEqual(view.badge, "none")
         self.assertIn("Aguardando", view.tooltip)
-        self.assertIn("Prévia local", view.tooltip)
-        self.assertIn("automação inativa", view.tooltip)
+        self.assertIn("Modo de teste", view.tooltip)
+        self.assertIn("Coleta desligada", view.tooltip)
         self.assertNotIn("sincronizado", view.tooltip.lower())
 
     def test_working_has_four_distinct_frames_with_constant_badge(self):

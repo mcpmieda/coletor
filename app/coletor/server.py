@@ -57,7 +57,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self._trusted():
-            self._json(403, {"error": "Origem local inválida."})
+            self._json(403, {"error": "Abra o programa neste computador e tente de novo."})
             return
         path = urlsplit(self.path).path
         if path == "/api/demo":
@@ -65,27 +65,27 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 fixture = build_fixture()
                 self._json(200, preview(fixture, "TESTE-A", 2026, "demo"))
             except (OSError, ValueError):
-                self._json(500, {"error": "A demonstração não está disponível neste pacote."})
+                self._json(500, {"error": "Os dados de exemplo não estão disponíveis."})
             return
         if path.startswith("/api/"):
-            self._json(404, {"error": "Recurso não disponível."})
+            self._json(404, {"error": "Esta opção não está disponível."})
             return
         root = (ROOT / "ui/dist").resolve()
         target = (root / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
         if not target.is_relative_to(root) or not target.is_file():
-            self._json(404, {"error": "Interface não encontrada. Execute o build da interface."})
+            self._json(404, {"error": "Não foi possível abrir a tela. Peça ajuda para preparar o programa."})
             return
         self._send(200, target.read_bytes(), mimetypes.guess_type(target.name)[0] or "application/octet-stream")
 
     def do_POST(self):
         if not self._trusted(require_origin=True):
-            self._json(403, {"error": "Origem local inválida."})
+            self._json(403, {"error": "Abra o programa neste computador e tente de novo."})
             return
         if urlsplit(self.path).path != "/api/preview":
-            self._json(404, {"error": "Recurso não disponível."})
+            self._json(404, {"error": "Esta opção não está disponível."})
             return
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json" or self.headers.get("Transfer-Encoding"):
-            self._json(415, {"error": "Use um corpo JSON de tamanho conhecido."})
+            self._json(415, {"error": "Não foi possível ler o pedido. Feche e abra o programa."})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -107,7 +107,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 raise ValueError("year")
             self._json(200, preview(html, class_id.strip(), year))
         except (ValueError, TypeError, KeyError, RecursionError):
-            self._json(400, {"error": "Não foi possível ler o diário. Confira o HTML, a turma e o ano."})
+            self._json(400, {"error": "Não foi possível ler o diário. Confira o arquivo, a turma e o ano."})
 
 
 def serve(port: int = 8765, dev: bool = False):

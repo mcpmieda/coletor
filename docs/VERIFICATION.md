@@ -4,7 +4,7 @@
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
   locais, contraste da UI, assets e bandeja simulada: 80 testes passaram. As correções de volume vieram de revisão parcial.
-- UI: 46 testes de labels, adaptador, erros, agenda e mascote passaram.
+- UI: 51 testes de labels, adaptador, erros, agenda, mascote e mensagens passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
 - Código do launcher Windows e contrato pywebview: inspecionados/compilados,
@@ -93,3 +93,13 @@ Permanece o escopo escolar autorizado, com um coletor ativo por vez e os demais
 computadores autorizados como reservas. Teste de renderização e smoke de navegador
 cobrem a mensagem compartilhada e o plano de coordenação. Não existe cadastro,
 limite artificial de dispositivos ou mudança de permissões implementada neste marco.
+
+## Linguagem simples na interface
+
+Navegação, botões, avisos, erros, rótulos acessíveis e mensagens da raposa usam
+frases curtas. A interface mostra "Conferir frequência", "Horários de coleta" e
+"Próximos passos". Diagnósticos originais permanecem em detalhes fechados, sem
+alterar dados ou validações. Avisos de ausência de envio, marcações sem confirmação
+e alunos/calendário a conferir continuam visíveis. Testes cobrem esses avisos mesmo
+quando uma resposta de validação tiver allowed=true, sem permitir envio.
+O smoke também abre e fecha os detalhes e usa os novos nomes acessíveis nos fluxos.

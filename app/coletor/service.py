@@ -14,7 +14,7 @@ def preview(html: str, class_id: str, year: int, mode: str = "local") -> dict:
     if not isinstance(html, str) or len(html.encode("utf-8")) > MAX_HTML_BYTES:
         raise ValueError("Diário inválido ou acima de 8 MB.")
     if not isinstance(class_id, str) or not class_id.strip() or len(class_id) > 80:
-        raise ValueError("Informe um identificador de turma válido.")
+        raise ValueError("Confira o código da turma.")
     if type(year) is not int or not 2000 <= year <= 2100:
         raise ValueError("Informe um ano entre 2000 e 2100.")
     snapshot = parse_annual_html(html, class_id.strip(), year)
@@ -30,10 +30,10 @@ class PreviewApi:
             html = build_fixture()
             return preview(html, "TESTE-A", 2026, "demo")
         except (OSError, ValueError, RecursionError):
-            return {"error": "Não foi possível abrir a demonstração."}
+            return {"error": "Não foi possível abrir os dados de exemplo."}
 
     def preview_html(self, html, class_id, year):
         try:
             return preview(html, class_id, year)
         except (ValueError, TypeError, RecursionError):
-            return {"error": "Não foi possível ler o diário. Confira o HTML, a turma e o ano."}
+            return {"error": "Não foi possível ler o diário. Confira o arquivo, a turma e o ano."}

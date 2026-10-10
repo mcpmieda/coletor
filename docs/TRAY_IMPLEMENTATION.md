@@ -35,7 +35,7 @@ validação; este marco não instala nem altera dependências de desktop.
 | `paused` | Estático | Símbolo de pausa | Pausado |
 | `error` | Estático, sem alerta piscante | Exclamação | Requer atenção |
 
-Todo tooltip começa com `Coletor de Frequência · Prévia local · automação inativa`.
+Todo tooltip começa com `Coletor de Frequência · Modo de teste · Coleta desligada`.
 Nenhum estado significa conectado, coletado ou sincronizado. O controlador não
 consulta o serviço nem infere sucesso. Uma futura integração deve separar a
 prévia demonstrativa do estado operacional real antes de alterar esse contrato.
@@ -109,7 +109,7 @@ coleta ou operações longas no loop da bandeja.
 
 - Clique duplo e ativação por teclado encaminham `on_open`; o adaptador não
   lança outro processo e não tenta criar uma segunda janela.
-- Menu nativo: estado, `Abrir painel` e `Sair da prévia`.
+- Menu nativo: estado, `Abrir programa` e `Sair`.
 - Sair encaminha `on_quit` e solicita encerramento da bandeja. `on_quit` é
   responsável por fechar a janela e os recursos próprios da aplicação.
 - `stop()` deve ser usado também no `finally` do ciclo de vida da aplicação.

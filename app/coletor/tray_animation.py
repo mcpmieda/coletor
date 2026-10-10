@@ -86,7 +86,7 @@ def resolve_icon_paths(directory: Path = DEFAULT_ASSET_DIRECTORY) -> dict[str, P
 def tooltip_for(state: TrayState, detail: str = "") -> str:
     """127 UTF-16 code units plus NUL fit Windows' 128-WCHAR tooltip buffer."""
     clean = " ".join("".join(c if c.isprintable() else " " for c in detail).split())
-    text = (f"{APP_TITLE} · Prévia local · automação inativa · {STATE_LABELS[state]}"
+    text = (f"{APP_TITLE} · Modo de teste · Coleta desligada · {STATE_LABELS[state]}"
             + (f" · {clean}" if clean else ""))
     return text.encode("utf-16-le")[:254].decode("utf-16-le", errors="ignore")
 

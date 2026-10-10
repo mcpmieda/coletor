@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { INITIAL_FOX, POSE_POSITION, beginAction, foxPose, nextFox, type FoxActivity } from '../mascot/animation';
 import { DEFAULT_FOX, FOX_KEY, readFoxPreferences } from '../mascot/preferences';
 
-const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para conferir.', reading:'Lendo a prévia local…', review:'Vamos conferir os avisos?', error:'O arquivo precisa de atenção.' };
+const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para ajudar.', reading:'Lendo o diário…', review:'Há pontos para conferir.', error:'O arquivo precisa de atenção.' };
 export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
   const [preferences, setPreferences] = useState(() => { try { return readFoxPreferences(window.localStorage); } catch { return DEFAULT_FOX; } });
   const [animation, setAnimation] = useState(INITIAL_FOX);
@@ -56,8 +56,8 @@ export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
       {action === 'pet' && <span className="fox-heart" aria-hidden="true">♥</span>}
       <p>{action === 'sleep' ? 'Descansando por aqui…' : action === 'pet' ? 'Oi! Vamos conferir juntos.' : CAPTIONS[activity]}</p>
     </div>}
-    <div className="fox-preferences"><label><input type="checkbox" checked={preferences.show} onChange={e => preference('show',e.target.checked)} />Mostrar raposa</label><label><input type="checkbox" checked={preferences.animate} disabled={!preferences.show} onChange={e => preference('animate',e.target.checked)} />Animar mascote</label></div>
-    {reduced && preferences.show && <span className="fox-note">Movimento reduzido do sistema respeitado</span>}
+    <div className="fox-preferences"><label><input type="checkbox" checked={preferences.show} onChange={e => preference('show',e.target.checked)} />Mostrar raposa</label><label><input type="checkbox" checked={preferences.animate} disabled={!preferences.show} onChange={e => preference('animate',e.target.checked)} />Animar raposa</label></div>
+    {reduced && preferences.show && <span className="fox-note">Animação reduzida pelo sistema.</span>}
     {storageNotice && <span className="fox-note" role="status">{storageNotice}</span>}
   </section>;
 }
