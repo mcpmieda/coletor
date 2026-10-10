@@ -83,3 +83,11 @@ td strong { font-weight: 500; }
 @media (max-width: 1250px) { main { padding: 30px 24px; }.source-controls { grid-template-columns: 1fr 110px; }.source-actions { grid-column: 1 / -1; justify-content: flex-end; }.content-grid { grid-template-columns: 1fr; }.checks { display: block; } }
 @media (max-width: 760px) { .app-shell { grid-template-columns: 1fr; }.sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 18px; gap: 18px; }.sidebar nav { flex-direction: row; }.sidebar-footer { display: none; }main { padding: 24px 16px; }.page-header { gap: 12px; }h1 { font-size: 23px; }.page-header p { max-width: 260px; }.summary-grid { grid-template-columns: 1fr 1fr; }.summary-grid div:nth-child(2) { border-right: 0; }.source-panel { padding: 18px; }.source-actions { justify-content: stretch; }.source-actions button { flex: 1; }.preview-context { align-items: flex-start; }.preview-context > span { max-width: 60%; }.preview-panel .section-heading { align-items: flex-start; }.filters { grid-template-columns: 1fr; }.empty-state { padding: 60px 12px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+/* Keep min-content widths inside the table scroller, never on the page. */
+main { min-width: 0; }
+@media (max-width: 760px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .source-controls { grid-template-columns: minmax(0, 1fr) 100px; }
+  .source-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .source-actions button { width: 100%; min-width: 0; }
+}

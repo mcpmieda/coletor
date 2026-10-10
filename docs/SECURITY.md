@@ -1,6 +1,6 @@
 # Segurança e privacidade
 
-- Nenhuma credencial ou sessão foi criada/copied para o projeto.
+- Nenhuma credencial ou sessão foi criada ou copiada para o projeto.
 - Não há rede de saída no backend de domínio; não há cliente PostgreSQL/API.
 - HTML não é renderizado: apenas texto/estrutura permitida entra no modelo.
 - Nenhum nome de aluno, corpo HTML ou credencial vai para logs.
@@ -19,3 +19,7 @@
 Antes de piloto: revisão de ameaça do perfil autenticado, cofre OS, transporte,
 revogação de dispositivo, lease/fencing, retenção mínima e controles por aluno;
 validação manual do parser em amostra autorizada sem inserir dados reais no Git.
+
+Limites defensivos: 8 MiB de HTML na interface/serviço, 64 fichas, 130 mil
+registros, 200 mil nós e diagnósticos agregados por código/ficha. Excesso de
+volume descarta a prévia parcial e mantém o envio bloqueado.

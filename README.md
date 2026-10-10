@@ -59,6 +59,7 @@ etapa separada após validação em Windows.
 ```sh
 python scripts/generate_fixture.py
 PYTHONPATH=app python -m unittest discover -s tests -v
+npm test --prefix ui
 npm run build --prefix ui
 python -m pip install -r requirements-test.txt
 python -m playwright install chromium

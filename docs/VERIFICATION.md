@@ -3,7 +3,8 @@
 ## Executado localmente
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
-  locais: 35 testes passando antes da revisão independente.
+  locais: 40 testes passando após correções de volume identificadas em revisão parcial.
+- UI: cinco testes de labels/adaptador/erros passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
 - Código do launcher Windows e contrato pywebview: inspecionados/compilados,
@@ -15,7 +16,7 @@ O navegador da nuvem não alcançou o loopback do executor (connection refused).
 O Chromium no executor foi impedido de iniciar por restrição de socket do sandbox,
 mesmo após tentativa suportada de execução com revisão. Nenhuma restrição foi
 alterada. O script `scripts/check_ui.py` está preparado para o CI Linux com fixtures
-sintéticas. Resultado remoto e screenshots serão registrados depois da execução.
+sintéticas. Primeira execução remota confirmou carga, demo, filtros, paginação, tema escuro, navegação, limpeza e importação. Detectou overflow horizontal em viewport 390px; a correção de min-width/grid está em validação. Screenshots dessa execução foram baixados e inspecionados, sem dados reais.
 
 Não afirmar fidelidade visual completa nem QA Windows até executar esses passos.
 A referência visual é o código de UI do Atualizador 1.3.0, e não um novo conceito
