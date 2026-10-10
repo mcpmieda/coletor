@@ -48,6 +48,17 @@ Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
 
 ## Executar a prévia no desenvolvimento
 
+### Pacote portátil de teste
+
+O CI privado agora prepara um ZIP para Windows x64 com Python oficial embutido,
+dependências e interface compilada. O ZIP só é gerado se o teste da janela nativa
+passar. Extraia a pasta inteira e use `Abrir Coletor.cmd`; não é um instalador.
+WebView2 continua sendo requisito e não é instalado automaticamente. Validação
+nos computadores da escola é separada do CI. Veja [conteúdo e verificações](docs/WINDOWS_PORTABLE.md)
+e [instruções simples do pacote](docs/PORTABLE_LEIA_ME.txt).
+
+### Código-fonte
+
 Requer Python 3.12+ e Node 22+. Na raiz:
 
 ```sh
@@ -60,7 +71,7 @@ PYTHONPATH=app python -m coletor --preview-server
 Abra `http://127.0.0.1:8765`. O servidor só escuta o loopback. Para UI com hot
 reload, use `--preview-server --dev` e, em outro terminal, `npm run dev --prefix ui`.
 
-### Janela Windows (código preparado; QA Windows pendente)
+### Janela Windows a partir do código-fonte
 
 Em PowerShell, depois do build da UI:
 

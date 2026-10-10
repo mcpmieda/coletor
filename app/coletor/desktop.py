@@ -10,7 +10,7 @@ from .service import PreviewApi, ROOT
 APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel.Preview"
 
 
-def run_desktop():
+def run_desktop(callback=None):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
     entry = ROOT / "ui/dist/index.html"
@@ -22,8 +22,8 @@ def run_desktop():
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    webview.create_window("Coletor de Frequência · Prévia local", str(entry), js_api=PreviewApi(),
+    window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry), js_api=PreviewApi(),
                           width=1240, height=820, min_size=(900, 620),
                           background_color="#faf7f8", text_select=True)
     # Ephemeral profile. Do not copy the original app's private_mode=False.
-    webview.start(gui="edgechromium", debug=False, private_mode=True, http_server=True)
+    webview.start(func=callback, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)

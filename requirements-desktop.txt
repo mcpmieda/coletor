@@ -1,2 +1,2 @@
-# Windows development only. This milestone does not ship an installer/runtime.
+# Windows development. The private portable test build uses a separate lock file.
 pywebview==6.1

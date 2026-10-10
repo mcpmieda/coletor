@@ -49,3 +49,60 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+  windows-portable:
+    needs: verify
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build interface
+        working-directory: ui
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          npm run build
+      - name: Assemble official embedded runtime and application
+        run: python scripts/build_windows_portable.py --source-commit "${{ github.event.pull_request.head.sha }}"
+      - name: Verify official Python signatures
+        shell: pwsh
+        run: |
+          $Runtime = 'dist/windows-portable/ColetorFrequencia-0.1.0-teste-windows-x64/programa'
+          foreach ($Name in @('python.exe', 'pythonw.exe')) {
+            $Signature = Get-AuthenticodeSignature "$Runtime/$Name"
+            if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
+              throw "Official Python signature validation failed: $Name"
+            }
+          }
+      - name: Open real native window from portable runtime
+        run: python scripts/check_windows_portable.py --python "dist/windows-portable/ColetorFrequencia-0.1.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
+      - name: Create portable test ZIP only after native success
+        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json
+      - name: Preserve native test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-evidence
+          path: artifacts/windows-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve private portable test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable-test
+          path: |
+            dist/windows-portable/ColetorFrequencia-*.zip
+            dist/windows-portable/*.sha256
+          if-no-files-found: error
+          retention-days: 7

@@ -3,7 +3,7 @@
 ## Executado localmente
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
-  locais, contraste da UI, assets e bandeja simulada: 80 testes passaram. As correções de volume vieram de revisão parcial.
+  locais, contraste da UI, assets, bandeja simulada e contratos do pacote portátil: 100 testes passaram. As correções de volume vieram de revisão parcial.
 - UI: 51 testes de labels, adaptador, erros, agenda, mascote e mensagens passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
@@ -103,3 +103,12 @@ alterar dados ou validações. Avisos de ausência de envio, marcações sem con
 e alunos/calendário a conferir continuam visíveis. Testes cobrem esses avisos mesmo
 quando uma resposta de validação tiver allowed=true, sem permitir envio.
 O smoke também abre e fecha os detalhes e usa os novos nomes acessíveis nos fluxos.
+
+## Pacote de teste Windows
+
+O job `windows-portable` abre uma janela EdgeChromium genuína com o Python
+embutido no pacote e testa dados de exemplo, ponte nativa, filtro, fechar/reabrir
+o diário e encerramento. Seus 16 testes unitários em Linux verificam contratos e
+falhas; não substituem o job Windows. O ZIP só é produzido quando o relatório
+nativo confirma sucesso e limpeza dos processos. Consulte o resultado desse job
+no SHA que acompanha o pacote, sem confundir CI Windows com teste no PC do usuário.

@@ -1,0 +1,48 @@
+COLETOR DE FREQUÊNCIA · 0.1.0 TESTE
+Pacote portátil para Windows de 64 bits
+
+COMO ABRIR
+1. Baixe o arquivo ZIP completo.
+2. Clique com o botão direito e escolha “Extrair tudo”.
+3. Na pasta extraída, abra “Abrir Coletor.cmd”.
+Mantenha a pasta “programa” junto desse arquivo.
+
+Não precisa instalar Python. Não precisa executar como administrador.
+O computador precisa ter o Microsoft Edge WebView2 Runtime.
+Se faltar, peça ajuda. Informações oficiais:
+https://developer.microsoft.com/microsoft-edge/webview2/
+Este pacote não instala o WebView2 automaticamente.
+
+O QUE VOCÊ PODE TESTAR
+- Usar dados de exemplo, sem alunos reais.
+- Abrir um diário HTML escolhido por você e conferir a leitura.
+- Ajustar os horários e ver a raposa animada.
+
+LIMITES IMPORTANTES
+É uma versão de teste. Não faz login, não busca dados no Smecel,
+não envia ao Ecossistema e não acessa o banco de dados.
+A coleta automática, os horários compartilhados e a bandeja ainda não estão ativos.
+Os horários podem se perder ao fechar esta versão.
+Uma marcação de aula prevista não confirma presença.
+O programa não grava o diário aberto.
+
+SEGURANÇA
+Este pacote não cria tarefa de inicialização, conta, senha ou serviço.
+Se o Windows ou o antivírus bloquear, pare e peça ajuda.
+Não desative proteções para abrir o programa.
+O Python incluído é o runtime oficial. O pacote do coletor não tem assinatura
+digital própria; não é um instalador nem uma versão final para uso diário.
+
+PARA FECHAR
+Feche a janela. O programa não continua coletando em segundo plano.
+
+COMPATIBILIDADE
+Alvo: Windows 10/11 x64 com WebView2 e .NET Framework 4.8.
+Um teste automatizado de janela é realizado no Windows do CI antes de gerar o ZIP.
+Isso não garante compatibilidade com todos os computadores da escola.
+Os testes completos e a versão exata estão em MANIFEST.json e na PR privada.
+
+LICENÇAS
+A licença do Python está na pasta programa.
+As licenças das bibliotecas Python estão em programa/Lib/site-packages.
+Avisos das bibliotecas da interface estão em LICENCAS-UI.txt.
