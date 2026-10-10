@@ -1,0 +1,2 @@
+# Windows development only. This milestone does not ship an installer/runtime.
+pywebview==6.1
