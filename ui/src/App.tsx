@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Button, Input, Label, TextField } from '@heroui/react';
-import { FileCheck2, FileUp, FlaskConical, LayoutDashboard, ShieldCheck, Monitor, Clock3, X } from 'lucide-react';
+import { FileUp, FlaskConical, LayoutDashboard, ShieldCheck, Monitor, Clock3, X } from 'lucide-react';
 import { loadDemo, previewHtml } from './api';
 import { SelectField, StatusChip } from './ui';
 import { useTheme, type ThemeMode } from './theme';
@@ -8,6 +8,7 @@ import type { Preview } from './types';
 import AttendancePreview from './components/AttendancePreview';
 import ValidationPanel from './components/ValidationPanel';
 import ScheduleSettings from './components/ScheduleSettings';
+import FoxCompanion from './components/FoxCompanion';
 export default function App() {
   const [theme, setTheme] = useTheme();
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -37,9 +38,9 @@ export default function App() {
   }
   const states = preview?.snapshot.summary.states;
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><span className="brand-icon"><FileCheck2 size={22} /></span><div><strong>Coletor de Frequência</strong><span>Ecossistema Escolar</span></div></div>
+    <aside className="sidebar"><div className="brand"><span className="brand-icon brand-fox"><img src="./mascot/head.png" alt="" width="32" height="32" /></span><div><strong>Coletor de Frequência</strong><span>Ecossistema Escolar</span></div></div>
       <nav aria-label="Navegação principal"><button className={view === 'preview' ? 'nav-item active' : 'nav-item'} aria-current={view === 'preview' ? 'page' : undefined} onClick={() => setView('preview')}><LayoutDashboard size={18} />Prévia e validação</button><button className={view === 'schedule' ? 'nav-item active' : 'nav-item'} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><Clock3 size={18} />Agenda de coleta</button><button className={view === 'roadmap' ? 'nav-item active' : 'nav-item'} aria-current={view === 'roadmap' ? 'page' : undefined} onClick={() => setView('roadmap')}><Monitor size={18} />Próximas etapas</button></nav>
-      <div className="sidebar-footer"><StatusChip>Protótipo local · 0.1.0</StatusChip><p>Sem conexão com a produção</p><SelectField label="Aparência" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automática' }, { id: 'light', label: 'Clara' }, { id: 'dark', label: 'Escura' }]} /></div>
+      <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Protótipo local · 0.1.0</StatusChip><p>Sem conexão com a produção</p><SelectField label="Aparência" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automática' }, { id: 'light', label: 'Clara' }, { id: 'dark', label: 'Escura' }]} /></div></div>
     </aside>
     <main><header className="page-header"><div><h1>{view === 'preview' ? 'Prévia e validação' : view === 'schedule' ? 'Agenda de coleta' : 'Próximas etapas'}</h1><p>{view === 'preview' ? 'Confira a leitura do diário antes de qualquer sincronização.' : view === 'schedule' ? 'Horários pré-configurados, com liberdade para ajustar.' : 'O que falta para uma sincronização segura nos três computadores.'}</p></div><StatusChip tone="warning">Envio desativado</StatusChip></header>
       <div hidden={view !== 'schedule'}><ScheduleSettings /></div>

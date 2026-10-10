@@ -122,3 +122,34 @@ main { min-width: 0; }
   .schedule-rule { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .schedule-day { grid-column: auto; }.schedule-actions > div { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
+/* The fox occupies its own sidebar space; it never floats over controls. */
+.sidebar { overflow-y: auto; }
+.sidebar-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 18px; }
+.sidebar-bottom .sidebar-footer { margin-top: 0; }
+.brand-fox { background: transparent; }
+.brand-fox img, .fox-sprite { image-rendering: pixelated; object-fit: contain; }
+.fox-companion { border-top: 1px solid var(--border); padding-top: 10px; }
+.fox-stage { position: relative; min-height: 170px; text-align: center; padding-top: 4px; }
+.fox-button { border: 0; background: transparent; margin: 0 auto; padding: 0; width: 128px; height: 128px; display: block; animation: fox-breathe 3.8s steps(2,end) infinite; }
+.fox-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 10px; }
+.fox-frame { display: block; overflow: hidden; width: 128px; height: 128px; pointer-events: none; }
+.fox-sprite { width: 512px; max-width: none; height: 256px; pointer-events: none; }
+.fox-stage p { font-size: 11px; color: var(--muted); padding-top: 6px; min-height: 24px; }
+.fox-preferences { display: flex; justify-content: space-between; gap: 6px; padding: 8px 0 0; }
+.fox-preferences label { display: flex; gap: 5px; align-items: center; font-size: 10px; color: var(--muted); cursor: pointer; }
+.fox-preferences input { accent-color: var(--accent); width: 13px; height: 13px; }
+.fox-note { display: block; font-size: 10px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
+.fox-zzz, .fox-heart { position: absolute; pointer-events: none; right: 42px; top: 13px; color: var(--accent); font-size: 16px; animation: fox-float 1.5s steps(4,end) infinite; }
+.fox-heart { animation-duration: .65s; }
+.fox-hop .fox-button, .fox-pet .fox-button { animation: fox-hop .48s steps(3,end); }
+.fox-walk .fox-button { animation: fox-walk .8s steps(4,end); }
+.fox-error .fox-button { animation: fox-alert .64s steps(4,end); }
+.fox-sleep .fox-button { animation: none; }
+.fox-stage[data-motion='off'] .fox-button { animation: none; translate: none; }
+@keyframes fox-breathe { 0%,100% { translate: 0 0; } 50% { translate: 0 -2px; } }
+@keyframes fox-hop { 0%,100% { translate: 0 0; } 50% { translate: 0 -8px; } }
+@keyframes fox-walk { 0%,100% { translate: 0 0; } 35% { translate: -12px 0; } 70% { translate: 12px 0; } }
+@keyframes fox-alert { 0%,100% { translate: 0 0; } 25% { translate: -3px 0; } 75% { translate: 3px 0; } }
+@keyframes fox-float { from { translate: 0 0; opacity: 1; } to { translate: 0 -9px; opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .fox-button, .fox-heart, .fox-zzz { animation: none !important; translate: none !important; } }
+@media (max-width: 760px) { .sidebar-bottom { display: none; } }

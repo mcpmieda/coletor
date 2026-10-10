@@ -16,16 +16,25 @@ Implementado:
 - Demonstração gerada com três alunos inteiramente sintéticos.
 - Falha fechada para HTML desconhecido, login, truncamento e escopo divergente.
 - Testes de parser, calendário, ambiguidades, identidade e adaptadores locais.
+- Raposa animada no painel, com preferências de exibição e movimento reduzido.
 
 A marca `•` é “aula prevista/presença” e continua **sem confirmação**. Não existe
 presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total de
 fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
 
 Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
-execução agendada, bandeja, coordenação dos três PCs, portal ou instalador.
+execução agendada, bandeja ativada/validada no Windows, coordenação dos três PCs, portal ou instalador.
 A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
 O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
 exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
+
+## Raposa do coletor
+
+Mascote escolhido pelo usuário, com quadros próprios e ações discretas: piscar,
+orelhas, cauda, curiosidade, pulinho, passeio, descanso e carinho. Reage apenas ao
+processamento local e aos avisos reais. Pode ser ocultado ou ficar estático; respeita
+movimento reduzido e pausa com a aba oculta. Ícones e adaptador Windows de bandeja
+estão preparados separadamente, sem iniciar bandeja por padrão.
 
 ## Agenda pré-configurada e editável
 

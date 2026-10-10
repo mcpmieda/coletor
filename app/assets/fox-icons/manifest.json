@@ -1,0 +1,69 @@
+{
+  "format": "ICO PNG entries, all RGBA with hard alpha",
+  "sizes": [
+    16,
+    20,
+    24,
+    32,
+    48,
+    64,
+    256
+  ],
+  "states": {
+    "fox-idle": {
+      "expression": "neutral",
+      "status": "idle",
+      "phase": 0,
+      "file": "fox-idle.ico"
+    },
+    "fox-blink": {
+      "expression": "blink",
+      "status": "blink",
+      "phase": 0,
+      "file": "fox-blink.ico"
+    },
+    "fox-ear": {
+      "expression": "attentive",
+      "status": "attentive",
+      "phase": 0,
+      "file": "fox-ear.ico"
+    },
+    "fox-paused": {
+      "expression": "resting",
+      "status": "paused",
+      "phase": 0,
+      "file": "fox-paused.ico"
+    },
+    "fox-error": {
+      "expression": "alert",
+      "status": "error",
+      "phase": 0,
+      "file": "fox-error.ico"
+    },
+    "fox-working-1": {
+      "expression": "attentive",
+      "status": "working",
+      "phase": 0,
+      "file": "fox-working-1.ico"
+    },
+    "fox-working-2": {
+      "expression": "attentive",
+      "status": "working",
+      "phase": 1,
+      "file": "fox-working-2.ico"
+    },
+    "fox-working-3": {
+      "expression": "attentive",
+      "status": "working",
+      "phase": 2,
+      "file": "fox-working-3.ico"
+    },
+    "fox-working-4": {
+      "expression": "attentive",
+      "status": "working",
+      "phase": 3,
+      "file": "fox-working-4.ico"
+    }
+  },
+  "note": "Status assets only; the host must select them based on verified application state. fox-ear is an attentive expression, not a tail frame. No tail ICO is fabricated."
+}

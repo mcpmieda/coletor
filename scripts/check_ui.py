@@ -14,13 +14,39 @@ root = Path(__file__).resolve().parents[1]
 out = Path(os.environ.get('QA_OUTPUT', '/tmp/smecel-qa'))
 out.mkdir(parents=True, exist_ok=True)
 errors = []
+atlas_requests = []
 try:
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH', p.chromium.executable_path), headless=True, args=['--no-sandbox'])
         page = browser.new_page(viewport={'width':1440,'height':1000}, locale='pt-BR', color_scheme='light', reduced_motion='reduce')
         page.on('pageerror', lambda e: errors.append(str(e)))
+        page.on('request', lambda r: atlas_requests.append(r.url) if r.url.endswith('/mascot/atlas.png') else None)
         page.goto(url)
         page.get_by_role('heading', name='Primeiro, conferir. Depois, sincronizar.').wait_for()
+        fox = page.get_by_role('img', name='Raposa vermelha, mascote do coletor')
+        fox.wait_for()
+        page.wait_for_function("document.querySelector('.fox-sprite')?.complete && document.querySelector('.fox-sprite').naturalWidth > 0")
+        assert fox.evaluate('img => img.complete && img.naturalWidth > 0'), 'Missing fox sprite'
+        assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
+        assert page.locator('.fox-button').evaluate('el => getComputedStyle(el).animationName') == 'none'
+        page.get_by_role('checkbox', name='Mostrar raposa', exact=True).uncheck()
+        assert fox.count() == 0
+        page.reload()
+        assert page.get_by_role('img', name='Raposa vermelha, mascote do coletor').count() == 0
+        page.get_by_role('checkbox', name='Mostrar raposa', exact=True).check()
+        page.emulate_media(reduced_motion='no-preference')
+        page.locator('.fox-stage[data-motion=on]').wait_for()
+        page.wait_for_function("document.querySelector('.fox-sprite')?.complete && document.querySelector('.fox-sprite').naturalWidth > 0")
+        atlas_count = len(atlas_requests)
+        page.get_by_role('button',name='Fazer carinho na raposa').click()
+        assert page.locator('.fox-stage').get_attribute('data-action') == 'pet'
+        page.wait_for_function("document.querySelector('.fox-stage').dataset.pose === 'happy'")
+        assert len(atlas_requests) == atlas_count, 'Sprite animation fetched another image'
+        page.get_by_role('checkbox',name='Animar mascote',exact=True).uncheck()
+        assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
+        page.get_by_role('checkbox',name='Animar mascote',exact=True).check()
+        page.emulate_media(reduced_motion='reduce')
+        page.locator('.fox-stage[data-motion=off]').wait_for()
         assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()") == '#a32743'
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
@@ -51,6 +77,9 @@ try:
         page.screenshot(path=str(out/'demo-dark.png'), full_page=True, animations='disabled')
         page.get_by_role('button', name='Próximas etapas', exact=True).click()
         page.get_by_role('heading', name='Da prévia ao envio seguro').wait_for()
+        page.mouse.move(0, 0)
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'roadmap-dark.png'), full_page=True, animations='disabled')
         page.get_by_role('button', name='Prévia e validação', exact=True).click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
         page.get_by_role('button', name='Limpar prévia').click()
@@ -105,6 +134,11 @@ try:
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'schedule-light.png'), full_page=True, animations='disabled')
+        page.get_by_role('button', name='Próximas etapas', exact=True).click()
+        page.mouse.move(0, 0)
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'roadmap-light.png'), full_page=True, animations='disabled')
+        page.get_by_role('button', name='Agenda de coleta', exact=True).click()
         page.set_viewport_size({'width':390,'height':844})
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
@@ -126,7 +160,7 @@ try:
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Horizontal page overflow'
         assert page.get_by_role('button',name='Abrir HTML').is_visible()
         assert not errors, errors
-        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
+        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox preference persists','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','fox animation toggle','roadmap screenshots in both themes','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:
     server.shutdown(); server.server_close(); thread.join()

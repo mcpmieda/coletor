@@ -24,6 +24,6 @@ def run_desktop():
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
     webview.create_window("Coletor de Frequência · Prévia local", str(entry), js_api=PreviewApi(),
                           width=1240, height=820, min_size=(900, 620),
-                          background_color="#f6f7f8", text_select=True)
+                          background_color="#faf7f8", text_select=True)
     # Ephemeral profile. Do not copy the original app's private_mode=False.
     webview.start(gui="edgechromium", debug=False, private_mode=True, http_server=True)
