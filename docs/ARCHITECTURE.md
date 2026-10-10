@@ -70,8 +70,9 @@ um parser estruturalmente bem-sucedido não comprova integridade do relatório.
   operação explícita e validada de correção, com proveniência/versionamento.
 - Portal consulta apenas dados sincronizados e autorizados para aquele aluno,
   com coletado_em/sincronizado_em e status de atualidade separados.
-- Bandeja, minimização, recuperação de falhas e instalação por usuário somente
-  depois de testes reais em Windows e decisão explícita de distribuição.
+- Recuperação operacional e instalação por usuário continuam futuras e dependem
+  de decisão explícita de distribuição. A bandeja da prévia foi integrada e testada
+  separadamente; controla apenas a janela e a leitura local, sem agente.
 
 ## Não é prova de produção
 
@@ -87,3 +88,4 @@ sugerir gatilhos diferentes por dia/turno e precisa de vigência confirmada.
 Não cortar automaticamente a sexta posição nem mudar a fórmula da frequência
 por divergência com essa planilha. A conciliação entre grade, calendário e
 semântica nativa permanece uma decisão funcional antes da integração.
+

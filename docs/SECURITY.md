@@ -18,8 +18,9 @@
 - MappingValidation é contrato interno futuro. Uma flag ou caixa na UI jamais
   poderá fabricar um comprovante de validação da API.
 - Falha, diário incompleto ou símbolo desconhecido não gera deleção nem presença.
-- Não há execução automática ao iniciar Windows, serviço, bandeja ativa ou instalação.
-  O adaptador de bandeja é opt-in e não é iniciado pelo launcher.
+- Não há execução automática ao iniciar Windows, serviço ou instalação.
+  A bandeja WinForms controla apenas a janela e mostra estados da leitura local.
+  Fechar pelo X ou Sair encerra a sessão; não agenda nem executa coleta.
 
 Antes de piloto: revisão de ameaça do perfil autenticado, cofre OS, transporte,
 revogação de dispositivo, lease/fencing, retenção mínima e controles por aluno;

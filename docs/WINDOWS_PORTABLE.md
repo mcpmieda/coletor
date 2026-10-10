@@ -30,7 +30,7 @@ a UI, a ponte nativa e os dados sintéticos; fecha a janela e limita o tempo/pro
 Também abre quatro processos/janelas sucessivos para testar configurações locais:
 salvar, reabrir, restaurar/reabrir e recuperar corrupção controlada. O teste usa
 pasta temporária e confirma que o arquivo-sentinela de outro aplicativo continua
-intacto. Os dois relatórios nativos precisam passar para criar o ZIP final. O empacotamento
+intacto. Os três relatórios nativos (janela, persistência e bandeja) precisam passar para criar o ZIP final. O empacotamento
 confere novamente os hashes e inclui apenas o inventário anterior ao teste.
 Não empacota diretórios de captura, perfil, dados reais, segredo ou logs.
 
@@ -41,7 +41,7 @@ parar e pedir ajuda; não desativar proteções. Nenhum bloqueio é contornado.
 
 O pacote usa a estratégia de runtime oficial embutido do Atualizador, sem copiar
 o instalador, as credenciais, os agentes nem scripts de segurança dele.
-A bandeja permanece opt-in e desligada; não é requisito nem resultado desse smoke.
+A bandeja WinForms controla mostrar/ocultar a mesma janela e sair; informa apenas leitura local, espera ou erro. O teste nativo separado é obrigatório antes do ZIP. Não há agente de coleta ou autostart.
 
 ## Fontes oficiais
 

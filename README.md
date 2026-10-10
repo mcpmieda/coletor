@@ -23,7 +23,7 @@ presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total d
 fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
 
 Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
-execução agendada, bandeja ativada/validada no Windows, coordenação dos computadores autorizados, portal ou instalador.
+execução agendada, coordenação dos computadores autorizados, portal ou instalador.
 A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
 O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
 exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
@@ -33,8 +33,8 @@ exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
 Mascote escolhido pelo usuário, com quadros próprios e ações discretas: piscar,
 orelhas, cauda, curiosidade, pulinho, passeio, descanso e carinho. Reage apenas ao
 processamento local e aos avisos reais. Pode ser ocultado ou ficar estático; respeita
-movimento reduzido e pausa com a aba oculta. Ícones e adaptador Windows de bandeja
-estão preparados separadamente, sem iniciar bandeja por padrão.
+movimento reduzido e pausa com a aba oculta. A bandeja Windows mostra estados reais locais e controla mostrar/ocultar a mesma
+janela e sair. Fechar pelo X também encerra o programa. Não cria autostart ou agente.
 
 ## Agenda pré-configurada e editável
 
@@ -109,7 +109,7 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 ## Arquitetura e revisão
 
 - [Agenda escolar editável, apenas local](docs/SCHEDULE_CONFIG.md)
-- [Direção futura de mascote e bandeja](docs/MASCOT_TRAY_PLAN.md)
+- [Raposa e bandeja da prévia](docs/MASCOT_TRAY_PLAN.md)
 - [Regras e fontes Smecel observadas](docs/SMECEL_SOURCE_RULES.md)
 - [Arquitetura, fonte e próximos contratos](docs/ARCHITECTURE.md)
 - [Segurança e privacidade](docs/SECURITY.md)

@@ -112,7 +112,7 @@ def build(output, source_commit):
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,
         "python_archive_sha256": PYTHON_SHA256, "packages": packages,
         "production_access": False, "automatic_collection": False,
-        "credentials_included": False, "tray_enabled": False,
+        "credentials_included": False, "tray_enabled": True,
         "native_smoke": "must-pass-before-zip", "files": []}
     for p in sorted(bundle.rglob("*")):
         if p.is_file():
@@ -121,7 +121,30 @@ def build(output, source_commit):
     print(json.dumps({"bundle": str(bundle), "files": len(manifest["files"])}))
 
 
-def package_zip(output, evidence, settings_evidence=None):
+def validate_tray_evidence(report):
+    common = {"native_window_visible", "native_tray_registered", "native_menu_visible",
+              "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
+              "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy"}
+    extended = {"actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
+                "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
+                "error_state_static_and_generic", "hidden_fox_uses_neutral_icon"}
+    workers = report.get("workers", [])
+    if (report.get("test") != "portable_windows_tray" or report.get("status") != "passed"
+            or report.get("cleanup", {}).get("verified") is not True
+            or report.get("cleanup", {}).get("remaining_processes") != 0
+            or report.get("only_nonsecret_settings_retained") is not True
+            or not isinstance(workers, list) or len(workers) != 2
+            or {w.get("scenario") for w in workers if isinstance(w, dict)} != {"quit", "close"}):
+        raise ValueError("Native tray test must pass before creating a distributable")
+    for worker in workers:
+        required = common | (extended if worker["scenario"] == "quit" else set())
+        if (worker.get("status") != "passed" or worker.get("cleanup", {}).get("verified") is not True
+                or worker.get("cleanup", {}).get("remaining_processes") != 0
+                or any(worker.get("checks", {}).get(key) is not True for key in required)):
+            raise ValueError("Native tray test must pass before creating a distributable")
+
+
+def package_zip(output, evidence, settings_evidence=None, tray_evidence=None):
     bundle = output / NAME
     report = json.loads(evidence.read_text(encoding="utf-8"))
     if report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True:
@@ -140,10 +163,15 @@ def package_zip(output, evidence, settings_evidence=None):
                    or w.get("checks", {}).get("window_closed") is not True
                    or w.get("checks", {}).get("native_window_visible") is not True for w in workers)):
         raise ValueError("Native local settings test must pass before creating a distributable")
+    if tray_evidence is None:
+        raise ValueError("Native tray test must pass before creating a distributable")
+    validate_tray_evidence(json.loads(tray_evidence.read_text(encoding="utf-8")))
     manifest_path = bundle / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["native_smoke"] = "passed-in-private-windows-ci"
     manifest["local_settings_smoke"] = "passed-in-private-windows-ci"
+    manifest["tray_smoke"] = "passed-in-private-windows-ci"
+    manifest["tray_scope"] = "same-window-show-hide-exit; local-preview-state; no-autostart-or-collection"
     manifest["local_settings"] = "agenda-theme-fox-only; private-browser-profile"
     for item in manifest["files"]:
         p = bundle / item["path"]
@@ -165,9 +193,10 @@ if __name__ == "__main__":
     parser.add_argument("--source-commit")
     parser.add_argument("--package", type=Path, help="Successful native smoke JSON")
     parser.add_argument("--settings-evidence", type=Path, help="Successful native settings close/reopen/recovery JSON")
+    parser.add_argument("--tray-evidence", type=Path, help="Successful native notification-area flows JSON")
     args = parser.parse_args()
     if args.package:
-        package_zip(args.output, args.package, args.settings_evidence)
+        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence)
     else:
         build(args.output, args.source_commit or "")
 

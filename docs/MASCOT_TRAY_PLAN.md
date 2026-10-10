@@ -1,3 +1,5 @@
+> Atualização: a bandeja da prévia está integrada via WinForms, com estados reais locais. Consulte TRAY_IMPLEMENTATION.md; os trechos sobre adaptador pywin32 abaixo registram o plano anterior.
+
 # Raposa vermelha do coletor
 
 O usuário escolheu a raposa vermelha da prancha de inspirações e pediu um repertório
@@ -51,3 +53,4 @@ Depois: testar janela/bandeja real no Windows, escala 125/150%, teclado, Explore
 reiniciado, encerramento limpo, alteração das preferências e política operacional
 quando o agente real existir. Não tratar os contratos de animação como autorização
 de login, coleta, implantação ou envio de frequência.
+

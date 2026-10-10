@@ -89,8 +89,10 @@ jobs:
         run: python scripts/check_windows_portable.py --python "dist/windows-portable/ColetorFrequencia-0.1.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
       - name: Verify local settings across native close and reopen
         run: python scripts/check_windows_settings.py --python "dist/windows-portable/ColetorFrequencia-0.1.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-settings --timeout 150
+      - name: Verify real notification-area menu, preferences and native shutdown
+        run: python scripts/check_windows_tray.py --python "dist/windows-portable/ColetorFrequencia-0.1.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-tray --timeout 150
       - name: Create portable test ZIP only after native success
-        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json
+        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json
       - name: Preserve native test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -99,6 +101,7 @@ jobs:
           path: |
             artifacts/windows-smoke/
             artifacts/windows-settings/
+            artifacts/windows-tray/
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve private portable test package

@@ -107,7 +107,7 @@ class LocalSettingsTests(unittest.TestCase):
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
         api = DesktopApi(self.directory)
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["get_local_settings", "load_demo", "preview_html", "save_fox", "save_schedule", "save_theme"])
+                         ["get_desktop_status", "get_local_settings", "hide_window", "load_demo", "preview_html", "save_fox", "save_schedule", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())

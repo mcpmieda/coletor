@@ -10,12 +10,14 @@ import ValidationPanel from './components/ValidationPanel';
 import ScheduleSettings from './components/ScheduleSettings';
 import FoxCompanion from './components/FoxCompanion';
 import { useLocalSettingsNotice } from './localSettings';
+import { useDesktopTray } from './desktop';
 export default function App() {
   const [theme, setTheme, themeNotice] = useTheme();
   const settingsNotice = useLocalSettingsNotice();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const tray = useDesktopTray(busy ? 'reading' : error ? 'error' : 'idle');
   const [classId, setClassId] = useState('TESTE-A');
   const [year, setYear] = useState('2026');
   const [view, setView] = useState<'preview' | 'roadmap' | 'schedule'>('preview');
@@ -47,6 +49,8 @@ export default function App() {
     <main><header className="page-header"><div><h1>{view === 'preview' ? 'Conferir frequência' : view === 'schedule' ? 'Horários de coleta' : 'Próximos passos'}</h1><p>{view === 'preview' ? 'Veja o diário e o que precisa conferir.' : view === 'schedule' ? 'Escolha os dias e horários.' : 'O que falta para começar a coleta.'}</p></div><StatusChip tone="warning">Não envia dados</StatusChip></header>
       {settingsNotice && <p className="local-settings-notice" role="status">{settingsNotice}</p>}
       {themeNotice && <p role="status">{themeNotice}</p>}
+      {tray.available && <div className="status-line"><Button size="sm" variant="ghost" onPress={() => { void tray.hide(); }}>Ocultar na bandeja</Button><span>Coleta desligada. Para sair, feche a janela ou use Sair na bandeja.</span></div>}
+      {tray.notice && <p role="status">{tray.notice}</p>}
       <div hidden={view !== 'schedule'}><ScheduleSettings /></div>
       {view === 'schedule' ? null : view === 'roadmap' ? <section className="panel roadmap"><h2>Antes de começar</h2><ol>
         <li><strong>Conferir o diário</strong><p>Checar os alunos, as faltas e os dias de aula.</p></li>
