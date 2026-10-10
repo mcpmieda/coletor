@@ -21,10 +21,18 @@ presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total d
 fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
 
 Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
-agendamento, bandeja, coordenação dos três PCs, portal ou instalador.
+execução agendada, bandeja, coordenação dos três PCs, portal ou instalador.
 A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
 O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
 exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
+
+## Agenda pré-configurada e editável
+
+A página Agenda de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
+versão 75, separados por dia e turno, com fuso America/Bahia editável. Salva apenas
+uma prévia neste navegador; nenhuma tarefa é executada. O escopo futuro é a escola:
+a mesma configuração para os três usuários, após login e sincronização ainda não
+implementados. Não guarda credenciais. Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
 
 ## Executar a prévia no desenvolvimento
 
@@ -75,6 +83,9 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 
 ## Arquitetura e revisão
 
+- [Agenda escolar editável, apenas local](docs/SCHEDULE_CONFIG.md)
+- [Direção futura de mascote e bandeja](docs/MASCOT_TRAY_PLAN.md)
+- [Regras e fontes Smecel observadas](docs/SMECEL_SOURCE_RULES.md)
 - [Arquitetura, fonte e próximos contratos](docs/ARCHITECTURE.md)
 - [Segurança e privacidade](docs/SECURITY.md)
 - [Estudo econômico PostgreSQL, ainda não implementado](docs/POSTGRESQL_PLAN.md)

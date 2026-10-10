@@ -56,6 +56,48 @@ try:
         page.get_by_label('Selecionar diário HTML').set_input_files({'name':'invalid.html','mimeType':'text/html','buffer':b'<html><form>login</form></html>'})
         page.get_by_role('heading', name='Prévia da turma').wait_for()
         assert page.get_by_text('Envio indisponível neste protótipo').is_visible()
+        # School schedule remains a local preview: edit, validate, save, reload, undo.
+        page.get_by_role('button', name='Agenda de coleta', exact=True).click()
+        page.get_by_role('heading', name='Horários de coleta').wait_for()
+        assert page.get_by_label('Fuso da escola').input_value() == 'America/Bahia'
+        assert page.get_by_label('Coletas Sexta-feira Matutino', exact=True).input_value().startswith('08:40')
+        assert not page.get_by_role('checkbox', name='Incluir Sábado Matutino').is_checked()
+        monday = page.get_by_label('Coletas Segunda-feira Matutino', exact=True)
+        monday.fill('24:00')
+        page.get_by_role('button', name='Salvar prévia local', exact=True).click()
+        assert page.get_by_role('alert').is_visible()
+        monday.fill('08:15, 09:00, 09:55, 11:05, 11:55')
+        page.get_by_role('button', name='Salvar prévia local', exact=True).click()
+        assert page.get_by_role('status').filter(has_text='Prévia salva').is_visible()
+        page.reload()
+        page.get_by_role('button', name='Agenda de coleta', exact=True).click()
+        monday = page.get_by_label('Coletas Segunda-feira Matutino', exact=True)
+        assert monday.input_value().startswith('08:15')
+        monday.fill('08:30')
+        page.get_by_role('button', name='Próximas etapas', exact=True).click()
+        page.get_by_role('button', name='Agenda de coleta', exact=True).click()
+        assert monday.input_value() == '08:30', 'Draft lost on navigation'
+        page.get_by_role('button', name='Descartar alterações', exact=True).click()
+        assert monday.input_value().startswith('08:15')
+        page.get_by_role('button', name='Vespertino', exact=True).click()
+        assert page.get_by_label('Rechecagem Sexta-feira Vespertino', exact=True).input_value() == '18:30'
+        page.get_by_role('button', name='Restaurar padrão', exact=True).click()
+        page.get_by_role('button', name='Salvar prévia local', exact=True).click()
+        page.get_by_role('button', name='Matutino', exact=True).click()
+        assert monday.input_value().startswith('08:05')
+        page.set_viewport_size({'width':1240,'height':820})
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'schedule-dark.png'), full_page=True)
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Schedule desktop overflow'
+        page.get_by_role('button', name='Aparência').click()
+        page.get_by_role('option', name='Clara', exact=True).click()
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'schedule-light.png'), full_page=True)
+        page.set_viewport_size({'width':390,'height':844})
+        page.evaluate('window.scrollTo(0, 0)')
+        page.screenshot(path=str(out/'schedule-mobile.png'), full_page=True)
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Schedule mobile overflow'
+        page.get_by_role('button', name='Prévia e validação', exact=True).click()
         # Repeated load after error and clearing; no stale preview.
         page.get_by_role('button', name='Carregar demonstração').click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
@@ -69,7 +111,7 @@ try:
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Horizontal page overflow'
         assert page.get_by_role('button',name='Abrir HTML').is_visible()
         assert not errors, errors
-        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
+        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:
     server.shutdown(); server.server_close(); thread.join()

@@ -4,7 +4,7 @@
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
   locais: 40 testes passando após correções de volume identificadas em revisão parcial.
-- UI: cinco testes de labels/adaptador/erros passaram.
+- UI: 32 testes de labels, adaptador, erros e configuração de agenda passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
 - Código do launcher Windows e contrato pywebview: inspecionados/compilados,
@@ -33,7 +33,7 @@ A tela funcional foi adaptada ao diário; não contém estados de sincronizaçã
   foi executado sobre dados reais no repositório. Piloto autorizado segue pendente.
 - HTML isolado não prova `ct`, roster completo ou MAT; envio permanece bloqueado.
 - Nenhuma coleta autenticada, credencial, dispositivo, API, banco ou portal conectado.
-- Interface importa em memória; não há instalador, tray, agendamento ou failover.
+- Interface importa em memória; não há instalador, tray, execução agendada ou failover. A agenda editável é uma prévia local.
 
 ## Inspeção visual da UI renderizada
 
@@ -55,3 +55,12 @@ instalador, campos/alertas específicos da validação. Não foi criado conceito
 novo, pois a referência solicitada é o sistema de design existente do Atualizador.
 O texto acima da dobra identifica protótipo local e envio desativado; nenhuma
 mensagem afirma conexão ou sincronização fictícia.
+
+## Agenda editável
+
+Padrões comparados com as dez combinações de dia/turno da fonte v75: 54 coletas e
+10 rechecagens. Os quatro pares de fim de semana iniciam desmarcados. Testes unitários
+conferem todos os horários, fuso confirmado, schema, validação, persistência mínima,
+limites e recuperação visível de armazenamento inválido. O smoke de UI cobre edição,
+erro, salvamento/reabertura, navegação sem perder rascunho, descarte e restauração,
+além de capturas claras/escuras e mobile. Resultado remoto vinculado ao commit da PR.

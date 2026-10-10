@@ -4,8 +4,8 @@
 - Não há rede de saída no backend de domínio; não há cliente PostgreSQL/API.
 - HTML não é renderizado: apenas texto/estrutura permitida entra no modelo.
 - Nenhum nome de aluno, corpo HTML ou credencial vai para logs.
-- Prévia não é persistida; recarregar/fechar limpa dados da memória da interface.
-- Só preferência de tema pode ficar no armazenamento local do navegador de QA.
+- Prévia do diário não é persistida; recarregar/fechar limpa dados da memória da interface.
+- Preferência de tema e agenda sem dados pessoais podem ficar no armazenamento local do navegador de QA.
   No launcher desktop, o perfil é privado/efêmero.
 - Arquivos reais, perfis Chromium, bancos locais, chaves e instaladores devem
   permanecer fora do Git. .gitignore oferece defesa adicional, não substitui revisão.

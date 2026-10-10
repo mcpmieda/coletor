@@ -23,7 +23,8 @@ empacotador, certificados, senhas, instaladores, macros ou dados operacionais.
 3. Serviço valida tamanho/escopo e entrega HTML ao parser sem executar scripts.
 4. Parser produz snapshot com posição de aula, estado e símbolo de origem.
 5. Validador mantém o envio bloqueado sem identidade/completude verificadas.
-6. Interface exibe prévia em memória. Não existe endpoint ou método de envio.
+6. Interface exibe diário em memória. Agenda sem dados pessoais pode ser salva
+   no localStorage como rascunho local versionado. Não existe endpoint ou método de envio.
 
 O servidor HTTP é exclusivamente um adaptador de desenvolvimento/QA. Só escuta
 127.0.0.1; exige Host correto, Origin local em POST, JSON e limite de corpo;
@@ -47,8 +48,8 @@ um parser estruturalmente bem-sucedido não comprova integridade do relatório.
 - Login inicial no Ecossistema e registro de dispositivo, após aprovação de
   acesso persistente; autenticação Smecel separada em perfil Chromium exclusivo.
 - Credenciais em cofre do sistema operacional, sem tokens em código/logs/repo.
-- Agenda configurável por horários e dias da semana, com fuso IANA; horários
-  ainda não conhecidos. São gatilhos de coleta, não prova de que uma aula ocorreu.
+- Execução da agenda configurável por horários e dias da semana, com fuso IANA.
+  A tela de edição e os padrões da versão 75 já existem como prévia local. São gatilhos de coleta, não prova de que uma aula ocorreu.
   No horário configurado, apenas o PC líder abre Chromium exclusivo, verifica a
   sessão, captura, fecha e reporta. Prever Coletar agora, Pausar e tentativas
   espaçadas, com uma coleta por vez e sem replay descontrolado de horários perdidos.
