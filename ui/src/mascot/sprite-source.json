@@ -600,18 +600,18 @@
           "...........kkddddkccckddddddkrrrrrrrrkesrrrrrrrrraarrrk.........",
           "............kkddkdcccckkddkkrrrsrrrrrrkssrrrrrrrrrrrrsk.........",
           ".............kkkkkcccckmkkkrrrskkksrrrrkssrrrrrrrrrrssk.........",
-          "...............kskccccemmrrrrrkrrrrsrrrksssrrrrrrrrrskk.........",
-          "...............ksskccckdddrrrkrrrrrrrrrksssrssrrrrrsskk.........",
-          "..............kkdddkcckddddrrkrrrrrrrrrrksssssrrrrssskk.........",
-          "..............kddddkcckdddddkrrrrrrrrrrrkssssrrrssssdk..........",
-          ".............kkddddkwkddddddkrrrrrrrrrrrksssssrssssskk..........",
-          ".............kdddddkwkdddddkkrrrrrrrrrrrksssssssssskk...........",
-          ".............kdddddkkkdddddkssrrrrrrrrrrkssssssssskk............",
-          "...........kkkdddddkddddddkksksssrrrrrrresssssssskk.............",
-          "..........kkdddddkkkddddddkkdddkdkrrrrmksssssssskk..............",
-          "..........kddkkddkkddkdddkkdddkdddkrrmssssssssskk...............",
-          "..........kkdkddkkkddkddkkkkdkdddddksskssssskkkk................",
-          "...........kkkkkk.kkkkkkk..kkkkkkkkkkkkkkkkkk...................",
+          "................kcwwwwwwwwrrrrrrrrrrrkrksssrrrrrrrrrskk.........",
+          "...............kkcwwwwwwwwwrrrrkrrrrrkrksssrssrrrrrsskk.........",
+          "..............kkrcwwwwwwwwwrrrkrrrrrrrrrksssssrrrrssskk.........",
+          ".............kkrrwcwwwwwwwwwrkrrrrrrrrrrkssssrrrssssdk..........",
+          ".............krrrrcwwwwwwwwwrkrrrrrrrrrrksssssrssssskk..........",
+          "............kkrrrrwcwwwwwwwrrrrrrrrrrrrrksssssssssskk...........",
+          "............krrrrrrwcwwwwwwrrrrrrrrrrrrrkssssssssskk............",
+          "...........kkddddddrwcwwwrrrrrdddddrrrrresssssssskk.............",
+          "...........kddddddddrrrwrrrrrddddddddrmksssssssskk..............",
+          "..........kkdkddddddkkkkkkkrdddkdddddkssssssssskk...............",
+          "...........kdddddkdkk.....kkkddddddkdkkssssskkkk................",
+          "...........kkkkkkkkk........kkkkkkkkkkkkkkkkk...................",
           "................................................................",
           "................................................................"
         ]
@@ -867,5 +867,21 @@
     "tail-right": 240,
     "sleep": 1500,
     "happy": 700
-  }
+  },
+  "revision": 2,
+  "corrections": [
+    {
+      "frame": "happy",
+      "issue": "Raised front paws retained duplicated grounded front legs.",
+      "fix": "Only lower torso and hind support redrawn; exactly two raised forepaws and two grounded hind paws.",
+      "changedPixels": 177,
+      "changedBBox": [
+        10,
+        50,
+        38,
+        62
+      ],
+      "unchanged": "All seven other body frames, all heads, palette, frame size, baseline and all ICOs."
+    }
+  ]
 }
