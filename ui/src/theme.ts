@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
+import { readLocalTheme, saveLocalTheme } from './localSettings';
 export type ThemeMode = 'system' | 'light' | 'dark';
-const key = 'smecel-collector:theme:v1';
-export function readTheme(): ThemeMode {
-  try { const v = localStorage.getItem(key); return v === 'light' || v === 'dark' ? v : 'system'; }
-  catch { return 'system'; }
-}
+export function readTheme(): ThemeMode { return readLocalTheme(); }
 export function paintTheme(mode: ThemeMode) {
   const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.classList.toggle('dark', dark);
@@ -12,13 +9,18 @@ export function paintTheme(mode: ThemeMode) {
 }
 export function useTheme() {
   const [mode, setMode] = useState<ThemeMode>(readTheme);
+  const [notice, setNotice] = useState('');
   useEffect(() => {
     paintTheme(mode);
-    try { localStorage.setItem(key, mode); } catch { /* Preference only; no student data. */ }
     const media = matchMedia('(prefers-color-scheme: dark)');
     const listener = () => paintTheme(mode);
     media.addEventListener('change', listener);
     return () => media.removeEventListener('change', listener);
   }, [mode]);
-  return [mode, setMode] as const;
+  function change(next: ThemeMode) {
+    setMode(next); setNotice('');
+    void saveLocalTheme(next).catch(() => setNotice('Tema aplicado só nesta sessão. Não foi possível salvar.'));
+  }
+  return [mode, change, notice] as const;
 }
+

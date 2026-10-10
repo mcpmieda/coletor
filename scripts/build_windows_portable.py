@@ -39,7 +39,7 @@ def safe_extract(archive, destination):
     with ZipFile(archive) as z:
         for entry in z.infolist():
             p = PurePosixPath(entry.filename)
-            if (p.is_absolute() or ".." in p.parts or "\\" in entry.filename
+            if (p.is_absolute() or ".." in p.parts or "\\" in entry.orig_filename
                     or ":" in entry.filename or (entry.external_attr >> 16) & 0o170000 == 0o120000):
                 raise ValueError("Unsafe runtime archive path")
             target = destination.joinpath(*p.parts)
@@ -121,14 +121,30 @@ def build(output, source_commit):
     print(json.dumps({"bundle": str(bundle), "files": len(manifest["files"])}))
 
 
-def package_zip(output, evidence):
+def package_zip(output, evidence, settings_evidence=None):
     bundle = output / NAME
     report = json.loads(evidence.read_text(encoding="utf-8"))
     if report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True:
         raise ValueError("Native Windows smoke must pass before creating a distributable")
+    if settings_evidence is None:
+        raise ValueError("Native local settings test must pass before creating a distributable")
+    settings_report = json.loads(settings_evidence.read_text(encoding="utf-8"))
+    workers = settings_report.get("workers", [])
+    if (settings_report.get("test") != "portable_windows_local_settings" or settings_report.get("status") != "passed"
+            or settings_report.get("cleanup", {}).get("verified") is not True
+            or settings_report.get("other_application_unchanged") is not True
+            or settings_report.get("only_nonsecret_settings_retained") is not True
+            or not isinstance(workers, list) or len(workers) != 4
+            or {w.get("scenario") for w in workers if isinstance(w, dict)} != {"save", "reopen", "restored", "recovered"}
+            or any(w.get("status") != "passed" or w.get("cleanup", {}).get("verified") is not True
+                   or w.get("checks", {}).get("window_closed") is not True
+                   or w.get("checks", {}).get("native_window_visible") is not True for w in workers)):
+        raise ValueError("Native local settings test must pass before creating a distributable")
     manifest_path = bundle / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["native_smoke"] = "passed-in-private-windows-ci"
+    manifest["local_settings_smoke"] = "passed-in-private-windows-ci"
+    manifest["local_settings"] = "agenda-theme-fox-only; private-browser-profile"
     for item in manifest["files"]:
         p = bundle / item["path"]
         if p.stat().st_size != item["size"] or sha256(p) != item["sha256"]:
@@ -148,8 +164,10 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--source-commit")
     parser.add_argument("--package", type=Path, help="Successful native smoke JSON")
+    parser.add_argument("--settings-evidence", type=Path, help="Successful native settings close/reopen/recovery JSON")
     args = parser.parse_args()
     if args.package:
-        package_zip(args.output, args.package)
+        package_zip(args.output, args.package, args.settings_evidence)
     else:
         build(args.output, args.source_commit or "")
+

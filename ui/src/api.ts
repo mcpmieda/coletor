@@ -1,5 +1,5 @@
 import type { Preview } from './types';
-interface NativeApi { load_demo(): Promise<Preview | { error: string }>; preview_html(html: string, classId: string, year: number): Promise<Preview | { error: string }> }
+interface NativeApi { load_demo(): Promise<Preview | { error: string }>; preview_html(html: string, classId: string, year: number): Promise<Preview | { error: string }>; get_local_settings?: import('./localSettings').SettingsBridge['get_local_settings']; save_schedule?: import('./localSettings').SettingsBridge['save_schedule']; save_theme?: import('./localSettings').SettingsBridge['save_theme']; save_fox?: import('./localSettings').SettingsBridge['save_fox'] }
 declare global { interface Window { pywebview?: { api: NativeApi } } }
 function unwrap(body: Preview | { error: string }): Preview {
   if (!('snapshot' in body)) throw new Error(body.error);
@@ -37,3 +37,4 @@ export async function previewHtml(html: string, classId: string, year: number, s
     body: JSON.stringify({ html, class_id: classId.trim(), year }),
   });
 }
+

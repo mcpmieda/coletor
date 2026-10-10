@@ -175,7 +175,7 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(evidence["status"], "passed")
         self.assertTrue(evidence["cleanup"]["verified"])
-        self.assertTrue(holder["command"][0].endswith("programa/python.exe"))
+        self.assertEqual(Path(holder["command"][0]).parts[-2:], ("programa", "python.exe"))
         self.assertEqual(holder["command"][1], "-I")
         self.assertEqual(holder["input"], b"RUN\n")
         job.assign.assert_called_once_with(process.pid)
@@ -207,3 +207,4 @@ class OrchestrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

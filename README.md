@@ -39,8 +39,10 @@ estão preparados separadamente, sem iniciar bandeja por padrão.
 ## Agenda pré-configurada e editável
 
 A página Horários de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
-versão 75, separados por dia e turno, com fuso America/Bahia editável. Salva apenas
-uma prévia neste navegador; nenhuma tarefa é executada. O escopo futuro é a escola:
+versão 75, separados por dia e turno, com fuso America/Bahia editável. Na janela Windows,
+agenda, tema e preferências da raposa ficam no arquivo próprio
+`%LOCALAPPDATA%/ColetorFrequenciaSmecel/settings.json`, mesmo depois de fechar.
+Na prévia no navegador, ficam no armazenamento desse navegador. Nenhuma tarefa é executada. O escopo futuro é a escola:
 a mesma configuração para os usuários e computadores autorizados, após login e sincronização ainda não
 implementados. A quantidade é variável; o desenho prevê um coletor ativo por vez
 e os demais computadores autorizados como reservas. Não guarda credenciais.
@@ -118,3 +120,4 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 - [Verificação desta versão](docs/VERIFICATION.md)
 
 Trabalho em draft PR. Sem merge, deploy, release, instalador ou escrita em produção.
+

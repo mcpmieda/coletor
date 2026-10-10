@@ -12,11 +12,21 @@
   padrões e descarte de alterações. Rascunho preservado ao navegar entre páginas.
 - Validação HH:MM, no máximo 16 coletas por dia/turno, sem duplicatas, rechecagem
   posterior às coletas, 14 pares únicos, fuso IANA reconhecido.
-- Salvamento somente no localStorage da origem local, na chave própria
-  `coletor-smecel.schedule-preview.v1`. Só campos permitidos são serializados.
-  Falha de armazenamento é visível. Nenhum diário, aluno ou segredo é salvo.
-- A janela desktop usa perfil privado: persistência após fechá-la não é garantida.
-  O teste de persistência cobre recarregar a mesma origem no navegador de QA.
+- A janela Windows salva agenda, tema e preferências da raposa em
+  `%LOCALAPPDATA%/ColetorFrequenciaSmecel/settings.json`, independente do Atualizador.
+  O JSON tem esquema e limite de 16 KB; a escrita usa temporário na mesma pasta,
+  flush/fsync e substituição atômica. Os setters nativos aceitam somente os campos
+  próprios de cada preferência. Fuso IANA é validado semanticamente pelo Intl da UI;
+  o backend valida formato, tamanho e estrutura sem instalar banco de fusos.
+- A prévia no navegador continua usando localStorage da origem local, na chave
+  `coletor-smecel.schedule-preview.v1`. Não há endpoint HTTP para gravar arquivos.
+- O perfil do WebView permanece privado e efêmero. Nenhum diário, aluno, senha,
+  token, cookie ou sessão é persistido. Falha de armazenamento é visível e mantém
+  o rascunho; o aviso de salvo só aparece após confirmação da escrita.
+- Arquivo inválido usa sugestões e aviso. Não há cópia de seu conteúdo inválido;
+  somente salvar explicitamente substitui o arquivo por configurações válidas.
+  O teste Windows cobre salvar, fechar, reabrir, restaurar/reabrir e corrupção
+  controlada em pasta temporária própria, com sentinela de outro aplicativo intacta.
 - Zero relógio operacional, timers de coleta, chamadas externas, autenticação,
   cadastro de dispositivos, fila ou envio. Selecionar um dia não ativa tarefa.
 
@@ -25,7 +35,8 @@
 `schemaVersion: 1`, `scope: school`, `storageMode: local-preview`, `localRevision`,
 `sharedRevision: null`, fuso e regras. A revisão é só do rascunho local e não deve
 ser promovida a revisão de servidor. Não há schoolId ou identidade inventada.
-Nenhuma API aceita esse documento neste marco.
+Somente a ponte local da janela Windows aceita esse documento para armazenamento
+local. Não há API de produção ou sincronização que o aceite neste marco.
 
 No produto futuro, a configuração pertence à escola autenticada e é compartilhada
 pelos usuários e computadores autorizados, em quantidade variável. Uma alteração autorizada
@@ -53,3 +64,4 @@ Não inferir dia letivo por checkbox, dia da semana ou evento genérico. Ver
 Antes da automação: confirmar vigência, calendário/exceções, política de retries,
 compensação de horários perdidos, login expirado, fuso na mudança de data e eleição
 do líder. Abrir/coletar/fechar navegador, Coletar agora e Pausar são etapas futuras.
+

@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 PATH = Path(__file__).resolve().parents[1] / "scripts/build_windows_portable.py"
 spec = importlib.util.spec_from_file_location("portable_builder", PATH)
@@ -21,7 +21,9 @@ class PortableBuildTests(unittest.TestCase):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 with ZipFile(root / "bad.zip", "w") as z:
-                    z.writestr(name, "no")
+                    member = ZipInfo("placeholder")
+                    member.filename = name  # Preserve hostile backslashes on Windows too.
+                    z.writestr(member, "no")
                 with self.assertRaises(ValueError):
                     builder.safe_extract(root / "bad.zip", root / "output")
 
@@ -33,9 +35,24 @@ class PortableBuildTests(unittest.TestCase):
             builder.safe_extract(root / "ok.zip", root / "output")
             self.assertEqual((root / "output/python313._pth").read_text(), "python313.zip")
 
+    def test_package_rejects_missing_or_incomplete_settings_proof(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            basic = root / "basic.json"
+            basic.write_text(json.dumps({"status":"passed", "cleanup":{"verified":True}}))
+            with self.assertRaisesRegex(ValueError, "local settings"):
+                builder.package_zip(root, basic)
+            settings = root / "settings.json"
+            settings.write_text(json.dumps({"test":"portable_windows_local_settings", "status":"passed", "cleanup":{"verified":True},
+                                            "other_application_unchanged":True, "only_nonsecret_settings_retained":True, "workers":[]}))
+            with self.assertRaisesRegex(ValueError, "local settings"):
+                builder.package_zip(root, basic, settings)
+
     def test_package_requires_native_smoke_success(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "failed.json").write_text('{"passed":false}')
             with self.assertRaises(ValueError):
                 builder.package_zip(root, root / "failed.json")
+

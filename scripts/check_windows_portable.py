@@ -398,7 +398,8 @@ def run_worker(args) -> int:
             fail("unexpected_pywebview_version")
         evidence["stage"] = "launch_native_window"
         write_json(args.worker_output, {key: value for key, value in evidence.items() if not key.startswith("_")})
-        desktop.run_desktop(callback=lambda window: exercise_window(window, evidence, args.output_dir / "windows-portable.png"))
+        desktop.run_desktop(callback=lambda window: exercise_window(window, evidence, args.output_dir / "windows-portable.png"),
+                            settings_directory=args.output_dir / "isolated-settings")
         evidence["checks"]["window_closed"] = True
         evidence["stage"] = "window_closed"
         if evidence["status"] != "passed" or not all(evidence["checks"].get(key) is True for key in REQUIRED_CHECKS):
@@ -521,3 +522,4 @@ def parse_args(argv=None):
 if __name__ == "__main__":
     options = parse_args()
     raise SystemExit(run_worker(options) if options.worker else run_orchestrator(options))
+

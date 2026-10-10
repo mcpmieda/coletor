@@ -22,9 +22,19 @@ LIMITES IMPORTANTES
 É uma versão de teste. Não faz login, não busca dados no Smecel,
 não envia ao Ecossistema e não acessa o banco de dados.
 A coleta automática, os horários compartilhados e a bandeja ainda não estão ativos.
-Os horários podem se perder ao fechar esta versão.
+Ao salvar, os horários ficam neste computador mesmo depois de fechar.
+O tema e as opções da raposa também ficam salvos.
+Essas configurações não são compartilhadas com outros computadores.
 Uma marcação de aula prevista não confirma presença.
 O programa não grava o diário aberto.
+
+CONFIGURAÇÕES LOCAIS
+O programa guarda somente horários, tema e opções da raposa na pasta própria
+ColetorFrequenciaSmecel, nos dados locais do seu usuário Windows.
+Não guarda alunos, HTML, senhas, cookies ou sessões do navegador.
+Se o arquivo de configurações estiver inválido, mostra um aviso e as sugestões.
+Clique em Salvar horários para guardar novamente. O Atualizador de Planilhas
+usa arquivos separados e não é alterado.
 
 SEGURANÇA
 Este pacote não cria tarefa de inicialização, conta, senha ou serviço.
@@ -46,3 +56,4 @@ LICENÇAS
 A licença do Python está na pasta programa.
 As licenças das bibliotecas Python estão em programa/Lib/site-packages.
 Avisos das bibliotecas da interface estão em LICENCAS-UI.txt.
+

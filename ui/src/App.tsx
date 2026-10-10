@@ -9,8 +9,10 @@ import AttendancePreview from './components/AttendancePreview';
 import ValidationPanel from './components/ValidationPanel';
 import ScheduleSettings from './components/ScheduleSettings';
 import FoxCompanion from './components/FoxCompanion';
+import { useLocalSettingsNotice } from './localSettings';
 export default function App() {
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme, themeNotice] = useTheme();
+  const settingsNotice = useLocalSettingsNotice();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -43,6 +45,8 @@ export default function App() {
       <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Versão de teste · 0.1.0</StatusChip><p>Dados ficam neste computador</p><SelectField label="Tema" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automático' }, { id: 'light', label: 'Claro' }, { id: 'dark', label: 'Escuro' }]} /></div></div>
     </aside>
     <main><header className="page-header"><div><h1>{view === 'preview' ? 'Conferir frequência' : view === 'schedule' ? 'Horários de coleta' : 'Próximos passos'}</h1><p>{view === 'preview' ? 'Veja o diário e o que precisa conferir.' : view === 'schedule' ? 'Escolha os dias e horários.' : 'O que falta para começar a coleta.'}</p></div><StatusChip tone="warning">Não envia dados</StatusChip></header>
+      {settingsNotice && <p className="local-settings-notice" role="status">{settingsNotice}</p>}
+      {themeNotice && <p role="status">{themeNotice}</p>}
       <div hidden={view !== 'schedule'}><ScheduleSettings /></div>
       {view === 'schedule' ? null : view === 'roadmap' ? <section className="panel roadmap"><h2>Antes de começar</h2><ol>
         <li><strong>Conferir o diário</strong><p>Checar os alunos, as faltas e os dias de aula.</p></li>
@@ -62,3 +66,4 @@ export default function App() {
     </main>
   </div>;
 }
+

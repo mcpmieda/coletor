@@ -5,8 +5,12 @@
 - HTML não é renderizado: apenas texto/estrutura permitida entra no modelo.
 - Nenhum nome de aluno, corpo HTML ou credencial vai para logs.
 - Prévia do diário não é persistida; recarregar/fechar limpa dados da memória da interface.
-- Preferências de tema/mascote e agenda sem dados pessoais podem ficar no armazenamento local do navegador de QA.
-  No launcher desktop, o perfil é privado/efêmero.
+- Preferências de tema/mascote e agenda sem dados pessoais ficam em JSON validado
+  na pasta própria ColetorFrequenciaSmecel do perfil local Windows. A ponte oferece
+  somente setters específicos; não aceita caminho, chave arbitrária, HTML ou aluno.
+  No navegador de QA, permanece localStorage. O perfil WebView continua privado/efêmero.
+- Gravação atômica mantém o arquivo anterior se a substituição falhar. Arquivo
+  inválido produz sugestões e aviso sem log ou backup de seu conteúdo.
 - Arquivos reais, perfis Chromium, bancos locais, chaves e instaladores devem
   permanecer fora do Git. .gitignore oferece defesa adicional, não substitui revisão.
 - Hash de snapshot garante determinismo/integridade interna; não prova autoria
@@ -24,3 +28,4 @@ validação manual do parser em amostra autorizada sem inserir dados reais no Gi
 Limites defensivos: 8 MiB de HTML na interface/serviço, 64 fichas, 130 mil
 registros, 200 mil nós e diagnósticos agregados por código/ficha. Excesso de
 volume descarta a prévia parcial e mantém o envio bloqueado.
+

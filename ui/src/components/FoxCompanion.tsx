@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { INITIAL_FOX, POSE_POSITION, beginAction, foxPose, nextFox, type FoxActivity } from '../mascot/animation';
-import { DEFAULT_FOX, FOX_KEY, readFoxPreferences } from '../mascot/preferences';
+import { readLocalFox, saveLocalFox } from '../localSettings';
 
 const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para ajudar.', reading:'Lendo o diário…', review:'Há pontos para conferir.', error:'O arquivo precisa de atenção.' };
 export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
-  const [preferences, setPreferences] = useState(() => { try { return readFoxPreferences(window.localStorage); } catch { return DEFAULT_FOX; } });
+  const [preferences, setPreferences] = useState(readLocalFox);
   const [animation, setAnimation] = useState(INITIAL_FOX);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden);
   const [reduced, setReduced] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -38,8 +38,7 @@ export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
   function preference(key:'show'|'animate', value:boolean) {
     const next = { ...preferences, [key]:value };
     setPreferences(next); setStorageNotice('');
-    try { localStorage.setItem(FOX_KEY, JSON.stringify(next)); }
-    catch { setStorageNotice('Preferência aplicada só nesta sessão.'); }
+    void saveLocalFox(next).catch(() => setStorageNotice('Preferência aplicada só nesta sessão. Não foi possível salvar.'));
   }
   function pet() {
     lastInput.current = performance.now();
@@ -61,3 +60,4 @@ export default function FoxCompanion({ activity }: { activity: FoxActivity }) {
     {storageNotice && <span className="fox-note" role="status">{storageNotice}</span>}
   </section>;
 }
+
