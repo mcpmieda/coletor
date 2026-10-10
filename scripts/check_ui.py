@@ -21,6 +21,7 @@ try:
         page.on('pageerror', lambda e: errors.append(str(e)))
         page.goto(url)
         page.get_by_role('heading', name='Primeiro, conferir. Depois, sincronizar.').wait_for()
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()") == '#a32743'
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'empty-light.png'), full_page=True)
         page.get_by_role('button', name='Carregar demonstração').click()
@@ -41,6 +42,7 @@ try:
         page.get_by_role('button', name='Aparência').click()
         page.get_by_role('option', name='Escura', exact=True).click()
         assert page.locator('html').get_attribute('data-theme') == 'dark'
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()") == '#f28ba0'
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'demo-dark.png'), full_page=True)
         page.get_by_role('button', name='Próximas etapas', exact=True).click()

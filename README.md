@@ -5,8 +5,9 @@ Coletor de frequência escolar para integração com o Ecossistema Escolar.
 ## Primeiro marco: prévia local, sem envio
 
 Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo a
-identidade do Atualizador de Planilhas 1.3.0: verde Excel, Segoe UI e temas
-claro, escuro e automático.
+padrão de interface do Atualizador de Planilhas 1.3.0: HeroUI, Segoe UI e temas
+claro, escuro e automático. A identidade do coletor usa vermelho/bordô, conforme
+a escolha posterior do usuário.
 
 Implementado:
 - Abertura de HTML selecionado pelo operador, processado somente em memória.

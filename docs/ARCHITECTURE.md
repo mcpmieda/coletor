@@ -9,8 +9,8 @@ com ponte window.pywebview.api, React e HeroUI v3. O coletor segue esse padrão:
 - Python 3.12+ para o domínio, sem dependências de rede no parser.
 - pywebview/Edge Chromium para a janela Windows, com perfil privado efêmero.
 - React 19, HeroUI 3.2.6 e Tailwind 4 para o painel.
-- Mesmos tokens de verde Excel: oklch(0.52 0.13 150) no tema claro e
-  oklch(0.72 0.15 152) no escuro; Segoe UI Variable Text / Segoe UI.
+- Após pedido explícito, a marca usa bordô #a32743 no claro e vermelho claro
+  #f28ba0 no escuro. Mantém Segoe UI Variable Text / Segoe UI e HeroUI do Atualizador.
 - Identidade própria, sem reutilizar dados, mutex, instalação ou serviço do Atualizador.
 
 A implementação anterior foi referência de arquitetura/identidade. Não copiamos

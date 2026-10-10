@@ -3,7 +3,8 @@
 O usuário pediu um animal bem diferente do dragão do Atualizador, com inspirações
 antes da escolha definitiva e ícone na bandeja ao lado do relógio. Nenhum mascote
 foi escolhido ou gerado neste marco; o ícone atual é apenas funcional. HeroUI,
-paleta e tipografia continuam os mesmos da família de aplicativos.
+e tipografia continuam os mesmos da família de aplicativos. A paleta mudou para
+vermelho/bordô por escolha explícita; inspirações do mascote devem acompanhar isso.
 
 A referência fornecida contém pixel art chibi, contorno escuro, olhos legíveis e
 paleta curta. O futuro sprite deve ter grade e paleta próprias; não reutilizar o

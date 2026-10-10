@@ -3,7 +3,7 @@
 ## Executado localmente
 
 - Python 3.12: parser, validação, calendário, ambiguidades, identidade e serviços
-  locais: 40 testes passando após correções de volume identificadas em revisão parcial.
+  locais e contraste da UI: 44 testes passando após correções de volume identificadas em revisão parcial.
 - UI: 33 testes de labels, adaptador, erros e configuração de agenda passaram.
 - TypeScript estrito e build Vite: passaram.
 - Fixtures: geradas, três alunos sintéticos; nenhuma exportação real versionada.
@@ -23,8 +23,8 @@ https://github.com/mcpmieda/coletor-frequencia-smecel/actions/runs/38007936337.
 
 Não afirmar equivalência pixel a pixel ao Atualizador nem QA nativo Windows.
 A referência visual é o código de UI do Atualizador 1.3.0, e não um novo conceito
-raster: foram preservados HeroUI v3, tokens de accent claro/escuro, fonte Segoe UI,
-barra lateral de 256px, marca em bloco verde, controles e navegação correspondentes.
+raster: foram preservados HeroUI v3, fonte Segoe UI, barra lateral de 256px, controles e
+navegação correspondentes. A marca mudou para vermelho/bordô por pedido explícito.
 A tela funcional foi adaptada ao diário; não contém estados de sincronização falsos.
 
 ## Limitações importantes
@@ -42,10 +42,10 @@ prévia escura e viewport móvel. O script verifica 1440×1000, 1240×820 (taman
 e 390×844. Consulte a execução do commit na PR para o resultado mais recente.
 
 Comparação com os fontes de identidade do Atualizador:
-1. Paleta: tokens de accent claros/escuros exatos, verde Excel aplicado nos botões e seleção.
+1. Paleta: vermelho/bordô próprio do coletor; contrastes de texto e botões testados nos dois temas.
 2. Tipografia: família Segoe UI Variable Text/Segoe UI declarada; CI Linux usa fallback,
    portanto a aparência exata da fonte precisa de QA no Windows.
-3. Navegação: barra lateral 256px, marca em quadrado verde e ícones Lucide lineares.
+3. Navegação: barra lateral 256px, marca em quadrado da cor principal e ícones Lucide lineares.
 4. Controles: Button/Chip/TextField/Select reais do HeroUI 3.2.6, sem simulação raster.
 5. Estados: claro/escuro/automático, vazio, erro, carga, prévia, filtros e paginação funcionais.
 6. Responsividade: overflow de página corrigido; a tabela conserva rolagem própria.
@@ -64,3 +64,11 @@ conferem todos os horários, fuso confirmado, schema, validação, persistência
 limites e recuperação visível de armazenamento inválido. O smoke de UI cobre edição,
 erro, salvamento/reabertura, navegação sem perder rascunho, descarte e restauração,
 além de capturas claras/escuras e mobile. Resultado remoto vinculado ao commit da PR.
+
+## Mudança de paleta solicitada
+
+Após a agenda passar o CI completo f41c81ff19caa811a8068d894256dfcc7ddd6b7b
+(run 38009482329), a marca mudou para vermelho/bordô a pedido do usuário. Testes
+medem contraste de texto/controles (mínimo 4,5:1) e foco (3:1), preservando verde
+semântico para presença explícita. Erros também têm texto, role alert e borda;
+nunca dependem apenas da cor da marca. QA visual deve conferir o novo SHA da PR.
