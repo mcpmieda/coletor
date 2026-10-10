@@ -369,6 +369,7 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
         evidence["status"] = "failed"
         evidence["failure"] = str(error) if isinstance(error, SmokeFailure) else "window_check_failed"
         evidence["error_type"] = type(error).__name__
+        evidence["failure_stage"] = evidence["stage"]
     finally:
         write_json(Path(evidence.pop("_worker_output")), evidence)
         window.destroy()
@@ -406,7 +407,7 @@ def run_worker(args) -> int:
     except BaseException as error:
         evidence["status"] = "failed"
         evidence.setdefault("failure", str(error) if isinstance(error, SmokeFailure) else "worker_failed")
-        evidence["error_type"] = type(error).__name__
+        evidence.setdefault("error_type", type(error).__name__)
         return_code = 1
     evidence.pop("_worker_output", None)
     write_json(args.worker_output, evidence)
@@ -435,29 +436,43 @@ def run_orchestrator(args) -> int:
                        "--worker", "--package-root", str(args.package_root), "--output-dir", str(args.output_dir),
                        "--worker-output", str(worker_output)]
             job = WindowsJob()
-            evidence["stage"] = "spawn_bundled_runtime"
-            process = subprocess.Popen(command, cwd=temporary, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.DEVNULL, close_fds=True)
-            job.assign(process.pid)
-            evidence["stage"] = "native_window_test"
             try:
-                process.communicate(input=b"RUN\n", timeout=args.timeout)
-            except subprocess.TimeoutExpired:
-                evidence["failure"] = "native_window_timeout"
+                evidence["stage"] = "spawn_bundled_runtime"
+                process = subprocess.Popen(command, cwd=temporary, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL, close_fds=True)
+                job.assign(process.pid)
+                evidence["stage"] = "native_window_test"
+                try:
+                    process.communicate(input=b"RUN\n", timeout=args.timeout)
+                except subprocess.TimeoutExpired:
+                    evidence["failure"] = "native_window_timeout"
+                finally:
+                    evidence["cleanup"] = job.finish(grace=0 if process.poll() is None else 5)
+                    process.wait(timeout=10)
+                    evidence["worker_exit_code"] = process.returncode
+                    if worker_output.is_file():
+                        evidence["worker"] = json.loads(worker_output.read_text(encoding="utf-8"))
+                worker = evidence.get("worker", {})
+                passed = process.returncode == 0 and worker.get("status") == "passed" and all(
+                    worker.get("checks", {}).get(key) is True for key in REQUIRED_CHECKS)
+                if "failure" not in evidence and passed and evidence["cleanup"]["verified"]:
+                    evidence["status"] = "passed"
+                    evidence["stage"] = "complete"
+                else:
+                    evidence.setdefault("failure", "native_window_smoke_failed")
             finally:
-                evidence["cleanup"] = job.finish(grace=0 if process.poll() is None else 5)
-                process.wait(timeout=10)
-                evidence["worker_exit_code"] = process.returncode
-                if worker_output.is_file():
-                    evidence["worker"] = json.loads(worker_output.read_text(encoding="utf-8"))
-            worker = evidence.get("worker", {})
-            passed = process.returncode == 0 and worker.get("status") == "passed" and all(
-                worker.get("checks", {}).get(key) is True for key in REQUIRED_CHECKS)
-            if "failure" not in evidence and passed and evidence["cleanup"]["verified"]:
-                evidence["status"] = "passed"
-                evidence["stage"] = "complete"
-            else:
-                evidence.setdefault("failure", "native_window_smoke_failed")
+                # Release the worker's current-directory handle before deleting
+                # its temporary directory, including failures at the stdin gate.
+                if job is not None:
+                    try:
+                        if "cleanup" not in evidence:
+                            evidence["cleanup"] = job.finish(grace=0)
+                    finally:
+                        job.close()
+                        job = None
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=10)
     except BaseException as error:
         evidence["failure"] = str(error) if isinstance(error, SmokeFailure) else "orchestrator_failed"
         evidence["error_type"] = type(error).__name__
