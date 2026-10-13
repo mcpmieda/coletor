@@ -34,6 +34,7 @@ class Student:
 class AttendanceRecord:
     source_student_ref: str
     date: str
+    # Native cell position (capacity), not evidence of a class held that day.
     lesson: int
     state: AttendanceState
     source_symbol: str
@@ -42,6 +43,7 @@ class AttendanceRecord:
 @dataclass(frozen=True)
 class SnapshotSummary:
     students: int
+    # Count of normalized source positions, including unmarked cells.
     records: int
     states: dict[str, int]
     blocking_issues: int

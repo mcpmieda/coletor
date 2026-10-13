@@ -89,3 +89,18 @@ Não cortar automaticamente a sexta posição nem mudar a fórmula da frequênci
 por divergência com essa planilha. A conciliação entre grade, calendário e
 semântica nativa permanece uma decisão funcional antes da integração.
 
+
+## Capacidade diária esclarecida pelo responsável em 13/10/2026
+
+No formato atual, o cabeçalho comporta posições 1–6. O uso varia conforme o dia:
+quatro, cinco, seis ou nenhuma posição marcada não alteram a capacidade da
+grade. `lesson` é o número da posição nativa, não aula ministrada comprovada.
+`summary.records` conta posições normalizadas, incluindo vazios; não é total
+de aulas ou denominador de frequência. A UI usa “Posição” e mantém ponto “sem
+confirmação”. Vazio nunca vira presença, falta ou aula realizada. X explícito
+permanece na posição de origem, inclusive na sexta, sem ser apagado por horários.
+
+Não há configuração de quantidade de aulas por dia/turno nesta entrega. O
+responsável optou por manter esse escopo; percentuais/aulas previstas exigiriam
+calendário, exceções e contrato próprio, sem dedução pelo horário de coleta.
+Cabeçalhos de capacidade diferente de seis seguem sem suporte e falham fechado.

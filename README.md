@@ -125,8 +125,10 @@ Trabalho em draft PR. Sem merge, deploy, release, instalador ou escrita em produ
 ## Revalidação da auditoria #3
 
 Consulte a [matriz, regressões, medições e pendências administrativas](docs/AUDIT_3_REMEDIATION.md).
-O leitor suporta o formato observado de **seis posições**; 4/5/7 posições são
-rejeitadas para conferência. Um contrato compartilhado limita HTML a 24 MiB,
+O leitor suporta cabeçalho com **capacidade de seis posições por dia**. Isso
+não significa seis aulas realizadas: dias podem usar menos posições ou não ter
+marcações. Vazios ficam sem marcação; pontos ficam sem confirmação. Cabeçalhos
+de capacidade 4/5/7 continuam rejeitados para conferência, sem cortar posições. Um contrato compartilhado limita HTML a 24 MiB,
 pedido JSON a 48 MiB + 64 KiB, até 64 fichas e 130 mil registros. Esses são tetos
 defensivos com regressão sintética, não garantia para qualquer captura real.
 “Descartar resultado” mantém a leitura ativa e impede nova leitura até terminar.

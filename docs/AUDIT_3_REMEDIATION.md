@@ -99,7 +99,7 @@ conector. Não confundir verificação de configuração com teste destrutivo ex
 
 ## Fontes e critério de encerramento
 
-Validação local desta correção: 120 testes Python; 63 testes UI; lint, tipos e
+Validação local desta correção: 124 testes Python; 63 testes UI; lint, tipos e
 build; cobertura 90% conjunta em parser/validação/configurações (mínimo 80%);
 SCA npm/Python sem vulnerabilidades conhecidas nos conjuntos finais consultados (runtime, testes e build);
 Bandit selecionado sem achados; Gitleaks em 18 commits sem achados após triagem
@@ -177,3 +177,19 @@ análise inicial precisam conferência. Não forçar análise sem código útil,
 plano ou tornar o Sonar obrigatório antes de obter um check real neste repo.
 Alternativa de scanner no CI requer configuração/credencial própria; não foi
 criado token. O pedido Sonar permanece separado do código da auditoria validado.
+
+
+### Aceite de escopo AUD-003 em 13/10/2026
+
+O responsável esclareceu e aceitou que seis é **capacidade de posições no dia**,
+com uso variável e sem configuração adicional de quantidade por dia/turno.
+O parser já preservava vazios como `unmarked` e pontos como `planned_unknown`,
+sem inventar presença, falta ou aula ministrada. Regressões específicas cobrem
+4/5/6 posições marcadas dentro dessa capacidade, dia totalmente vazio, dia não
+letivo explicitamente marcado e X na sexta posição com as outras cinco vazias.
+A UI diferencia “Posição” de aula efetiva e ponto de presença confirmada.
+Não foi inventado calendário nem ampliado suporte a cabeçalhos 4/5/7.
+
+A integração PR #4 → PR #1 → main foi autorizada sob revisão independente e
+CI do SHA exato, sem bypass. Isso não autoriza release, instalação, login,
+coleta, transmissão ou deploy. A autorização de acesso do Sonar é separada.

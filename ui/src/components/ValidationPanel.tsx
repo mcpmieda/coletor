@@ -70,7 +70,7 @@ export default function ValidationPanel({ preview }: { preview: Preview }) {
     {issues.length > 0 && <details className="validation-issue"><summary>Ver detalhes ({issues.length} diagnósticos)</summary>
       <p>Marcações repetidas na mesma ficha são agrupadas pelo leitor. A localização abaixo é a primeira registrada.</p>
       <label>Filtrar código <select value={filter} onChange={e => { setFilter(e.target.value); setPage(0); }}><option value="">Todos</option>{[...new Set(issues.map(i => i.code))].map(code => <option key={code}>{code}</option>)}</select></label>
-      {details.map((issue, i) => <p key={`${issue.code}:${current}:${i}`}><strong>{issue.code}</strong> · {issue.source_student_ref ?? 'Documento'}{issue.date ? ` · ${issue.date}` : ''}{issue.lesson ? ` · aula ${issue.lesson}` : ''}<br />{issue.message}</p>)}
+      {details.map((issue, i) => <p key={`${issue.code}:${current}:${i}`}><strong>{issue.code}</strong> · {issue.source_student_ref ?? 'Documento'}{issue.date ? ` · ${issue.date}` : ''}{issue.lesson ? ` · posição ${issue.lesson}` : ''}<br />{issue.message}</p>)}
       <div><button disabled={current === 0} onClick={() => setPage(current - 1)}>Anterior</button><span> Página {current + 1} de {pages} </span><button disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Próxima</button></div>
     </details>}
     <div className="blocked-note"><strong>Envio desativado</strong><p>Esta versão não está conectada ao Ecossistema.</p></div>

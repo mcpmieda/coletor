@@ -75,7 +75,9 @@ test('the attendance table keeps uncertainty and every observed state distinct',
   expect(html).toContain('Aluno não conferido');
   expect(html).toContain('Registros do diário; os alunos e as matrículas ainda precisam de conferência');
   expect(STATE_LABELS.planned_unknown).toContain('sem confirmação');
-  expect(STATE_LABELS.planned_unknown).toContain('prevista');
+  expect(STATE_LABELS.planned_unknown).toContain('Ponto');
+  expect(html).toContain('<th>Posição</th>');
+  expect(html).not.toContain('<th>Aula</th>');
   expect(STATE_LABELS.outside_enrollment).toContain('período de matrícula');
   for (const label of Object.values(STATE_LABELS)) expect(html).toContain(label);
   expect(new Set(Object.values(STATE_LABELS)).size).toBe(Object.keys(STATE_LABELS).length);

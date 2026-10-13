@@ -8,7 +8,7 @@ test('details retain both cards, first location, pagination and private header e
   const html = renderToStaticMarkup(<ValidationPanel preview={preview} />);
   expect(html).toContain('25 fichas identificadas');
   expect(html).toContain('row:1'); expect(html).toContain('row:2');
-  expect(html).toContain('2026-02-01'); expect(html).toContain('aula 2');
+  expect(html).toContain('2026-02-01'); expect(html).toContain('posição 2');
   expect(html).toContain('Página 1 de 2'); expect(html).not.toContain('row:21');
   expect(html).not.toContain('display_name');
 });
