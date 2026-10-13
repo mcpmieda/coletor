@@ -97,7 +97,7 @@ de escrita em main foi feito nesta entrega.
 
 ## Fontes e critério de encerramento
 
-Validação local desta correção: 120 testes Python; 60 testes UI; lint, tipos e
+Validação local desta correção: 120 testes Python; 63 testes UI; lint, tipos e
 build; cobertura 90% conjunta em parser/validação/configurações (mínimo 80%);
 SCA npm/Python sem vulnerabilidades conhecidas nos conjuntos finais consultados (runtime, testes e build);
 Bandit selecionado sem achados; Gitleaks em 18 commits sem achados após triagem
@@ -128,3 +128,12 @@ O gate de CI passou a auditar também esse lock. Download local verificou hashes
 dos oito artefatos runtime; uma SHA-256 deliberadamente incorreta foi rejeitada
 pelo pip antes de instalar qualquer pacote. Compatibilidade Python 3.13 do
 pacote final continua responsabilidade do job Windows.
+
+A revisão independente encontrou e motivou mais duas regressões de recarga:
+avisos de recovery não podem virar sucesso silencioso; edição/gravação não podem
+concorrer com resposta tardia da recarga. O adaptador agora serializa leitura e
+gravação e preserva `reply.notice`. A UI trava seus controles até a resposta e
+mostra o aviso recebido. Testes unitários e QA renderizado com bridge sintética
+pendente cobrem recovery por corrupção/inacessibilidade, recarga seguida de save
+e impossibilidade de editar/salvar durante recarga. Novas alterações depois da
+conclusão permanecem no rascunho e no save seguinte.

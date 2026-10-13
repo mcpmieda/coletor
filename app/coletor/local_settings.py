@@ -89,7 +89,7 @@ class ScheduleConflict(ValueError):
 
 
 class LocalSettings:
-    """Only this fixed JSON file is used; construction performs no filesystem IO."""
+    """Fixed preference JSON and lock sidecar; construction performs no IO."""
     def __init__(self, directory=None):
         self._directory = Path(directory) if directory is not None else user_settings_directory()
         self._path = self._directory / "settings.json"

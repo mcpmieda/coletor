@@ -96,9 +96,15 @@ export async function saveLocalFox(fox: FoxPreferences) {
 
 
 export async function reloadLocalSchedule() {
-  if (nativeMode) {
+  if (!nativeMode) return readLocalSchedule();
+  const task = writeQueue.then(async () => {
     if (!bridge) throw new Error('Não foi possível recarregar os horários.');
-    cached = accept(await bridge.get_local_settings());
-  }
-  return readLocalSchedule();
+    const reply = await bridge.get_local_settings();
+    cached = accept(reply);
+    notice = 'notice' in reply ? reply.notice ?? '' : '';
+    listeners.forEach(listener => listener());
+    return readLocalSchedule();
+  });
+  writeQueue = task.then(() => {}, () => {});
+  return task;
 }

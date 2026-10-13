@@ -206,7 +206,36 @@ try:
         page.get_by_role('heading',name='Vamos conferir a frequência?').wait_for()
         page.evaluate('delete window.pywebview; delete window.finishSyntheticRead')
         assert not errors, errors
-        print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion.')
+        # Independent review: recovery notice and pending reload/edit/save race.
+        import json as json_module
+        config = {'schemaVersion':1,'scope':'school','storageMode':'local-preview','localRevision':0,'sharedRevision':None,'timezone':'America/Bahia','rules':json_module.loads((root/'ui/src/schedule-presets.json').read_text(encoding='utf-8'))['rules']}
+        prefs = {'schemaVersion':1,'schedule':config,'theme':'light','fox':{'version':1,'show':True,'animate':False}}
+        recovery_page=browser.new_page(viewport={'width':1440,'height':1000},locale='pt-BR')
+        recovery_page.on('pageerror',lambda error: errors.append(str(error)))
+        recovery_page.add_init_script("window.syntheticSettings="+json_module.dumps(prefs)+";window.syntheticSaves=[];window.settingsReads=0;window.pywebview={api:{get_local_settings:()=>++window.settingsReads===1?Promise.resolve({settings:window.syntheticSettings}):new Promise(resolve=>window.finishReload=resolve),save_schedule:schedule=>{window.syntheticSaves.push(schedule);window.syntheticSettings.schedule=schedule;return Promise.resolve({settings:window.syntheticSettings});}}};")
+        recovery_page.goto(url)
+        recovery_page.get_by_role('button',name='Horários de coleta',exact=True).click()
+        recovery_page.get_by_role('button',name='Recarregar e descartar alterações').click()
+        field = recovery_page.get_by_label('Buscar frequência Segunda-feira Manhã',exact=True)
+        expect(field).to_be_disabled()
+        expect(recovery_page.get_by_role('button',name='Salvar horários')).to_be_disabled()
+        expect(recovery_page.get_by_label('Fuso horário da escola')).to_be_disabled()
+        expect(recovery_page.get_by_role('button',name='Usar sugestão')).to_be_disabled()
+        recovery_page.get_by_role('button',name='Salvar horários').evaluate('button=>button.click()')
+        assert recovery_page.evaluate('window.syntheticSaves.length')==0
+        recovery='Não foi possível ler as configurações salvas. Mostramos as sugestões; salve para guardar novamente.'
+        recovery_page.evaluate('reply=>window.finishReload(reply)',{'settings':prefs,'notice':recovery})
+        expect(field).to_be_enabled()
+        assert recovery_page.get_by_text(recovery,exact=True).count()>=1
+        assert recovery_page.get_by_text('Horários salvos recarregados.',exact=True).count()==0
+        field.fill('08:15, 09:00, 09:55, 11:05, 11:55')
+        recovery_page.get_by_role('button',name='Salvar horários').click()
+        expect(recovery_page.get_by_text('Horários salvos só neste computador.',exact=True)).to_be_visible()
+        assert recovery_page.evaluate('window.syntheticSaves[0].rules[0].times[0]')=='08:15'
+        recovery_page.screenshot(path=str(out/'schedule-recovery-after-save.png'),full_page=True,animations='disabled')
+        recovery_page.close()
+        assert not errors,errors
+        print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion; schedule reload preserves recovery notice and blocks editing/saving until completion.')
         print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox preference persists','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','fox animation toggle','roadmap screenshots in both themes','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:
