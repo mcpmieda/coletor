@@ -1,0 +1,172 @@
+{
+  "source": {
+    "file": "HORARIO 2026.xlsb",
+    "version": 75,
+    "internalDate": "22/06",
+    "sha256": "270a8bcb1873987a5fc904277146bfddd07986d18e52db342466241031bd62e7"
+  },
+  "rules": [
+    {
+      "weekday": 1,
+      "shift": "matutino",
+      "selected": true,
+      "times": [
+        "08:05",
+        "09:00",
+        "09:55",
+        "11:05",
+        "11:55"
+      ],
+      "reconciliation": "12:15"
+    },
+    {
+      "weekday": 2,
+      "shift": "matutino",
+      "selected": true,
+      "times": [
+        "07:55",
+        "08:40",
+        "09:25",
+        "10:10",
+        "11:10",
+        "11:55"
+      ],
+      "reconciliation": "12:15"
+    },
+    {
+      "weekday": 3,
+      "shift": "matutino",
+      "selected": true,
+      "times": [
+        "08:05",
+        "09:00",
+        "09:55",
+        "11:05",
+        "11:55"
+      ],
+      "reconciliation": "12:15"
+    },
+    {
+      "weekday": 4,
+      "shift": "matutino",
+      "selected": true,
+      "times": [
+        "07:55",
+        "08:40",
+        "09:25",
+        "10:10",
+        "11:10",
+        "11:55"
+      ],
+      "reconciliation": "12:15"
+    },
+    {
+      "weekday": 5,
+      "shift": "matutino",
+      "selected": true,
+      "times": [
+        "08:40",
+        "09:25",
+        "10:10",
+        "11:10",
+        "11:55"
+      ],
+      "reconciliation": "12:15"
+    },
+    {
+      "weekday": 6,
+      "shift": "matutino",
+      "selected": false,
+      "times": [],
+      "reconciliation": ""
+    },
+    {
+      "weekday": 7,
+      "shift": "matutino",
+      "selected": false,
+      "times": [],
+      "reconciliation": ""
+    },
+    {
+      "weekday": 1,
+      "shift": "vespertino",
+      "selected": true,
+      "times": [
+        "14:20",
+        "15:15",
+        "16:25",
+        "17:20",
+        "18:10"
+      ],
+      "reconciliation": "18:30"
+    },
+    {
+      "weekday": 2,
+      "shift": "vespertino",
+      "selected": true,
+      "times": [
+        "14:10",
+        "14:55",
+        "15:40",
+        "16:40",
+        "17:25",
+        "18:10"
+      ],
+      "reconciliation": "18:30"
+    },
+    {
+      "weekday": 3,
+      "shift": "vespertino",
+      "selected": true,
+      "times": [
+        "14:20",
+        "15:15",
+        "16:25",
+        "17:20",
+        "18:10"
+      ],
+      "reconciliation": "18:30"
+    },
+    {
+      "weekday": 4,
+      "shift": "vespertino",
+      "selected": true,
+      "times": [
+        "14:10",
+        "14:55",
+        "15:40",
+        "16:40",
+        "17:25",
+        "18:10"
+      ],
+      "reconciliation": "18:30"
+    },
+    {
+      "weekday": 5,
+      "shift": "vespertino",
+      "selected": true,
+      "times": [
+        "14:10",
+        "14:55",
+        "15:40",
+        "16:40",
+        "17:25"
+      ],
+      "reconciliation": "18:30"
+    },
+    {
+      "weekday": 6,
+      "shift": "vespertino",
+      "selected": false,
+      "times": [],
+      "reconciliation": ""
+    },
+    {
+      "weekday": 7,
+      "shift": "vespertino",
+      "selected": false,
+      "times": [],
+      "reconciliation": ""
+    }
+  ]
+}

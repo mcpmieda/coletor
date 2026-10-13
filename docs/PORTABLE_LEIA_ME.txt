@@ -1,0 +1,65 @@
+COLETOR DE FREQUÊNCIA — 0.1.0 TESTE
+Pacote portátil para Windows de 64 bits
+
+COMO ABRIR
+1. Baixe o arquivo ZIP completo.
+2. Clique com o botão direito e escolha "Extrair tudo".
+3. Na pasta extraída, abra "Abrir Coletor.cmd".
+Mantenha a pasta "programa" junto desse arquivo.
+
+Não precisa instalar Python. Não precisa executar como administrador.
+O computador precisa ter WebView2 e .NET Framework 4.8 existentes.
+Este pacote não instala dependências automaticamente.
+
+O QUE VOCÊ PODE TESTAR
+- Usar dados de exemplo, sem alunos reais.
+- Abrir um diário HTML escolhido por você e conferir a leitura.
+- Ajustar os horários, tema e preferências da raposa.
+- Usar "Ocultar na bandeja" e mostrar a mesma janela pelo ícone.
+- Menu da bandeja: Mostrar janela, Ocultar janela e Sair.
+Clique esquerdo ou duplo no ícone também mostra a janela.
+O Windows pode colocar o ícone entre os ícones ocultos.
+
+LIMITES IMPORTANTES
+Não faz login, não busca dados no Smecel, não envia ao Ecossistema
+e não acessa banco. Coleta automática e horários compartilhados não estão ativos.
+A bandeja controla somente a janela e informa espera, leitura local ou erro.
+Todo estado informa Coleta desligada.
+Uma marcação de aula prevista não confirma presença.
+
+CONFIGURAÇÕES LOCAIS
+Somente horários, tema e opções da raposa ficam na pasta própria
+ColetorFrequenciaSmecel, nos dados locais do seu usuário Windows.
+Não guarda alunos, HTML, senhas, cookies ou sessões do navegador.
+Configurações não são compartilhadas com outros computadores.
+Se o arquivo for inválido, mostra aviso e sugestões. Salve novamente para recuperar.
+O Atualizador de Planilhas usa arquivos separados e não é alterado.
+
+RAPOSA E MOVIMENTO
+A bandeja só anima durante leitura local. Em espera ou erro fica estática.
+Desmarque Animar raposa para desligar animações no painel e na bandeja.
+Movimento reduzido do sistema também é respeitado.
+Desmarque Mostrar raposa para ocultar o mascote e usar ícone neutro na bandeja.
+O ícone neutro mantém os controles de mostrar e sair.
+
+PARA FECHAR
+Fechar a janela pelo X encerra o programa.
+Ocultar na bandeja deixa apenas esta sessão aberta; não agenda coleta.
+Use Mostrar janela para voltar ou Sair para encerrar.
+Se a bandeja falhar, a janela continua disponível e pode ser fechada normalmente.
+
+SEGURANÇA
+Não cria tarefa de inicialização, conta, senha ou serviço.
+Se Windows ou antivírus bloquear, pare e peça ajuda. Não desative proteções.
+Python incluído é o runtime oficial. O coletor não tem assinatura digital própria.
+Não é instalador nem versão final para uso diário.
+
+COMPATIBILIDADE
+Windows 10/11 x64 com WebView2 e .NET Framework 4.8 existentes.
+O CI testa janela, preferências e bandeja no Windows antes de gerar o ZIP.
+Isso não certifica todos os computadores, leitores de tela ou escalas de DPI.
+Consulte MANIFEST.json e a PR privada para versão e evidências.
+
+LICENÇAS
+Python: pasta programa. Bibliotecas Python: programa/Lib/site-packages.
+Interface: LICENCAS-UI.txt.

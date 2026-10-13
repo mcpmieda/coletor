@@ -1,0 +1,32 @@
+# Segurança e privacidade
+
+- Nenhuma credencial ou sessão foi criada ou copiada para o projeto.
+- Não há rede de saída no backend de domínio; não há cliente PostgreSQL/API.
+- HTML não é renderizado: apenas texto/estrutura permitida entra no modelo.
+- Nenhum nome de aluno, corpo HTML ou credencial vai para logs.
+- Prévia do diário não é persistida; recarregar/fechar limpa dados da memória da interface.
+- Preferências de tema/mascote e agenda sem dados pessoais ficam em JSON validado
+  na pasta própria ColetorFrequenciaSmecel do perfil local Windows. A ponte oferece
+  somente setters específicos; não aceita caminho, chave arbitrária, HTML ou aluno.
+  No navegador de QA, permanece localStorage. O perfil WebView continua privado/efêmero.
+- Gravação atômica mantém o arquivo anterior se a substituição falhar. Arquivo
+  inválido produz sugestões e aviso sem log ou backup de seu conteúdo.
+- Arquivos reais, perfis Chromium, bancos locais, chaves e instaladores devem
+  permanecer fora do Git. .gitignore oferece defesa adicional, não substitui revisão.
+- Hash de snapshot garante determinismo/integridade interna; não prova autoria
+  da origem, autenticidade de uma matrícula ou autorização de envio.
+- MappingValidation é contrato interno futuro. Uma flag ou caixa na UI jamais
+  poderá fabricar um comprovante de validação da API.
+- Falha, diário incompleto ou símbolo desconhecido não gera deleção nem presença.
+- Não há execução automática ao iniciar Windows, serviço ou instalação.
+  A bandeja WinForms controla apenas a janela e mostra estados da leitura local.
+  Fechar pelo X ou Sair encerra a sessão; não agenda nem executa coleta.
+
+Antes de piloto: revisão de ameaça do perfil autenticado, cofre OS, transporte,
+revogação de dispositivo, lease/fencing, retenção mínima e controles por aluno;
+validação manual do parser em amostra autorizada sem inserir dados reais no Git.
+
+Limites defensivos: 8 MiB de HTML na interface/serviço, 64 fichas, 130 mil
+registros, 200 mil nós e diagnósticos agregados por código/ficha. Excesso de
+volume descarta a prévia parcial e mantém o envio bloqueado.
+

@@ -1,0 +1,2 @@
+# Windows development. The private portable test build uses a separate lock file.
+pywebview==6.1
