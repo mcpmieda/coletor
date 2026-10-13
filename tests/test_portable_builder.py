@@ -11,6 +11,22 @@ spec.loader.exec_module(builder)
 
 
 class PortableBuildTests(unittest.TestCase):
+    def test_manual_distribution_gate_rejects_missing_consent_isolation_and_cleanup(self):
+        native = {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
+                  "separate_edge_started", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                  "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "window_closed"}
+        report = {"status": "passed", "cleanup": {"verified": True, "remaining_processes": 0},
+                  "real_network": False, "real_credentials": False, "checks": {key: True for key in native}}
+        builder.validate_manual_evidence(report)
+        for key in native:
+            report["checks"][key] = False
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Manual"):
+                builder.validate_manual_evidence(report)
+            report["checks"][key] = True
+        report["cleanup"]["remaining_processes"] = 1
+        with self.assertRaisesRegex(ValueError, "Manual"):
+            builder.validate_manual_evidence(report)
+
     def test_tray_proof_cannot_omit_exit_or_motion_checks(self):
         checks = {"native_window_visible", "native_tray_registered", "native_menu_visible",
                   "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",

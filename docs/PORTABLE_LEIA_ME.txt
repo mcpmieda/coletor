@@ -1,4 +1,4 @@
-COLETOR DE FREQUÊNCIA — 0.1.0 TESTE
+COLETOR DE FREQUÊNCIA — 0.2.0 TESTE
 Pacote portátil para Windows de 64 bits
 
 COMO ABRIR
@@ -8,12 +8,14 @@ COMO ABRIR
 Mantenha a pasta "programa" junto desse arquivo.
 
 Não precisa instalar Python. Não precisa executar como administrador.
-O computador precisa ter WebView2 e .NET Framework 4.8 existentes.
+O computador precisa ter WebView2, .NET Framework 4.8 e Microsoft Edge existentes.
 Este pacote não instala dependências automaticamente.
 
 O QUE VOCÊ PODE TESTAR
 - Usar dados de exemplo, sem alunos reais.
 - Abrir um diário HTML escolhido por você e conferir a leitura.
+- Preparar sessão manual, confirmar abertura, entrar diretamente no site,
+  conferir turma/ano, confirmar leitura local e encerrar a sessão.
 - Ajustar os horários, tema e preferências da raposa.
 - Usar "Ocultar na bandeja" e mostrar a mesma janela pelo ícone.
 - Menu da bandeja: Mostrar janela, Ocultar janela e Sair.
@@ -21,8 +23,10 @@ Clique esquerdo ou duplo no ícone também mostra a janela.
 O Windows pode colocar o ícone entre os ícones ocultos.
 
 LIMITES IMPORTANTES
-Não faz login, não busca dados no Smecel, não envia ao Ecossistema
-e não acessa banco. Coleta automática e horários compartilhados não estão ativos.
+O operador pode entrar no Smecel em uma janela separada do Edge e autorizar
+uma leitura manual do diário da turma/ano confirmados. O coletor não digita
+senha nem confirma identidade da escola ou lista completa de alunos.
+Não envia ao Ecossistema e não acessa banco. Coleta automática e horários compartilhados não estão ativos.
 A bandeja controla somente a janela e informa espera, leitura local ou erro.
 Todo estado informa Coleta desligada.
 Uma marcação de aula prevista não confirma presença.
@@ -30,7 +34,10 @@ Uma marcação de aula prevista não confirma presença.
 CONFIGURAÇÕES LOCAIS
 Somente horários, tema e opções da raposa ficam na pasta própria
 ColetorFrequenciaSmecel, nos dados locais do seu usuário Windows.
-Não guarda alunos, HTML, senhas, cookies ou sessões do navegador.
+Não exporta alunos, HTML, senhas, cookies ou estado autenticado para arquivos.
+A sessão usa um contexto de navegador sem persistência e temporários próprios,
+removidos ao encerrar. Fechar o programa também encerra seus processos.
+Nunca use perfil pessoal do Edge, nem informe senha no coletor.
 Configurações não são compartilhadas com outros computadores.
 Se o arquivo for inválido, mostra aviso e sugestões. Salve novamente para recuperar.
 O Atualizador de Planilhas usa arquivos separados e não é alterado.
@@ -56,7 +63,10 @@ Não é instalador nem versão final para uso diário.
 
 COMPATIBILIDADE
 Windows 10/11 x64 com WebView2 e .NET Framework 4.8 existentes.
-O CI testa janela, preferências e bandeja no Windows antes de gerar o ZIP.
+O CI testa janela, preferências, bandeja e sessão manual com dados fictícios no Windows antes de gerar o ZIP.
+O fluxo real de login/SSO e diário ainda requer validação autorizada com o operador.
+Somente HTTPS em www.smecel.com.br é permitido; outros domínios ficam bloqueados.
+Se a página precisar de outro domínio, pare: não amplie acesso nem desative proteção.
 Isso não certifica todos os computadores, leitores de tela ou escalas de DPI.
 Consulte MANIFEST.json e a PR privada para versão e evidências.
 

@@ -47,5 +47,8 @@ def run_desktop(callback=None, settings_directory=None):
     try:
         webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)
     finally:
-        if api._tray is not None: api._tray.stop()
+        try:
+            api._manual_session.close()
+        finally:
+            if api._tray is not None: api._tray.stop()
 

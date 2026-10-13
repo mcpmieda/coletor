@@ -18,7 +18,7 @@ import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-teste"
+VERSION = "0.2.0-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -112,7 +112,8 @@ def build(output, source_commit):
         "built_at": datetime.now(timezone.utc).isoformat(), "platform": "windows-x64",
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,
         "python_archive_sha256": PYTHON_SHA256, "packages": packages,
-        "production_access": False, "automatic_collection": False,
+        "production_access": "manual-source-read-only-with-operator-confirmation", "automatic_collection": False,
+        "transmission_enabled": False, "real_source_qa": "pending-authorized-operator-validation",
         "credentials_included": False, "tray_enabled": True,
         "native_smoke": "must-pass-before-zip", "files": []}
     for p in sorted(bundle.rglob("*")):
@@ -146,7 +147,21 @@ def validate_tray_evidence(report):
             raise ValueError("Native tray test must pass before creating a distributable")
 
 
-def package_zip(output, evidence, settings_evidence=None, tray_evidence=None):
+def validate_manual_evidence(report, browser=False):
+    required = ({"external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
+                 "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
+                 "ephemeral_context_closed", "owned_processes_stopped"} if browser else
+                {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
+                 "separate_edge_started", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                 "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "window_closed"})
+    if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
+            or report.get("cleanup", {}).get("remaining_processes") != 0
+            or report.get("real_network") is not False or report.get("real_credentials") is not False
+            or not all(report.get("checks", {}).get(key) is True for key in required)):
+        raise ValueError("Manual session QA must pass before creating a distributable")
+
+
+def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, manual_evidence=None, browser_evidence=None):
     bundle = output / NAME
     report = json.loads(evidence.read_text(encoding="utf-8"))
     if report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True:
@@ -168,11 +183,16 @@ def package_zip(output, evidence, settings_evidence=None, tray_evidence=None):
     if tray_evidence is None:
         raise ValueError("Native tray test must pass before creating a distributable")
     validate_tray_evidence(json.loads(tray_evidence.read_text(encoding="utf-8")))
+    if manual_evidence is None or browser_evidence is None:
+        raise ValueError("Manual session QA must pass before creating a distributable")
+    validate_manual_evidence(json.loads(manual_evidence.read_text(encoding="utf-8")))
+    validate_manual_evidence(json.loads(browser_evidence.read_text(encoding="utf-8")), browser=True)
     manifest_path = bundle / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["native_smoke"] = "passed-in-private-windows-ci"
     manifest["local_settings_smoke"] = "passed-in-private-windows-ci"
     manifest["tray_smoke"] = "passed-in-private-windows-ci"
+    manifest["manual_session_smoke"] = "passed-synthetic-native-and-external-edge"
     manifest["tray_scope"] = "same-window-show-hide-exit; local-preview-state; no-autostart-or-collection"
     manifest["local_settings"] = "agenda-theme-fox-only; private-browser-profile"
     for item in manifest["files"]:
@@ -196,9 +216,11 @@ if __name__ == "__main__":
     parser.add_argument("--package", type=Path, help="Successful native smoke JSON")
     parser.add_argument("--settings-evidence", type=Path, help="Successful native settings close/reopen/recovery JSON")
     parser.add_argument("--tray-evidence", type=Path, help="Successful native notification-area flows JSON")
+    parser.add_argument("--manual-evidence", type=Path, help="Successful native manual-session flow JSON")
+    parser.add_argument("--browser-evidence", type=Path, help="Successful isolated Edge synthetic QA JSON")
     args = parser.parse_args()
     if args.package:
-        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence)
+        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence, args.manual_evidence, args.browser_evidence)
     else:
         build(args.output, args.source_commit or "")
 
