@@ -15,11 +15,7 @@ import unicodedata
 from .models import AnnualSnapshot, AttendanceRecord, Issue, SnapshotSummary, Student
 from .validation import canonical_snapshot_id
 
-MAX_HTML_BYTES = 16 * 1024 * 1024
-MAX_STUDENTS = 64
-MAX_RECORDS = 130_000
-MAX_ISSUES = 1_000
-MAX_NODES = 200_000
+from .limits import MAX_HTML_BYTES, MAX_STUDENTS, MAX_RECORDS, MAX_ISSUES, MAX_NODES
 
 
 class _VolumeExceeded(ValueError):

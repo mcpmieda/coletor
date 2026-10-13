@@ -1,4 +1,6 @@
 import { ShieldCheck, CircleAlert } from 'lucide-react';
+import { useState } from 'react';
+import { collectDiagnostics, groupDiagnostics } from '../diagnostics';
 import type { Preview } from '../types';
 
 // Keep the source diagnostics intact; only the wording shown first is simplified.
@@ -11,6 +13,7 @@ const ISSUE_LABELS: Record<string, string> = {
   REPORT_STRUCTURE_UNSUPPORTED: 'Não foi possível reconhecer o diário anual.',
   REPORT_VOLUME_EXCEEDED: 'Há dados demais neste arquivo. A prévia foi descartada.',
   SYNTHETIC_DATA: 'Este exemplo usa alunos fictícios.',
+  SYNTHETIC_TRANSMISSION_FORBIDDEN: 'Dados de exemplo não podem ser enviados.',
   ROSTER_EMPTY: 'Não foram encontradas fichas de alunos.',
   ROSTER_INCOMPLETE: 'A quantidade de fichas não confere.',
   ROSTER_COMPLETENESS_UNVERIFIED: 'Não foi possível confirmar se todos os alunos estão no arquivo.',
@@ -52,16 +55,24 @@ const ISSUE_LABELS: Record<string, string> = {
 };
 
 export default function ValidationPanel({ preview }: { preview: Preview }) {
-  const issues = [...preview.snapshot.issues, ...preview.validation.issues].filter((issue, index, all) => all.findIndex(i => i.code === issue.code && i.message === issue.message) === index);
-  // These two checks are always visible below, including when the file has no issues.
-  const extraIssues = issues.filter(issue => !['SOURCE_SYMBOL_AMBIGUOUS', 'API_MAPPING_REQUIRED'].includes(issue.code))
-    .map(issue => ({ ...issue, label: ISSUE_LABELS[issue.code] ?? 'Este aviso precisa de conferência. Veja os detalhes.' }))
-    .filter((issue, index, all) => all.findIndex(i => i.severity === issue.severity && i.label === issue.label) === index);
+  const [page, setPage] = useState(0);
+  const [filter, setFilter] = useState('');
+  const issues = collectDiagnostics(preview.snapshot.issues, preview.validation.issues);
+  const extraIssues = groupDiagnostics(issues.filter(issue => !['SOURCE_SYMBOL_AMBIGUOUS', 'API_MAPPING_REQUIRED', 'TRANSMISSION_DISABLED', 'SOURCE_PROVENANCE_REQUIRED'].includes(issue.code)));
+  const filtered = issues.filter(issue => !filter || issue.code === filter);
+  const pages = Math.max(1, Math.ceil(filtered.length / 20));
+  const current = Math.min(page, pages - 1);
+  const details = filtered.slice(current * 20, (current + 1) * 20);
   return <section className="panel checks" aria-labelledby="checks-title"><h2 id="checks-title">O que conferir</h2>
     <div className="check-row"><ShieldCheck size={18} /><div><strong>Nenhum dado foi enviado</strong><p>Esta é uma prévia neste computador.</p></div></div>
     <div className="check-row"><CircleAlert size={18} /><div><strong>• não confirma presença</strong><p>Os alunos, as matrículas e o calendário ainda precisam de conferência.</p></div></div>
-    {extraIssues.map((issue, i) => <div key={`${issue.code}:${i}`} className={`validation-issue ${issue.severity}`}><span className="issue-label">{issue.severity === 'error' ? 'Atenção' : 'Aviso'}</span><p>{issue.label}</p></div>)}
-    {issues.length > 0 && <details className="validation-issue"><summary>Ver detalhes ({issues.length})</summary>{issues.map((issue, i) => <p key={`${issue.code}:${i}`}>{issue.message}</p>)}</details>}
+    {extraIssues.map(({ issue, diagnostics, cards }) => <div key={`${issue.severity}:${issue.code}`} className={`validation-issue ${issue.severity}`}><span className="issue-label">{issue.severity === 'error' ? 'Atenção' : 'Aviso'}</span><p>{ISSUE_LABELS[issue.code] ?? 'Este aviso precisa de conferência. Veja os detalhes.'}</p><small>{diagnostics} diagnósticos · {cards.size} fichas identificadas</small></div>)}
+    {issues.length > 0 && <details className="validation-issue"><summary>Ver detalhes ({issues.length} diagnósticos)</summary>
+      <p>Marcações repetidas na mesma ficha são agrupadas pelo leitor. A localização abaixo é a primeira registrada.</p>
+      <label>Filtrar código <select value={filter} onChange={e => { setFilter(e.target.value); setPage(0); }}><option value="">Todos</option>{[...new Set(issues.map(i => i.code))].map(code => <option key={code}>{code}</option>)}</select></label>
+      {details.map((issue, i) => <p key={`${issue.code}:${current}:${i}`}><strong>{issue.code}</strong> · {issue.source_student_ref ?? 'Documento'}{issue.date ? ` · ${issue.date}` : ''}{issue.lesson ? ` · aula ${issue.lesson}` : ''}<br />{issue.message}</p>)}
+      <div><button disabled={current === 0} onClick={() => setPage(current - 1)}>Anterior</button><span> Página {current + 1} de {pages} </span><button disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>Próxima</button></div>
+    </details>}
     <div className="blocked-note"><strong>Envio desativado</strong><p>Esta versão não está conectada ao Ecossistema.</p></div>
   </section>;
 }

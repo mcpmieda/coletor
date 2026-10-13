@@ -37,6 +37,13 @@ def validate_for_transmission(
     def block(code: str, message: str, ref: str | None = None) -> None:
         issues.append(Issue(code, "error", message, source_student_ref=ref))
 
+    # No trusted adapter or receipt verifier exists in this preview. Neither
+    # HTML attributes nor a local mapping object can establish authenticity.
+    block("TRANSMISSION_DISABLED", "Envio desativado nesta versão de prévia local.")
+    block("SOURCE_PROVENANCE_REQUIRED", "A origem precisa de validação externa autenticada, ainda não implementada.")
+    if snapshot.source_format.startswith("synthetic"):
+        block("SYNTHETIC_TRANSMISSION_FORBIDDEN", "Dados demonstrativos nunca podem compor um payload autorizado.")
+
     if snapshot.schema_version != "1.0":
         block("SNAPSHOT_SCHEMA_UNSUPPORTED", "Versão de snapshot não suportada.")
     if snapshot.snapshot_id != canonical_snapshot_id(snapshot):

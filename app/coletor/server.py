@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 from .service import preview, ROOT, MAX_HTML_BYTES
 from .demo import build_fixture
-MAX_REQUEST_BYTES = 10 * 1024 * 1024
+from .limits import MAX_REQUEST_BYTES
 
 
 class PreviewServer(ThreadingHTTPServer):
@@ -92,7 +92,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
         except ValueError:
             length = 0
         if not 0 < length <= MAX_REQUEST_BYTES:
-            self._json(413, {"error": "Arquivo ausente ou maior que o limite de 8 MB."})
+            self._json(413, {"error": "Pedido ausente ou acima do limite seguro de transporte (48 MiB + 64 KiB)."})
             return
         try:
             body = json.loads(self.rfile.read(length))

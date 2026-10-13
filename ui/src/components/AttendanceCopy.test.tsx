@@ -49,7 +49,7 @@ test('technical messages stay in closed details and the source data is unchanged
   const visible = withoutDetails(html);
   expect(visible).not.toMatch(/studentUid|contrato|\bAPI\b|backend|slots|proveniência|idempotência/i);
   expect(visible).toContain('Ainda falta definir como o Ecossistema receberá as faltas justificadas.');
-  expect(html).toContain('Ver detalhes (3)');
+  expect(html).toContain('Ver detalhes (3 diagnósticos)');
   expect(html).not.toMatch(/<details\b[^>]*\bopen(?:\s|=|>)/);
   for (const issue of issues) expect(html).toContain(issue.message);
   expect(JSON.stringify(preview)).toBe(original);

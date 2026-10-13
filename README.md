@@ -86,8 +86,8 @@ $env:PYTHONPATH = "app"
 
 Requer WebView2 já disponível. O launcher não instala nada no sistema, não
 registra tarefa de inicialização e usa perfil privado. A dependência desktop
-está fixada para desenvolvimento; empacotamento e runtime embutido serão uma
-etapa separada após validação em Windows.
+está fixada para desenvolvimento; o CI já monta e testa o pacote portátil
+com runtime embutido. Isso não autoriza instalação produtiva nem substitui QA no PC da escola.
 
 ## Verificações
 
@@ -121,3 +121,13 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 
 Trabalho em draft PR. Sem merge, deploy, release, instalador ou escrita em produção.
 
+
+## Revalidação da auditoria #3
+
+Consulte a [matriz, regressões, medições e pendências administrativas](docs/AUDIT_3_REMEDIATION.md).
+O leitor suporta o formato observado de **seis posições**; 4/5/7 posições são
+rejeitadas para conferência. Um contrato compartilhado limita HTML a 24 MiB,
+pedido JSON a 48 MiB + 64 KiB, até 64 fichas e 130 mil registros. Esses são tetos
+defensivos com regressão sintética, não garantia para qualquer captura real.
+“Descartar resultado” mantém a leitura ativa e impede nova leitura até terminar.
+Transmissão permanece bloqueada mesmo com metadados/recibo declarativos.

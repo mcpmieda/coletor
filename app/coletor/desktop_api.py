@@ -1,5 +1,5 @@
 """Desktop bridge for narrowly scoped non-secret local settings."""
-from .local_settings import LocalSettings, default_settings
+from .local_settings import LocalSettings, ScheduleConflict, default_settings
 from .service import PreviewApi
 from .desktop_state import DesktopState
 
@@ -52,6 +52,8 @@ class DesktopApi(PreviewApi):
     def _save(self, field, value):
         try:
             return {"settings": self._settings.update(field, value)}
+        except ScheduleConflict:
+            return {"error": "Os horários foram alterados em outra janela. Recarregue os horários salvos e compare antes de salvar novamente.", "code": "SCHEDULE_REVISION_CONFLICT"}
         except (OSError, ValueError, TypeError, RecursionError):
             return {"error": "Não foi possível salvar neste computador. Suas alterações continuam na tela."}
 

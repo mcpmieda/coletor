@@ -94,3 +94,11 @@ export async function saveLocalFox(fox: FoxPreferences) {
   else localStorage.setItem(FOX_KEY, JSON.stringify(fox));
 }
 
+
+export async function reloadLocalSchedule() {
+  if (nativeMode) {
+    if (!bridge) throw new Error('Não foi possível recarregar os horários.');
+    cached = accept(await bridge.get_local_settings());
+  }
+  return readLocalSchedule();
+}

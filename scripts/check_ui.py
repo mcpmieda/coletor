@@ -54,7 +54,10 @@ try:
         page.get_by_role('button', name='Usar dados de exemplo').click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
         assert page.get_by_text('Aluno sintético 001',exact=True).count() > 0
-        assert page.get_by_text('Envio desativado').is_visible()
+        assert page.get_by_text('Envio desativado',exact=True).is_visible()
+        assert page.title(), 'Page identity missing'
+        assert page.locator('vite-error-overlay').count() == 0
+
         assert page.locator('tbody tr').count() == 24
         details = page.locator('.checks details')
         assert details.get_attribute('open') is None
@@ -99,7 +102,10 @@ try:
         page.get_by_role('button', name='Fechar diário').click()
         page.get_by_label('Selecionar arquivo do diário').set_input_files({'name':'invalid.html','mimeType':'text/html','buffer':b'<html><form>login</form></html>'})
         page.get_by_role('heading', name='Prévia da turma').wait_for()
-        assert page.get_by_text('Envio desativado').is_visible()
+        assert page.get_by_text('Envio desativado',exact=True).is_visible()
+        assert page.title(), 'Page identity missing'
+        assert page.locator('vite-error-overlay').count() == 0
+
         # School schedule remains a local preview: edit, validate, save, reload, undo.
         page.get_by_role('button', name='Horários de coleta', exact=True).click()
         page.get_by_role('heading', name='Dias e horários').wait_for()
@@ -174,7 +180,33 @@ try:
         page.screenshot(path=str(out/'mobile.png'), full_page=True, animations='disabled')
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Horizontal page overflow'
         assert page.get_by_role('button',name='Abrir diário').is_visible()
+        # AUD-004: the same diagnostic on separate cards remains identifiable.
+        page.set_viewport_size({'width':1440,'height':1000})
+        from coletor.demo import build_fixture
+        html = build_fixture(include_edge_cases=False).replace('<div>1</div><div>2</div>','<div>2</div><div>1</div>')
+        page.get_by_label('Selecionar arquivo do diário').set_input_files({'name':'synthetic-diagnostics.html','mimeType':'text/html','buffer':html.encode()})
+        page.get_by_role('heading',name='Prévia da turma').wait_for()
+        details=page.locator('.checks details'); details.locator('summary').click()
+        details.get_by_role('combobox').select_option('LESSON_HEADER_INVALID')
+        assert 'row:1' in details.inner_text() and 'row:2' in details.inner_text()
+        page.screenshot(path=str(out/'diagnostics-by-card.png'),full_page=True,animations='disabled')
+        details.locator('summary').click()
+        # AUD-010: discard the result but stay busy until native work ends.
+        page.get_by_role('button',name='Fechar diário').click()
+        demo=page.request.get(url+'/api/demo').json()
+        page.evaluate("window.pywebview={api:{load_demo:()=>new Promise(resolve=>{window.finishSyntheticRead=resolve;})}}")
+        page.get_by_role('button',name='Usar dados de exemplo').click()
+        page.get_by_role('button',name='Descartar resultado').wait_for()
+        page.get_by_role('button',name='Descartar resultado').click()
+        expect(page.get_by_role('button',name='Usar dados de exemplo')).to_be_disabled()
+        expect(page.get_by_role('button',name='Abrir diário')).to_be_disabled()
+        page.evaluate('value => window.finishSyntheticRead(value)',demo)
+        expect(page.get_by_role('button',name='Usar dados de exemplo')).to_be_enabled()
+        assert page.get_by_role('heading',name='Prévia da turma').count()==0
+        page.get_by_role('heading',name='Vamos conferir a frequência?').wait_for()
+        page.evaluate('delete window.pywebview; delete window.finishSyntheticRead')
         assert not errors, errors
+        print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion.')
         print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox preference persists','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','fox animation toggle','roadmap screenshots in both themes','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:

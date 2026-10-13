@@ -164,7 +164,7 @@ def orchestrator(args):
                     if sentinel.read_bytes()!=b"UNRELATED_APP_SENTINEL": smoke.fail("other_application_modified")
                     data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
                     if set(data)!={"schemaVersion","schedule","theme","fox"}: smoke.fail("unexpected_persistent_data")
-                    if sorted(p.name for p in isolated.iterdir())!=["settings.json"]: smoke.fail("unexpected_settings_file")
+                    if sorted(p.name for p in isolated.iterdir())!=["settings.json", "settings.lock"]: smoke.fail("unexpected_settings_file")
                 finally:
                     job.close()
                     if process is not None and process.poll() is None: process.kill();process.wait(timeout=10)

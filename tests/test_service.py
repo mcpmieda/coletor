@@ -68,7 +68,7 @@ class PreviewServiceTests(unittest.TestCase):
         self.assertFalse(PreviewApi().load_demo()['validation']['allowed'])
 
     def test_native_api_rejects_large_or_invalid_input(self):
-        self.assertIn('error',PreviewApi().preview_html('x' * (8*1024*1024+1),'TESTE-A',2026))
+        self.assertIn('error',PreviewApi().preview_html('x' * (24*1024*1024+1),'TESTE-A',2026))
         self.assertIn('error',PreviewApi().preview_html('html','TESTE-A',True))
         self.assertIn('error',PreviewApi().preview_html('html','',2026))
 

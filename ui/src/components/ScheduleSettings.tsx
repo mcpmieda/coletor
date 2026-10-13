@@ -4,7 +4,7 @@ import { Clock3, RotateCcw, Save, Users } from 'lucide-react';
 import { StatusChip } from '../ui';
 import { DAYS, SHIFTS, defaultSchedule, fromDraft, toDraft, type Shift } from '../schedule';
 
-import { isDesktopSettings, readLocalSchedule, saveLocalSchedule } from '../localSettings';
+import { isDesktopSettings, readLocalSchedule, reloadLocalSchedule, saveLocalSchedule } from '../localSettings';
 
 function initialState() {
   try { return readLocalSchedule(); }
@@ -35,7 +35,7 @@ export default function ScheduleSettings() {
       const result = await saveLocalSchedule(config);
       setSaved(result); setDraft(toDraft(result));
       setNotice('Horários salvos só neste computador.');
-    } catch { setError('Não foi possível salvar. Suas alterações continuam na tela.'); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar. Suas alterações continuam na tela.'); }
     finally { setSaving(false); }
   }
   return <div className="schedule-page">
@@ -54,6 +54,7 @@ export default function ScheduleSettings() {
       })}</div>
       {error && <div className="error-message" role="alert">{error}</div>}
       {notice && <p className="schedule-feedback" role="status">{notice}</p>}
+      <Button variant="secondary" isDisabled={saving} onPress={() => { void reloadLocalSchedule().then(result => { setSaved(result.config); setDraft(toDraft(result.config)); setError(''); setNotice('Horários salvos recarregados.'); }).catch(() => setError('Não foi possível recarregar os horários.')); }}>Recarregar e descartar alterações</Button>
       <div className="schedule-actions"><span>{dirty ? 'Alterações ainda não salvas' : 'Coleta automática ainda não disponível'}</span><div><Button variant="ghost" isDisabled={saving || !dirty} onPress={() => { setDraft(toDraft(saved)); setError(''); setNotice('Voltamos aos horários salvos.'); }}>Desfazer alterações</Button><Button variant="secondary" isDisabled={saving} onPress={() => { setDraft(toDraft(defaultSchedule())); setError(''); setNotice('Sugestão aplicada. Clique em Salvar horários para guardar.'); }}><RotateCcw size={15} />Usar sugestão</Button><Button isDisabled={saving} onPress={() => { void save(); }}><Save size={15} />{saving ? 'Salvando…' : 'Salvar horários'}</Button></div></div>
     </section>
     <p className="schedule-source">{isDesktopSettings() ? 'Ao salvar, os horários ficam neste computador mesmo depois de fechar o programa.' : 'Nesta prévia, os horários salvos ficam somente neste navegador.'}</p>
