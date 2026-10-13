@@ -28,6 +28,14 @@ Sonar permanece em uma etapa posterior.
 - HTTPS em `www.smecel.com.br` é a única origem permitida para requisições.
   WebSockets, downloads e popups ficam bloqueados/encerrados. Domínios SSO/CDN
   adicionais não são liberados por suposição.
+- Um proxy CONNECT temporário da própria sessão verifica cada destino antes
+  de resolver/conectar, inclusive redirecionamentos que não voltam ao callback
+  de rota do Playwright. Não intercepta TLS nem registra headers/corpos. HTTP/2
+  e QUIC estão desligados para evitar coalescência/bypass de túneis; WebRTC está
+  indisponível nesse contexto. Uma sonda local nega a abertura da fonte se a
+  configuração do proxy não for respeitada pelo Edge.
+- O worker usa Playwright assíncrono e lê IPC em uma thread de apoio: a navegação
+  do operador continua funcionando entre abrir a sessão e pedir uma captura.
 - Não se reutiliza perfil pessoal, não há CDP/TCP de depuração nem exportação de
   cookies, `storage_state`, credenciais, HTML, HAR, trace ou vídeo.
 - O contexto do navegador é não persistente. O navegador e o driver criam
@@ -40,6 +48,11 @@ Sonar permanece em uma etapa posterior.
 - Cancelamento mantém o bloqueio da operação até seu término e rejeita gerações
   antigas. Não há ponte pública para executar JavaScript, abrir URL arbitrária,
   selecionar perfil ou trocar o driver. Injeções de fixtures existem apenas no QA Python.
+- Um compartilhamento de arquivo ainda aberto pelo Windows (`WinError 32`) após
+  o término dos processos recebe tentativas limitadas de limpeza, só no temporário
+  próprio. Falha persistente conserva a referência à sessão, limpa o escopo e
+  bloqueia uma substituição até a limpeza terminar. O gate não aceita arquivos
+  temporários restantes nem amplia seu timeout de cancelamento.
 - Prévias não autorizam envio. O bloqueio incondicional, a origem não comprovada,
   identidade não durável e completude não comprovada continuam ativos. As seis
   posições continuam capacidade do diário, sem inventar quantidade de aulas.
@@ -56,6 +69,21 @@ requisições do navegador de teste. Testa consentimento nas duas etapas, escopo
 senha/formulário rejeitado, sanitização, ausência da bridge, origem proibida,
 cancelamento e encerramento. O ZIP só é criado após os gates nativos anteriores
 e os dois gates novos de sessão manual e Edge externo.
+
+O QA adicional usa TLS autoassinado exclusivamente em servidores loopback, sem
+instalar certificados, e mede zero conexões/corpos no destino negado em redirects
+GET, POST 307 e POST 308. A exceção à validação TLS existe somente nesse teste;
+o programa preserva a validação normal. A fixture inclui campos, atributos,
+scripts e valores dinâmicos dentro do contêiner capturado, além de metadados
+pessoais que não são usados. O fluxo nativo só pede a primeira captura depois
+da navegação/login sintéticos pós-abertura, e cancela após a segunda captura
+ter começado. Nas datas de nascimento, filiação e matrícula o texto é removido
+antes de serializar o HTML transitório.
+
+O SDK foi atualizado para Playwright 1.63.0, com hashes oficiais do PyPI. Seu
+driver inclui Node 24.21.0, conferido em 13/10/2026 com o
+[índice oficial Node](https://nodejs.org/dist/index.json); o manifest registra
+essa versão e os hashes do binário. [Notas oficiais do Playwright](https://playwright.dev/python/docs/release-notes).
 
 Pendência para acompanhamento autorizado: operador, turma/ano de teste, confirmação
 de escola, diário exibido e eventual fluxo/domínio SSO necessário. Nenhum login ou

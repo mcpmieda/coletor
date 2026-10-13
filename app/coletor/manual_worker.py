@@ -1,4 +1,5 @@
 """External Edge worker without the desktop bridge. Private, transient IPC."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -7,8 +8,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 from .limits import MAX_HTML_BYTES, MAX_REQUEST_BYTES, MAX_NODES
+from .origin_proxy import OriginProxy, verify_proxy
 
 # Clone only the documented report container; never serialize login inputs.
 CAPTURE_JS = """() => {
@@ -16,6 +19,10 @@ CAPTURE_JS = """() => {
   const containers = document.querySelectorAll('div.container-fluid');
   if (password_form || containers.length !== 1 || document.querySelectorAll('*').length > NODE_LIMIT) return {url: location.href, password_form, html: ''};
   const clone = containers[0].cloneNode(true);
+  for (const small of clone.querySelectorAll('.ls-box1 small')) {
+    const fields = small.querySelectorAll('strong');
+    if (fields.length === 5) for (const index of [1, 2, 4]) fields[index].textContent = '[não capturado]';
+  }
   clone.querySelectorAll('script,style,form,input,textarea,select,button,iframe,object,embed,link,meta,video,audio,img').forEach(n => n.remove());
   for (const n of [clone, ...clone.querySelectorAll('*')]) {
     for (const a of [...n.attributes]) if (!['class','style','colspan','rowspan'].includes(a.name)) n.removeAttribute(a.name);
@@ -31,22 +38,61 @@ CAPTURE_JS = """() => {
 }""".replace("NODE_LIMIT", str(MAX_NODES)).replace("HTML_LIMIT", str(MAX_HTML_BYTES))
 
 
-def configure_context(context, request_delegate=None):
+def browser_options(proxy):
+    return {"channel": "msedge", "headless": False, "chromium_sandbox": True,
+            "proxy": proxy.configuration,
+            # HTTP/1.1 tunnels cannot coalesce an approved TLS connection across
+            # origins; QUIC and non-proxied WebRTC UDP must not bypass the gate.
+            "args": ["--disable-http2", "--disable-quic",
+                     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]}
+
+
+def worker_environment(temporary):
+    # Do not pass shell/cloud tokens, custom Node executables or debug settings
+    # into the source browser. Only OS discovery and our own module path remain.
+    keys = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "LOCALAPPDATA", "APPDATA",
+            "USERPROFILE", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "SYSTEMDRIVE",
+            "HOMEDRIVE", "HOMEPATH", "USERNAME", "USERDOMAIN", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"}
+    environment = {key: value for key, value in os.environ.items() if key.upper() in keys}
+    environment.update(TMP=temporary, TEMP=temporary, PYTHONNOUSERSITE="1",
+                       PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    return environment
+
+
+async def configure_context(context, request_delegate=None):
     from .manual_session import allowed_request
-    def route_request(route):
+    async def route_request(route):
         if not allowed_request(route.request.url):
-            route.abort()
+            await route.abort()
         elif request_delegate is not None:
-            request_delegate(route)  # Python-only synthetic QA injection; never in the bridge.
+            await request_delegate(route)  # Python-only synthetic QA injection.
         else:
-            route.continue_()
-    context.route("**/*", route_request)
-    context.route_web_socket("**/*", lambda socket: socket.close())
+            await route.continue_()
+    async def block_socket(socket):
+        await socket.close()
+    await context.route("**/*", route_request)
+    await context.route_web_socket("**/*", block_socket)
+    await context.add_init_script("""for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
+      Object.defineProperty(globalThis, name, {configurable: false, get: () => undefined});
+    }""")
 
 
 def configure_page(page):
-    page.on("popup", lambda popup: popup.close())
-    page.on("download", lambda download: download.cancel())
+    async def close_popup(popup):
+        try:
+            await popup.close()
+        except Exception:
+            pass
+    async def close_other_page(other):
+        if other is not page:
+            await close_popup(other)
+    async def cancel_download(download):
+        await download.cancel()
+    page.on("popup", close_popup)
+    # The popup event can wait for its initial navigation. Close at the context
+    # page event too, including an aborted first navigation that stays blank.
+    page.context.on("page", close_other_page)
+    page.on("download", cancel_download)
     page.set_default_timeout(15000)
     page.set_default_navigation_timeout(30000)
 
@@ -60,6 +106,7 @@ class BrowserWorker:
         self._close_lock = threading.Lock()
         self.cleanup = None
         self._closed = False
+        self._cleanup_errors = []
 
     def _command(self):
         executable = Path(sys.executable)
@@ -67,7 +114,7 @@ class BrowserWorker:
         # private pipe worker must use its sibling python.exe, without a console.
         if executable.name.lower() == "pythonw.exe":
             executable = executable.with_name("python.exe")
-        return [str(executable), "-m", "coletor.manual_worker"]
+        return [str(executable), "-B", "-m", "coletor.manual_worker"]
 
     def _rpc(self, command, timeout=40):
         with self._rpc_lock:
@@ -105,11 +152,7 @@ class BrowserWorker:
             if self._closed:
                 raise RuntimeError("session_closed")
             self._temporary = tempfile.TemporaryDirectory(prefix="coletor-session-")
-            environment = os.environ.copy()
-            environment.update(TMP=self._temporary.name, TEMP=self._temporary.name)
-            # Do not inherit browser debug/trace settings, which could save secrets.
-            for key in ("DEBUG", "PWDEBUG", "PLAYWRIGHT_BROWSERS_PATH", "NODE_OPTIONS"):
-                environment.pop(key, None)
+            environment = worker_environment(self._temporary.name)
             self._job = WindowsJob()
             root = Path(__file__).resolve().parents[2]
             self._process = subprocess.Popen(self._command(), cwd=root,
@@ -132,6 +175,13 @@ class BrowserWorker:
                     process.stdin.close()
                 except (OSError, ValueError):
                     pass
+                # EOF cancels the in-flight browser task. Let the SDK close
+                # Edge and its mapped metrics/artifact files before using the
+                # Job Object fallback; killing it mid-close caused WinError 32.
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
             if self._job is not None:
                 try:
                     self.cleanup = self._job.finish(grace=1)
@@ -146,58 +196,95 @@ class BrowserWorker:
                     process.wait(timeout=3)
                 process.stdout.close()
             if self._temporary is not None:
-                self._temporary.cleanup()
+                for attempt in range(7):
+                    try:
+                        self._temporary.cleanup()
+                        break
+                    except OSError as error:
+                        self._cleanup_errors.append(getattr(error, "winerror", None))
+                        self._temp_failed_path = getattr(error, "filename", None)
+                        # Windows can retain a handle briefly after the owned
+                        # process tree exits. Retry only this sharing violation,
+                        # on our own TemporaryDirectory, without relaxing QA.
+                        if getattr(error, "winerror", None) != 32 or attempt == 6:
+                            raise
+                        time.sleep(0.05 * 2 ** attempt)
                 self._temporary = None
 
 
-def main():
-    # Windows redirected stdio otherwise uses the system code page. JSON carries
-    # Portuguese text and symbols, so both ends of private IPC use explicit UTF-8.
-    sys.stdin.reconfigure(encoding="utf-8")
-    sys.stdout.reconfigure(encoding="utf-8")
+async def browser_session(initial):
     from .manual_session import matches_source
     from urllib.parse import parse_qsl, urlsplit
-    from playwright.sync_api import sync_playwright
-    initial = json.loads(sys.stdin.readline(2048))
+    from playwright.async_api import async_playwright
     url = initial.get("url", "")
     params = dict(parse_qsl(urlsplit(url).query))
     if initial.get("command") != "open" or not matches_source(url, params.get("ct"), params.get("ano")):
         raise ValueError("invalid_scope")
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="msedge", headless=False, chromium_sandbox=True)
-        try:
-            context = browser.new_context(accept_downloads=False, service_workers="block")
-            configure_context(context)
-            page = context.new_page()
-            configure_page(page)
-            # Navigation errors can mean an unapproved SSO origin. Do not broaden access.
+    with OriginProxy() as proxy:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(**browser_options(proxy))
             try:
-                page.goto(url, wait_until="domcontentloaded")
-            except Exception:
-                pass
-            print(json.dumps({"opened": True}), flush=True)
-            for line in sys.stdin:
-                command = json.loads(line)
-                if command.get("command") != "capture":
-                    break
+                context = await browser.new_context(accept_downloads=False, service_workers="block")
+                page = await context.new_page()
+                configure_page(page)
+                await verify_proxy(page, proxy)
+                await configure_context(context)
                 try:
-                    before = page.url
-                    if not matches_source(before, params["ct"], params["ano"]):
-                        payload = {"url": "", "password_form": False, "html": ""}
-                    else:
-                        payload = page.evaluate(CAPTURE_JS)
-                        if page.url != before or payload.get("url") != before:
-                            payload = {"error": "page_changed"}
-                        elif len(payload.get("html", "").encode("utf-8")) > MAX_HTML_BYTES:
-                            payload = {"error": "report_too_large"}
-                    encoded = json.dumps(payload, ensure_ascii=False)
-                    if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
-                        encoded = '{"error":"transport_limit"}'
-                    print(encoded, flush=True)
+                    await page.goto(url, wait_until="domcontentloaded")
                 except Exception:
-                    print('{"error":"source_unavailable"}', flush=True)
-        finally:
-            browser.close()
+                    pass
+                print(json.dumps({"opened": True}), flush=True)
+                async def capture_reply():
+                    try:
+                        before = page.url
+                        if not matches_source(before, params["ct"], params["ano"]):
+                            payload = {"url": "", "password_form": False, "html": ""}
+                        else:
+                            payload = await page.evaluate(CAPTURE_JS)
+                            if page.url != before or payload.get("url") != before:
+                                payload = {"error": "page_changed"}
+                            elif len(payload.get("html", "").encode("utf-8")) > MAX_HTML_BYTES:
+                                payload = {"error": "report_too_large"}
+                        encoded = json.dumps(payload, ensure_ascii=False)
+                        if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
+                            encoded = '{"error":"transport_limit"}'
+                        print(encoded, flush=True)
+                    except Exception:
+                        print('{"error":"source_unavailable"}', flush=True)
+                reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
+                capture = None
+                try:
+                    while True:
+                        pending = {reader} | ({capture} if capture is not None else set())
+                        ready, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                        if capture is not None and capture in ready:
+                            await capture
+                            capture = None
+                        if reader in ready:
+                            line = reader.result()
+                            if not line or json.loads(line).get("command") != "capture":
+                                break
+                            if capture is not None:
+                                raise RuntimeError("overlapping_capture")
+                            capture = asyncio.create_task(capture_reply())
+                            # Continue listening while capture runs: EOF must
+                            # interrupt it immediately, rather than wait for it.
+                            reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
+                finally:
+                    if capture is not None:
+                        capture.cancel()
+                        await asyncio.gather(capture, return_exceptions=True)
+                    reader.cancel()
+            finally:
+                await browser.close()
+
+
+def main():
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+    # Before browser creation this blocking read is the Job Object handshake.
+    initial = json.loads(sys.stdin.readline(2048))
+    asyncio.run(browser_session(initial))
 
 
 if __name__ == "__main__":

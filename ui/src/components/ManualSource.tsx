@@ -5,7 +5,8 @@ import type { Preview } from '../types';
 
 export interface ManualStatus {
   generation: number;
-  state: 'closed' | 'prepared' | 'opening' | 'awaiting_user' | 'capturing' | 'preview_ready';
+  state: 'closed' | 'closing' | 'prepared' | 'opening' | 'awaiting_user' | 'capturing' | 'preview_ready';
+  cleanup_pending?: boolean;
   scope: { class_id: string; year: number; url: string } | null;
   identity_verified: false;
   transmission_enabled: false;
@@ -58,7 +59,11 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
     if (closing.current) return;
     closing.current = true; operation.current++; onClear(); setConfirmation(false); setError('');
     try { setSession(checked(await (await bridge()).close_manual_session())); }
-    catch { setError('Não foi possível confirmar o encerramento. Feche o programa para encerrar sua sessão.'); }
+    catch {
+      const status = await window.pywebview?.api.get_manual_session_status?.().catch(() => undefined);
+      if (status) setSession(status);
+      setError('A limpeza não terminou. Encerre a sessão novamente antes de preparar outra.');
+    }
     finally { closing.current = false; }
   }
   async function capture() {
@@ -77,7 +82,7 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
   }
   const prepared = session?.state === 'prepared';
   const opened = session?.state === 'awaiting_user' || session?.state === 'preview_ready';
-  const live = !!session && session.state !== 'closed';
+  const live = !!session && (session.state !== 'closed' || session.cleanup_pending);
   return <section className="panel source-panel" aria-labelledby="manual-source-title">
     <h2 id="manual-source-title">Sessão manual no Smecel</h2>
     <p>Você entra no site em uma janela separada do Microsoft Edge. A leitura só acontece após sua confirmação e fica na memória deste computador.</p>
@@ -88,8 +93,8 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
       <Button isDisabled={busy || live} onPress={() => { void perform(async () => checked(await (await bridge()).prepare_manual_session(classId.trim(), Number(year)))); }}>Preparar sessão</Button>
     </div>
     {live && <>
-      <p role="status">Turma {session.scope?.class_id} · Ano {session.scope?.year} · {prepared ? 'Sessão preparada, sem acesso ao site.' : 'Confira o diário na janela separada. A entrada no site não foi verificada pelo programa.'}</p>
-      <p><code>{session.scope?.url}</code></p>
+      <p role="status">{session.cleanup_pending ? 'Sessão interrompida. Finalize a limpeza antes de preparar outra.' : <>Turma {session.scope?.class_id} · Ano {session.scope?.year} · {prepared ? 'Sessão preparada, sem acesso ao site.' : 'Confira o diário na janela separada. A entrada no site não foi verificada pelo programa.'}</>}</p>
+      {session.scope && <p><code>{session.scope.url}</code></p>}
       {opened && <p>Depois de entrar no site, abra esse endereço na janela separada do Edge e confira a escola, a turma e o ano antes de autorizar a leitura.</p>}
       {(prepared || opened) && <label className="status-line"><input type="checkbox" checked={confirmation} disabled={busy} onChange={e => setConfirmation(e.target.checked)} />{prepared ? 'Autorizo abrir esta turma e este ano no Smecel e fazer o login diretamente no site.' : 'Conferi a turma e o ano na janela separada e autorizo ler este diário para uma prévia local, sem envio.'}</label>}
       {prepared && <Button isDisabled={busy || !confirmation} onPress={() => { void perform(async () => checked(await (await bridge()).open_manual_session(session.generation, true))); }}>Abrir Smecel</Button>}

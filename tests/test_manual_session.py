@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from coletor.demo import build_fixture
 from coletor.manual_session import ManualSession, SessionError, allowed_request, captured_preview, matches_source, source_url
-from coletor.manual_worker import BrowserWorker
+from coletor.manual_worker import BrowserWorker, worker_environment
 
 
 def raw_fixture():
@@ -149,7 +149,16 @@ class ManualSessionTests(unittest.TestCase):
         with patch('coletor.manual_worker.sys.executable', str(Path('portable') / 'pythonw.exe')):
             command = BrowserWorker()._command()
         self.assertEqual(Path(command[0]).name, 'python.exe')
-        self.assertEqual(command[1:], ['-m', 'coletor.manual_worker'])
+        self.assertEqual(command[1:], ['-B', '-m', 'coletor.manual_worker'])
+
+    def test_worker_does_not_inherit_cloud_secrets_or_debug_executable_overrides(self):
+        with patch.dict('coletor.manual_worker.os.environ', {'GH_TOKEN': 'SYNTHETIC_ONLY',
+                        'SONAR_TOKEN': 'SYNTHETIC_ONLY', 'NODE_OPTIONS': '--inspect',
+                        'PLAYWRIGHT_NODEJS_PATH': 'untrusted', 'PYTHONPATH': 'untrusted'}, clear=True):
+            environment = worker_environment('owned-temporary')
+        self.assertFalse(any(key in environment for key in ('GH_TOKEN', 'SONAR_TOKEN', 'NODE_OPTIONS', 'PLAYWRIGHT_NODEJS_PATH')))
+        self.assertEqual(environment['TMP'], 'owned-temporary')
+        self.assertNotEqual(environment['PYTHONPATH'], 'untrusted')
 
     def test_operational_failure_is_redacted_and_session_closed(self):
         def failed(_url):
@@ -161,6 +170,22 @@ class ManualSessionTests(unittest.TestCase):
         self.assertNotIn("SECRET", str(caught.exception))
         self.assertTrue(self.driver.closed)
         self.assertEqual(self.session.status()["state"], "closed")
+
+    def test_failed_cleanup_retains_owned_driver_and_cannot_open_a_replacement(self):
+        self.opened()
+        def failure():
+            raise OSError('SYNTHETIC_PRIVATE_PATH_DO_NOT_ECHO')
+        self.driver.close = failure
+        with self.assertRaises(SessionError) as caught:
+            self.session.close()
+        self.assertNotIn('SYNTHETIC_PRIVATE_PATH', str(caught.exception))
+        self.assertTrue(self.session.status()['cleanup_pending'])
+        with self.assertRaises(SessionError):
+            self.session.prepare('13332', 2026)
+        self.driver.close = lambda: None
+        result = self.session.prepare('13332', 2026)
+        self.assertFalse(result['cleanup_pending'])
+        self.assertEqual(result['state'], 'prepared')
 
 
 if __name__ == "__main__":

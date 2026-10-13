@@ -78,7 +78,8 @@ class ManualSession:
     def _status(self):
         return {"generation": self._generation, "state": self._state,
                 "scope": self._scope, "identity_verified": False,
-                "transmission_enabled": False, "notice": NOTICE}
+                "transmission_enabled": False, "notice": NOTICE,
+                "cleanup_pending": self._state == "closed" and self._driver is not None}
 
     def status(self):
         with self._lock:
@@ -88,6 +89,8 @@ class ManualSession:
         url = source_url(class_id, year)  # Validate before replacing any active session.
         self.close()
         with self._lock:
+            if self._state != "closed" or self._driver is not None:
+                raise SessionError("A sessão anterior ainda está sendo encerrada. Aguarde e tente novamente.")
             self._scope = {"class_id": class_id, "year": year, "url": url}
             self._state = "prepared"
             return self._status()
@@ -150,9 +153,21 @@ class ManualSession:
 
     def close(self):
         with self._lock:
+            if self._state == "closing":
+                raise SessionError("O encerramento já está em andamento. Aguarde.")
             self._generation += 1
-            driver, self._driver = self._driver, None
-            self._state, self._scope = "closed", None
+            driver = self._driver
+            self._state, self._scope = "closing", None
         if driver is not None:
-            driver.close()
+            try:
+                driver.close()
+            except Exception:
+                with self._lock:
+                    self._state = "closed"
+                # Keep the owned driver for cleanup retries; never silently
+                # replace a session whose temporary files could not be removed.
+                raise SessionError("A sessão foi interrompida, mas a limpeza não terminou. Encerre novamente antes de preparar outra sessão.") from None
+        with self._lock:
+            self._driver = None
+            self._state = "closed"
         return self.status()

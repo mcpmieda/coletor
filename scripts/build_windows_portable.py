@@ -107,11 +107,16 @@ def build(output, source_commit):
     ui_license_notices(bundle)
     packages = sorted([{"name": d.metadata["Name"], "version": d.version}
         for d in importlib.metadata.distributions(path=[str(site)])], key=lambda x: x["name"].lower())
+    driver_node = subprocess.run([str(site / "playwright/driver/node.exe"), "--version"],
+                                 check=True, capture_output=True, text=True).stdout.strip()
+    if driver_node != "v24.21.0":
+        raise ValueError("Unexpected browser driver Node runtime")
     manifest = {"application": "Coletor de Frequência", "version": VERSION,
         "kind": "portable-test-not-installer", "source_commit": source_commit,
         "built_at": datetime.now(timezone.utc).isoformat(), "platform": "windows-x64",
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,
         "python_archive_sha256": PYTHON_SHA256, "packages": packages,
+        "browser_driver_node_version": driver_node,
         "production_access": "manual-source-read-only-with-operator-confirmation", "automatic_collection": False,
         "transmission_enabled": False, "real_source_qa": "pending-authorized-operator-validation",
         "credentials_included": False, "tray_enabled": True,
@@ -150,15 +155,21 @@ def validate_tray_evidence(report):
 def validate_manual_evidence(report, browser=False):
     required = ({"external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
                  "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
-                 "ephemeral_context_closed", "owned_processes_stopped"} if browser else
+                 "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
+                 "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled"} if browser else
                 {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                 "separate_edge_started", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
-                 "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "window_closed"})
+                 "separate_edge_started", "post_open_synthetic_login_navigation", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                 "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
     if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
             or report.get("cleanup", {}).get("remaining_processes") != 0
             or report.get("real_network") is not False or report.get("real_credentials") is not False
             or not all(report.get("checks", {}).get(key) is True for key in required)):
         raise ValueError("Manual session QA must pass before creating a distributable")
+    if browser and (type(report.get("denied_destination_contacts")) is not int
+                    or report["denied_destination_contacts"] != 0
+                    or type(report.get("denied_destination_body_bytes")) is not int
+                    or report["denied_destination_body_bytes"] != 0):
+        raise ValueError("Denied redirect destinations must never be contacted")
 
 
 def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, manual_evidence=None, browser_evidence=None):
