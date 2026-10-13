@@ -99,7 +99,7 @@ de escrita em main foi feito nesta entrega.
 
 Validação local desta correção: 120 testes Python; 60 testes UI; lint, tipos e
 build; cobertura 90% conjunta em parser/validação/configurações (mínimo 80%);
-SCA npm/Python sem vulnerabilidades conhecidas nos conjuntos consultados;
+SCA npm/Python sem vulnerabilidades conhecidas nos conjuntos finais consultados (runtime, testes e build);
 Bandit selecionado sem achados; Gitleaks em 18 commits sem achados após triagem
 de um falso positivo. A única exceção do scanner é o valor literal exato do
 namespace público de localStorage `coletor-smecel.fox.v1`, sem exceção ampla por
@@ -118,3 +118,13 @@ Encerramento continua bloqueado enquanto houver requisito material pendente:
 AUD-006 administrativo, decisão explícita sobre itens triados, review independente
 do head corrigido e CI completo desse SHA (incluindo Windows portátil/nativo).
 Sucesso local não substitui esses gates. A publicação é PR draft, sem merge.
+
+
+Ferramentas de build também foram auditadas: `setuptools==83.0.0`, `wheel==0.46.2`
+e `packaging==26.3`, com hashes antecipados. As versões antigas preliminarmente
+fixadas foram substituídas após SCA detectar [PYSEC-2026-3447 (setuptools)](https://raw.githubusercontent.com/pypa/advisory-database/main/vulns/setuptools/PYSEC-2026-3447.yaml)
+e [GHSA-8rrh-rw8j-w5fx (wheel)](https://github.com/advisories/GHSA-8rrh-rw8j-w5fx).
+O gate de CI passou a auditar também esse lock. Download local verificou hashes
+dos oito artefatos runtime; uma SHA-256 deliberadamente incorreta foi rejeitada
+pelo pip antes de instalar qualquer pacote. Compatibilidade Python 3.13 do
+pacote final continua responsabilidade do job Windows.

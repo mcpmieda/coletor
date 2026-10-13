@@ -40,6 +40,7 @@ jobs:
           /tmp/gitleaks git --redact --no-banner --log-opts=--all
       - name: Audit Python runtime and test dependency sets separately
         run: |
+          pip-audit --disable-pip --no-deps -r requirements-windows-build.txt
           pip-audit --disable-pip --no-deps -r requirements-windows-portable.txt
           pip-audit -r requirements-test.txt
       - name: Generate synthetic fixture
