@@ -1,5 +1,10 @@
 # Autenticação institucional do Coletor: diagnóstico e decisão pendente
 
+Proposta inicial histórica. O requisito posterior de permanência/renovação e a
+inspeção dos grants estão em [DEVICE_AUTH_DECISION.md](DEVICE_AUTH_DECISION.md).
+O limite fixo de 4 horas e a recomendação inicial de grants de aplicação não
+são mais a proposta preferida. Nenhuma dessas propostas foi ativada.
+
 Estado: preparação de contrato e gate, sem integração ativa, sem pacote novo.
 O app 0.3.0 entregue permanece inalterado. Nenhuma configuração produtiva foi lida
 com credenciais administrativas ou alterada; nenhum login real foi executado.
