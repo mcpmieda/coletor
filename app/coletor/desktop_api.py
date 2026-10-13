@@ -40,14 +40,8 @@ class DesktopApi(PreviewApi):
         except (OSError, ValueError, TypeError):
             return {"error": "Confira a etapa, a turma e o ano. Se a sessão não responder, feche-a e prepare novamente."}
 
-    def prepare_manual_session(self, class_id, year):
-        return self._manual(lambda: self._manual_session.prepare(class_id, year))
-
     def open_manual_session(self, generation, confirmed):
         return self._manual(lambda: self._manual_session.open(generation, confirmed))
-
-    def capture_manual_preview(self, generation, confirmed):
-        return self._reading(lambda: self._manual(lambda: self._manual_session.capture(generation, confirmed)))
 
     def close_manual_session(self):
         return self._manual(self._manual_session.close)
