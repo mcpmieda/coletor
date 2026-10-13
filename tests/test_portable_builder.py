@@ -13,7 +13,7 @@ spec.loader.exec_module(builder)
 class PortableBuildTests(unittest.TestCase):
     def test_manual_distribution_gate_rejects_missing_consent_isolation_and_cleanup(self):
         native = {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                  "separate_edge_started", "post_open_synthetic_login_navigation", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                  "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
                   "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"}
         report = {"status": "passed", "cleanup": {"verified": True, "remaining_processes": 0},
                   "real_network": False, "real_credentials": False, "checks": {key: True for key in native}}

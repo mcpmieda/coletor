@@ -107,7 +107,7 @@ class LocalSettingsTests(unittest.TestCase):
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
         api = DesktopApi(self.directory)
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["capture_manual_preview", "close_manual_session", "get_desktop_status", "get_local_settings", "get_manual_session_status", "hide_window", "load_demo", "open_manual_session", "prepare_manual_session", "preview_html", "save_fox", "save_schedule", "save_theme", "set_tray_context"])
+                         ["capture_manual_preview", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "discover_manual_classes", "get_desktop_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "hide_window", "load_demo", "open_manual_session", "prepare_manual_login", "prepare_manual_session", "preview_html", "save_fox", "save_manual_class_selection", "save_schedule", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())

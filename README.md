@@ -10,7 +10,8 @@ claro, escuro e automático. A identidade do coletor usa vermelho/bordô, confor
 a escolha posterior do usuário.
 
 Implementado:
-- Sessão manual em Edge separado, com confirmação de abertura e leitura por turma/ano.
+- Login primeiro em Edge separado, descoberta dinâmica de turmas por nome e seleção local por ano/contexto.
+- Revalidação da disponibilidade após login e imediatamente antes da leitura do diário.
 - Login digitado pelo operador diretamente no site, sem senha na bridge do coletor.
 - Abertura de HTML selecionado pelo operador, processado somente em memória.
 - Parser de diário anual: fichas, FEV–DEZ, dias válidos e seis posições de aula.

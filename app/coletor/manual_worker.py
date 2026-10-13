@@ -163,6 +163,12 @@ class BrowserWorker:
             self._job.assign(self._process.pid)
         self._rpc({"command": "open", "url": url})
 
+    def discover(self, year):
+        return self._rpc({"command": "list", "year": year})
+
+    def capture_selected(self, class_id, year, context_key):
+        return self._rpc({"command": "capture", "class_id": class_id, "year": year, "context_key": context_key})
+
     def capture(self):
         return self._rpc({"command": "capture"})
 
@@ -213,12 +219,14 @@ class BrowserWorker:
 
 
 async def browser_session(initial):
-    from .manual_session import matches_source
+    from .manual_session import matches_source, source_url
+    from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
     from urllib.parse import parse_qsl, urlsplit
     from playwright.async_api import async_playwright
     url = initial.get("url", "")
     params = dict(parse_qsl(urlsplit(url).query))
-    if initial.get("command") != "open" or not matches_source(url, params.get("ct"), params.get("ano")):
+    listing_mode = matches_list(url, params.get("ano"))
+    if initial.get("command") != "open" or not (listing_mode or matches_source(url, params.get("ct"), params.get("ano"))):
         raise ValueError("invalid_scope")
     with OriginProxy() as proxy:
         async with async_playwright() as playwright:
@@ -234,10 +242,30 @@ async def browser_session(initial):
                 except Exception:
                     pass
                 print(json.dumps({"opened": True}), flush=True)
-                async def capture_reply():
+                async def read_catalog(year):
+                    await page.goto(list_url(year), wait_until="domcontentloaded")
+                    before = page.url
+                    observation = await page.evaluate(CATALOG_JS)
+                    if page.url != before or observation.get("url") != before:
+                        raise ValueError("listing_changed")
+                    return catalog_from_observation(observation, year)
+
+                async def capture_reply(command):
                     try:
+                        if command["command"] == "list":
+                            payload = await read_catalog(command["year"])
+                            print(json.dumps(payload, ensure_ascii=False), flush=True)
+                            return
+                        class_id, year = params.get("ct"), params.get("ano")
+                        if listing_mode:
+                            class_id, year = command.get("class_id"), command.get("year")
+                            catalog = await read_catalog(year)
+                            if (catalog["scope"]["context_key"] != command.get("context_key")
+                                    or class_id not in {c["class_id"] for c in catalog["classes"]}):
+                                raise ValueError("selected_class_unavailable")
+                            await page.goto(source_url(class_id, year), wait_until="domcontentloaded")
                         before = page.url
-                        if not matches_source(before, params["ct"], params["ano"]):
+                        if not matches_source(before, class_id, year):
                             payload = {"url": "", "password_form": False, "html": ""}
                         else:
                             payload = await page.evaluate(CAPTURE_JS)
@@ -262,11 +290,14 @@ async def browser_session(initial):
                             capture = None
                         if reader in ready:
                             line = reader.result()
-                            if not line or json.loads(line).get("command") != "capture":
+                            if not line:
+                                break
+                            command = json.loads(line)
+                            if command.get("command") not in {"capture", "list"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")
-                            capture = asyncio.create_task(capture_reply())
+                            capture = asyncio.create_task(capture_reply(command))
                             # Continue listening while capture runs: EOF must
                             # interrupt it immediately, rather than wait for it.
                             reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))

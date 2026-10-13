@@ -18,7 +18,7 @@ import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.2.0-teste"
+VERSION = "0.3.0-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -158,7 +158,7 @@ def validate_manual_evidence(report, browser=False):
                  "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
                  "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled"} if browser else
                 {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                 "separate_edge_started", "post_open_synthetic_login_navigation", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
                  "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
     if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
             or report.get("cleanup", {}).get("remaining_processes") != 0

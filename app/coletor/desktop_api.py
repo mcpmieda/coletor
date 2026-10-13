@@ -10,7 +10,27 @@ class DesktopApi(PreviewApi):
         self._settings = LocalSettings(settings_directory)
         self._desktop_state = DesktopState(self.get_local_settings()["settings"]["fox"])
         self._tray = None
-        self._manual_session = ManualSession()
+        self._manual_session = ManualSession(settings_directory=settings_directory)
+
+    def prepare_manual_login(self, year):
+        return self._manual(lambda: self._manual_session.prepare_login(year))
+
+    def get_manual_class_selection_preferences(self):
+        saved = self._manual_session._selections.read()
+        return {"last_year": saved["selection"]["scope"]["year"] if saved["selection"] else None,
+                "revalidation_required": True, "notice": saved["notice"]}
+
+    def discover_manual_classes(self, generation, confirmed):
+        return self._manual(lambda: self._manual_session.discover(generation, confirmed))
+
+    def save_manual_class_selection(self, generation, ids, revision):
+        return self._manual(lambda: self._manual_session.save_choices(generation, ids, revision))
+
+    def clear_manual_class_selection(self, generation, revision):
+        return self._manual(lambda: self._manual_session.save_choices(generation, [], revision, clear=True))
+
+    def capture_selected_class(self, generation, class_id, confirmed):
+        return self._reading(lambda: self._manual(lambda: self._manual_session.capture_selected(generation, class_id, confirmed)))
 
     def _manual(self, work):
         try:

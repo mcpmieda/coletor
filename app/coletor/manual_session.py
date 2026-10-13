@@ -64,7 +64,7 @@ def captured_preview(payload, class_id, year):
 
 
 class ManualSession:
-    def __init__(self, driver_factory=None):
+    def __init__(self, driver_factory=None, settings_directory=None):
         if driver_factory is None:
             from .manual_worker import BrowserWorker
             driver_factory = BrowserWorker
@@ -74,6 +74,95 @@ class ManualSession:
         self._driver = None
         self._state = "closed"
         self._scope = None
+        self._catalog = None
+        self._mode = "annual"
+        from .class_selection import ClassSelectionStore
+        self._selections = ClassSelectionStore(settings_directory)
+
+    def prepare_login(self, year):
+        from .class_catalog import list_url
+        url = list_url(year)
+        self.close()
+        with self._lock:
+            if self._state != "closed" or self._driver is not None:
+                raise SessionError("A sessão anterior ainda está sendo encerrada.")
+            self._mode = "list"
+            self._scope = {"year": year, "url": url}
+            self._state = "prepared"
+            return self._status()
+
+    def _catalog_reply(self):
+        from .class_selection import revalidate_choices
+        saved = self._selections.read(self._catalog["scope"])
+        choices = revalidate_choices(saved["selection"], self._catalog["scope"],
+                                     [c["class_id"] for c in self._catalog["classes"]])
+        return {"session": self._status(), "catalog": self._catalog, **choices,
+                "selection_revision": saved["local_revision"], "notice": saved["notice"]}
+
+    def discover(self, generation, confirmed):
+        with self._lock:
+            self._check(generation, confirmed, {"awaiting_user", "list_ready", "preview_ready"})
+            if self._mode != "list":
+                raise SessionError("Prepare o acesso à lista de turmas primeiro.")
+            self._catalog = None
+            self._state = "discovering"
+            driver, year = self._driver, self._scope["year"]
+        try:
+            catalog = driver.discover(year)
+            with self._lock:
+                self._check(generation, True, {"discovering"})
+                from .class_catalog import CONTEXT_KEY, LIST_PATH
+                if (catalog.get("scope") != {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
+                                            "year": year, "context_key": CONTEXT_KEY}
+                        or not catalog.get("classes")):
+                    raise SessionError("A lista não corresponde ao contexto e ano solicitados.")
+                self._catalog = catalog
+                self._state = "list_ready"
+                return self._catalog_reply()
+        except Exception:
+            with self._lock:
+                if generation == self._generation:
+                    self._catalog = None
+                    self._state = "awaiting_user"
+            raise SessionError("Não foi possível reconhecer a lista deste ano/contexto. Confira o Smecel e limpe a busca da lista. Suas escolhas salvas foram preservadas.") from None
+
+    def save_choices(self, generation, ids, revision, clear=False):
+        from .class_selection import validate_ids
+        ids = validate_ids(ids)
+        with self._lock:
+            self._check(generation, True, {"list_ready", "preview_ready"})
+            available = {c["class_id"] for c in self._catalog["classes"]}
+            if any(key not in available for key in ids):
+                raise SessionError("Escolha somente turmas da lista atual.")
+            saved = self._selections.read(self._catalog["scope"])
+            # An absent/filtered row is not a revocation receipt. Preserve its
+            # choice unless the operator explicitly clears this context/year.
+            pending = set(saved["selection"]["selected_class_ids"]) - available if saved["selection"] and not clear else set()
+            self._selections.save(self._catalog["scope"], list(set(ids) | pending), revision)
+            return self._catalog_reply()
+
+    def capture_selected(self, generation, class_id, confirmed):
+        with self._lock:
+            self._check(generation, confirmed, {"list_ready", "preview_ready"})
+            choices = self._catalog_reply()["selected_class_ids"]
+            if class_id not in choices:
+                raise SessionError("Selecione uma turma disponível nesta sessão antes de ler.")
+            self._state = "capturing"
+            driver, year, context = self._driver, self._scope["year"], self._catalog["scope"]["context_key"]
+        try:
+            # Worker checks the fresh listing again immediately before opening
+            # the annual diary. A saved selection never authorizes this itself.
+            result = captured_preview(driver.capture_selected(class_id, year, context), class_id, year)
+            with self._lock:
+                self._check(generation, True, {"capturing"})
+                self._state = "preview_ready"
+                return {"session": self._status(), "preview": result}
+        except Exception:
+            with self._lock:
+                if generation == self._generation:
+                    self._catalog = None
+                    self._state = "awaiting_user"
+            raise SessionError("A turma não passou pela revalidação da lista e do diário. Carregue as turmas novamente; a seleção salva foi preservada.") from None
 
     def _status(self):
         return {"generation": self._generation, "state": self._state,
@@ -92,6 +181,7 @@ class ManualSession:
             if self._state != "closed" or self._driver is not None:
                 raise SessionError("A sessão anterior ainda está sendo encerrada. Aguarde e tente novamente.")
             self._scope = {"class_id": class_id, "year": year, "url": url}
+            self._mode = "annual"
             self._state = "prepared"
             return self._status()
 
@@ -158,6 +248,7 @@ class ManualSession:
             self._generation += 1
             driver = self._driver
             self._state, self._scope = "closing", None
+            self._catalog = None
         if driver is not None:
             try:
                 driver.close()

@@ -33,3 +33,9 @@ Limites defensivos: 24 MiB de HTML na interface/serviço, 64 fichas, 130 mil
 registros, 200 mil nós e diagnósticos agregados por código/ficha. Excesso de
 volume descarta a prévia parcial e mantém o envio bloqueado.
 
+
+A seleção de turmas da versão0.3 usa arquivo separado class-selection.json.
+Só contém IDs de turmas,ano/contexto não secreto e revisão. Toda nova sessão e
+captura exige listagem atual; escolhas ausentes não são revogadas nem autorizam
+leitura. Veja CLASS_DISCOVERY_EVIDENCE.md. Senhas/cookies/tokens continuam fora
+das preferências. A origem e o proxy/TLS não foram ampliados.

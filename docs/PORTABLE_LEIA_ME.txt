@@ -1,4 +1,4 @@
-COLETOR DE FREQUÊNCIA — 0.2.0 TESTE
+COLETOR DE FREQUÊNCIA — 0.3.0 TESTE
 Pacote portátil para Windows de 64 bits
 
 COMO ABRIR
@@ -14,8 +14,11 @@ Este pacote não instala dependências automaticamente.
 O QUE VOCÊ PODE TESTAR
 - Usar dados de exemplo, sem alunos reais.
 - Abrir um diário HTML escolhido por você e conferir a leitura.
-- Preparar sessão manual, confirmar abertura, entrar diretamente no site,
-  conferir turma/ano, confirmar leitura local e encerrar a sessão.
+- Escolher o ano, autorizar e usar Entrar no Smecel.
+- Fazer login na janela separada e clicar em Carregar turmas.
+- Marcar as turmas pelo nome. As escolhas são salvas automaticamente.
+- Escolher uma turma marcada, autorizar e usar Ler diário manualmente.
+- Encerrar sessão e descartar prévia. Nenhum código de turma precisa ser digitado.
 - Ajustar os horários, tema e preferências da raposa.
 - Usar "Ocultar na bandeja" e mostrar a mesma janela pelo ícone.
 - Menu da bandeja: Mostrar janela, Ocultar janela e Sair.
@@ -32,12 +35,16 @@ Todo estado informa Coleta desligada.
 Uma marcação de aula prevista não confirma presença.
 
 CONFIGURAÇÕES LOCAIS
-Somente horários, tema e opções da raposa ficam na pasta própria
+Horários, tema, opções da raposa e escolha de turmas por ano/contexto ficam na pasta própria
 ColetorFrequenciaSmecel, nos dados locais do seu usuário Windows.
 Não exporta alunos, HTML, senhas, cookies ou estado autenticado para arquivos.
 A sessão usa um contexto de navegador sem persistência e temporários próprios,
 removidos ao encerrar. Fechar o programa também encerra seus processos.
 Nunca use perfil pessoal do Edge, nem informe senha no coletor.
+A escolha de turmas fica em class-selection.json, sem nomes/dados de alunos.
+Depois de novo login, a lista é lida de novo. Ausência numa lista filtrada não
+apaga escolhas anteriores. Para remover todas, use Limpar seleção deste ano e contexto.
+Só turmas observadas no contexto/ano atual podem ter diário lido.
 Configurações não são compartilhadas com outros computadores.
 Se o arquivo for inválido, mostra aviso e sugestões. Salve novamente para recuperar.
 O Atualizador de Planilhas usa arquivos separados e não é alterado.
