@@ -34,6 +34,40 @@ e guardar seu refresh token cifrado no servidor, separado do token do dispositiv
 Isso é uma dependência real de consent/armazenamento, ainda não aprovada/ativada.
 Não alterar os scopes de login de outros módulos nem seus grants existentes.
 
+Importante: refresh token Microsoft é vinculado a usuário+clientId, não a um
+recurso, tenant ou módulo. Marcar o fluxo como Coletor não o restringe no Entra.
+O token permanece somente no backend; isso protege o desktop, não transforma o
+refresh token servidor em uma credencial collector-only. Atualmente o Web só tem
+os grants OIDC observados. Reutilizar esse client exige allowlist fixa de tenant,
+issuer, client, Graph/User.Read e chamadas próprias, além de detectar novos
+consents antes de ativar uso mais amplo. Não permitir scopes/URLs do cliente.
+Isolamento por clientId exigiria App Registration confidencial separado, redirect
+e credencial próprios no servidor: alternativa que NÃO foi aprovada/configurada.
+
+Refresh Microsoft pode devolver token novo sem invalidar o antigo. Guardar só o
+mais recente com versão/CAS evita concorrência no nosso serviço, mas não comprova
+replay detection Microsoft nem revogação do anterior. Excluir o ciphertext local
+ou sair do Coletor também não revoga tokens Microsoft previamente copiados.
+Revogação do vínculo próprio bloqueia emissão/uso das licenças do Coletor; não
+executar revokeSignInSessions global, que atingiria acessos de outros módulos.
+
+Armazenamento servidor candidato: AEAD com propósito e additionalData vinculados
+a tenant/client/account/registro/versão, acesso restrito ao broker de renovação,
+sem logs/retorno de tokens, transações para substituir o valor e descarte ao
+encerrar o vínculo. SESSION_SECRET/seal atual não possui essa separação de
+propósito/AAD; não copiar seu formato sem adaptação/revisão. Separação criptográfica
+de propósito não isola comprometimento do segredo raiz ou do runtime inteiro.
+invalid_grant/interaction_required, identidade/audience/tenant divergentes ou
+propriedades negadas/ausentes suspendem o acesso e exigem o caminho legítimo.
+
+A autorização inicial exige transação Coletor ligada à chave/nonce e identidade
+validada no fluxo OAuth oficial, seguida de verificação própria atual. Cookie
+Web antigo e papel armazenado não são prova nova de diretório/revogação. O tempo
+de origem deve vir do fluxo validado; não fabricar origem recente renovando
+timestamp local. Revalidação não muda a conta/tenant originalmente vinculados.
+
+Fonte: [refresh tokens Microsoft](https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens).
+
 Antes de ativar, um teste autorizado deve confirmar que User.Read permite obter
 as propriedades próprias accountEnabled/signInSessionsValidFromDateTime exigidas
 pelo contrato. A documentação geral de GET /me é User.Read; não há comprovação
