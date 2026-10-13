@@ -90,6 +90,7 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
     {live && <>
       <p role="status">Turma {session.scope?.class_id} · Ano {session.scope?.year} · {prepared ? 'Sessão preparada, sem acesso ao site.' : 'Confira o diário na janela separada. A entrada no site não foi verificada pelo programa.'}</p>
       <p><code>{session.scope?.url}</code></p>
+      {opened && <p>Depois de entrar no site, abra esse endereço na janela separada do Edge e confira a escola, a turma e o ano antes de autorizar a leitura.</p>}
       {(prepared || opened) && <label className="status-line"><input type="checkbox" checked={confirmation} disabled={busy} onChange={e => setConfirmation(e.target.checked)} />{prepared ? 'Autorizo abrir esta turma e este ano no Smecel e fazer o login diretamente no site.' : 'Conferi a turma e o ano na janela separada e autorizo ler este diário para uma prévia local, sem envio.'}</label>}
       {prepared && <Button isDisabled={busy || !confirmation} onPress={() => { void perform(async () => checked(await (await bridge()).open_manual_session(session.generation, true))); }}>Abrir Smecel</Button>}
       {opened && <Button isDisabled={busy || !confirmation} onPress={() => { void capture(); }}>Ler diário manualmente</Button>}

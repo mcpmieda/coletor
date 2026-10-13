@@ -5,6 +5,7 @@ import re
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from coletor.demo import build_fixture
@@ -143,6 +144,12 @@ class ManualSessionTests(unittest.TestCase):
             worker.open(source_url("13331", 2026))
         self.assertIsNone(worker._process)
         self.assertIsNone(worker._temporary)
+
+    def test_gui_launcher_uses_pipe_capable_sibling_interpreter_without_console(self):
+        with patch('coletor.manual_worker.sys.executable', str(Path('portable') / 'pythonw.exe')):
+            command = BrowserWorker()._command()
+        self.assertEqual(Path(command[0]).name, 'python.exe')
+        self.assertEqual(command[1:], ['-m', 'coletor.manual_worker'])
 
     def test_operational_failure_is_redacted_and_session_closed(self):
         def failed(_url):

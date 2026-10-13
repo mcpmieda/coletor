@@ -1,4 +1,4 @@
-"""Unprivileged external Edge worker. Private IPC; no persisted session or HTML."""
+"""External Edge worker without the desktop bridge. Private, transient IPC."""
 import json
 import os
 from pathlib import Path
@@ -8,13 +8,13 @@ import sys
 import tempfile
 import threading
 
-from .limits import MAX_HTML_BYTES, MAX_REQUEST_BYTES
+from .limits import MAX_HTML_BYTES, MAX_REQUEST_BYTES, MAX_NODES
 
 # Clone only the documented report container; never serialize login inputs.
 CAPTURE_JS = """() => {
   const password_form = !!document.querySelector('input[type="password"]');
   const containers = document.querySelectorAll('div.container-fluid');
-  if (password_form || containers.length !== 1 || document.querySelectorAll('*').length > 200000) return {url: location.href, password_form, html: ''};
+  if (password_form || containers.length !== 1 || document.querySelectorAll('*').length > NODE_LIMIT) return {url: location.href, password_form, html: ''};
   const clone = containers[0].cloneNode(true);
   clone.querySelectorAll('script,style,form,input,textarea,select,button,iframe,object,embed,link,meta,video,audio,img').forEach(n => n.remove());
   for (const n of [clone, ...clone.querySelectorAll('*')]) {
@@ -26,9 +26,9 @@ CAPTURE_JS = """() => {
     }
   }
   const html = '<html><body>' + clone.outerHTML + '</body></html>';
-  if (new TextEncoder().encode(html).length > 25165824) return {error: 'report_too_large'};
+  if (new TextEncoder().encode(html).length > HTML_LIMIT) return {error: 'report_too_large'};
   return {url: location.href, password_form, html};
-}"""
+}""".replace("NODE_LIMIT", str(MAX_NODES)).replace("HTML_LIMIT", str(MAX_HTML_BYTES))
 
 
 def configure_context(context, request_delegate=None):
@@ -62,7 +62,12 @@ class BrowserWorker:
         self._closed = False
 
     def _command(self):
-        return [sys.executable, "-m", "coletor.manual_worker"]
+        executable = Path(sys.executable)
+        # The portable GUI uses pythonw.exe, which has no usable stdio. The
+        # private pipe worker must use its sibling python.exe, without a console.
+        if executable.name.lower() == "pythonw.exe":
+            executable = executable.with_name("python.exe")
+        return [str(executable), "-m", "coletor.manual_worker"]
 
     def _rpc(self, command, timeout=40):
         with self._rpc_lock:
@@ -146,6 +151,10 @@ class BrowserWorker:
 
 
 def main():
+    # Windows redirected stdio otherwise uses the system code page. JSON carries
+    # Portuguese text and symbols, so both ends of private IPC use explicit UTF-8.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     from .manual_session import matches_source
     from urllib.parse import parse_qsl, urlsplit
     from playwright.sync_api import sync_playwright

@@ -2,7 +2,7 @@
 
 Coletor de frequência escolar para integração com o Ecossistema Escolar.
 
-## Primeiro marco: prévia local, sem envio
+## Prévia local e sessão manual, sem envio
 
 Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo o
 padrão de interface do Atualizador de Planilhas 1.3.0: HeroUI, Segoe UI e temas
@@ -10,6 +10,8 @@ claro, escuro e automático. A identidade do coletor usa vermelho/bordô, confor
 a escolha posterior do usuário.
 
 Implementado:
+- Sessão manual em Edge separado, com confirmação de abertura e leitura por turma/ano.
+- Login digitado pelo operador diretamente no site, sem senha na bridge do coletor.
 - Abertura de HTML selecionado pelo operador, processado somente em memória.
 - Parser de diário anual: fichas, FEV–DEZ, dias válidos e seis posições de aula.
 - Prévia por aluno/mês, paginação e alertas de validação.
@@ -22,9 +24,12 @@ A marca `•` é “aula prevista/presença” e continua **sem confirmação**.
 presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total de
 fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
 
-Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
+Não implementado: autenticação validada da escola/Ecossistema, login automático,
+coleta automática, credenciais persistentes, API de produção, banco,
 execução agendada, coordenação dos computadores autorizados, portal ou instalador.
-A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
+A interface mostra essas etapas como futuras. A leitura manual não prova identidade
+ou completude da turma; o fluxo real de login/SSO aguarda validação autorizada.
+Veja [escopo e segurança da sessão manual](docs/MANUAL_SESSION_MILESTONE.md). Não há endpoint de sincronização.
 O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
 exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
 
@@ -54,8 +59,8 @@ Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
 
 O CI privado agora prepara um ZIP para Windows x64 com Python oficial embutido,
 dependências e interface compilada. O ZIP só é gerado se o teste da janela nativa
-passar. Extraia a pasta inteira e use `Abrir Coletor.cmd`; não é um instalador.
-WebView2 continua sendo requisito e não é instalado automaticamente. Validação
+passar, junto dos gates de sessão manual e Edge externo. Extraia a pasta inteira e use `Abrir Coletor.cmd`; não é um instalador.
+Microsoft Edge, WebView2 e .NET 4.8 continuam sendo requisitos e não é instalado automaticamente. Validação
 nos computadores da escola é separada do CI. Veja [conteúdo e verificações](docs/WINDOWS_PORTABLE.md)
 e [instruções simples do pacote](docs/PORTABLE_LEIA_ME.txt).
 
@@ -108,6 +113,7 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 
 ## Arquitetura e revisão
 
+- [Sessão manual isolada, limites e validação pendente](docs/MANUAL_SESSION_MILESTONE.md)
 - [Agenda escolar editável, apenas local](docs/SCHEDULE_CONFIG.md)
 - [Raposa e bandeja da prévia](docs/MASCOT_TRAY_PLAN.md)
 - [Regras e fontes Smecel observadas](docs/SMECEL_SOURCE_RULES.md)
