@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import sys
 import threading
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -37,7 +38,9 @@ class Driver:
 class ManualSessionTests(unittest.TestCase):
     def setUp(self):
         self.driver = Driver()
-        self.session = ManualSession(lambda: self.driver)
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.session = ManualSession(lambda: self.driver, self.directory.name)
 
     def opened(self):
         prepared = self.session.prepare("13331", 2026)
