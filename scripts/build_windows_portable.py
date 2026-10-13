@@ -91,13 +91,14 @@ def build(output, source_commit):
     (runtime / "python313._pth").write_text("python313.zip\n.\nLib\\site-packages\napp\nimport site\n", encoding="ascii")
     site = runtime / "Lib/site-packages"
     subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-        "--no-warn-script-location", "--no-compile", "--target", str(site),
+        "--no-warn-script-location", "--no-compile", "--require-hashes", "--no-build-isolation", "--target", str(site),
         "--index-url", "https://pypi.org/simple", "-r", str(ROOT / "requirements-windows-portable.txt")], check=True)
     # Only application code and built static UI; no diaries, captures or profiles.
     app = runtime / "app/coletor"
     app.mkdir(parents=True)
     for p in sorted((ROOT / "app/coletor").glob("*.py")):
         shutil.copyfile(p, app / p.name)
+    shutil.copyfile(ROOT / "app/coletor/preview-limits.json", app / "preview-limits.json")
     shutil.copytree(ROOT / "app/assets", runtime / "app/assets")
     shutil.copytree(ROOT / "ui/dist", runtime / "ui/dist")
     shutil.copyfile(ROOT / "docs/PORTABLE_LEIA_ME.txt", bundle / "LEIA-ME.txt")
@@ -127,6 +128,7 @@ def validate_tray_evidence(report):
               "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
     extended = {"actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
                 "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
+                "discard_blocks_new_reads", "discarded_result_stays_hidden",
                 "error_state_static_and_generic", "hidden_fox_uses_neutral_icon"}
     workers = report.get("workers", [])
     if (report.get("test") != "portable_windows_tray" or report.get("status") != "passed"

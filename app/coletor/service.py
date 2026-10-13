@@ -7,12 +7,12 @@ from .validation import validate_for_transmission
 from .demo import build_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
-MAX_HTML_BYTES = 8 * 1024 * 1024
+from .limits import MAX_HTML_BYTES
 
 
 def preview(html: str, class_id: str, year: int, mode: str = "local") -> dict:
     if not isinstance(html, str) or len(html.encode("utf-8")) > MAX_HTML_BYTES:
-        raise ValueError("Diário inválido ou acima de 8 MB.")
+        raise ValueError("Diário inválido ou acima de 24 MiB.")
     if not isinstance(class_id, str) or not class_id.strip() or len(class_id) > 80:
         raise ValueError("Confira o código da turma.")
     if type(year) is not int or not 2000 <= year <= 2100:

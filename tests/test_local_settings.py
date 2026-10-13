@@ -40,7 +40,7 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertEqual(actual["schedule"], expected)
         self.assertEqual(actual["theme"], "dark")
         self.assertEqual(actual["fox"], {"version": 1, "show": False, "animate": False})
-        self.assertEqual(set(p.name for p in self.directory.iterdir()), {"settings.json"})
+        self.assertEqual(set(p.name for p in self.directory.iterdir()), {"settings.json", "settings.lock"})
         self.assertEqual(set(actual), {"schemaVersion", "schedule", "theme", "fox"})
 
     def test_invalid_payload_never_replaces_previous_settings(self):
@@ -78,7 +78,7 @@ class LocalSettingsTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), raw)
                 self.store.update("theme", "light")
                 self.assertEqual(LocalSettings(self.directory).read()["settings"]["theme"], "light")
-                self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json"])
+                self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json", "settings.lock"])
 
     def test_atomic_replace_failure_keeps_original_and_cleans_temp(self):
         self.store.update("theme", "dark")
@@ -87,7 +87,7 @@ class LocalSettingsTests(unittest.TestCase):
         with patch("coletor.local_settings.os.replace", side_effect=OSError("DO_NOT_ECHO")):
             with self.assertRaises(OSError): self.store.update("theme", "light")
         self.assertEqual(path.read_bytes(), before)
-        self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json"])
+        self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json", "settings.lock"])
 
     def test_other_application_files_remain_unchanged(self):
         other = self.root / "Atualizador de Planilhas"

@@ -162,16 +162,18 @@ class AnnualParserTests(unittest.TestCase):
         duplicate = replace(self.clean, records=self.clean.records + self.clean.records[:1])
         self.assertIn("DUPLICATE_RECORD", {i.code for i in validate_for_transmission(duplicate, self.mapping()).issues})
 
-    def test_safe_payload_contains_only_explicit_upserts(self):
-        payload = build_safe_payload(self.clean, self.mapping())
-        self.assertEqual(payload["mode"], "upsert_explicit_only")
-        self.assertEqual(len(payload["records"]), 2)
-        self.assertTrue(all(r["state"] in {"present", "absent"} for r in payload["records"]))
-        self.assertTrue(all(set(r) == {"studentUid", "date", "lesson", "state"} for r in payload["records"]))
-        serialized = json.dumps(payload)
-        self.assertNotIn("delete", serialized)
-        self.assertNotIn("replace", serialized)
-        self.assertNotIn("Aluno", serialized)
+    def test_synthetic_payload_is_forbidden_even_with_complete_mapping(self):
+        with self.assertRaisesRegex(ValueError, "SYNTHETIC_TRANSMISSION_FORBIDDEN"):
+            build_safe_payload(self.clean, self.mapping())
+
+    def test_forged_source_label_and_receipt_cannot_authorize_prototype(self):
+        forged = replace(self.clean, source_format="smecel-annual-v1")
+        forged = replace(forged, snapshot_id=canonical_snapshot_id(forged))
+        result = validate_for_transmission(forged, self.mapping(forged))
+        self.assertFalse(result.allowed)
+        self.assertIn("SOURCE_PROVENANCE_REQUIRED", {i.code for i in result.issues})
+        with self.assertRaisesRegex(ValueError, "TRANSMISSION_DISABLED"):
+            build_safe_payload(forged, self.mapping(forged))
 
     def test_real_shape_is_previewed_but_provenance_remains_blocked(self):
         raw = re.sub(r' data-(?:report|class-id|year|student-count|student-row|report-end)="[^"]*"', '', self.clean_html)

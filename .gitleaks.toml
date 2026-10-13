@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed false positive: public localStorage namespace, not an API credential (AUD-007)."
+regexTarget = "secret"
+regexes = ['''^coletor-smecel\.fox\.v1$''']

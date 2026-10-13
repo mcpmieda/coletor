@@ -1,3 +1,4 @@
+import limits from '../../app/coletor/preview-limits.json';
 import type { Preview } from './types';
 import type { TrayBridge } from './desktop';
 interface NativeApi extends Partial<TrayBridge> { load_demo(): Promise<Preview | { error: string }>; preview_html(html: string, classId: string, year: number): Promise<Preview | { error: string }>; get_local_settings?: import('./localSettings').SettingsBridge['get_local_settings']; save_schedule?: import('./localSettings').SettingsBridge['save_schedule']; save_theme?: import('./localSettings').SettingsBridge['save_theme']; save_fox?: import('./localSettings').SettingsBridge['save_fox'] }
@@ -34,8 +35,10 @@ export async function loadDemo(signal?: AbortSignal): Promise<Preview> {
 export async function previewHtml(html: string, classId: string, year: number, signal?: AbortSignal): Promise<Preview> {
   const native = await nativeApi();
   if (native) return unwrap(await native.preview_html(html, classId.trim(), year));
+  const body = JSON.stringify({ html, class_id: classId.trim(), year });
+  if (new TextEncoder().encode(body).byteLength > limits.requestBytes) throw new Error('O pedido excede o limite seguro de transporte.');
   return request('/api/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ html, class_id: classId.trim(), year }),
+    body,
   });
 }
 

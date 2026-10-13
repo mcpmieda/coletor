@@ -96,3 +96,33 @@ test('browser preview keeps its own browser storage and never creates a disk end
   expect(local.readLocalSchedule().config.localRevision).toBe(1);
 });
 
+test.each(['Arquivo corrompido. Mostramos sugestões.', 'Arquivo inacessível. Mostramos sugestões.'])('reload preserves backend recovery notice: %s', async recovery => {
+  const get = vi.fn().mockResolvedValueOnce({ settings: defaults() })
+    .mockResolvedValueOnce({ settings: defaults(), notice: recovery });
+  vi.stubGlobal('window', { location: { hash: '#coletor-desktop' }, pywebview: { api: { get_local_settings: get } } });
+  const local = await import('./localSettings'); await local.initializeLocalSettings();
+  const result = await local.reloadLocalSchedule();
+  expect(result.notice).toBe(recovery);
+  expect(local.localSettingsNotice()).toBe(recovery);
+  expect(result.config.localRevision).toBe(0);
+});
+
+test('reload is serialized with saves; pending read cannot return after a completed write', async () => {
+  let finishRead!: (reply: unknown) => void;
+  const get = vi.fn().mockResolvedValueOnce({ settings: defaults() })
+    .mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+  const save = vi.fn().mockImplementation(async schedule => ({ settings: { ...defaults(), schedule } }));
+  vi.stubGlobal('window', { location: { hash: '#coletor-desktop' }, pywebview: { api: { get_local_settings: get, save_schedule: save } } });
+  const local = await import('./localSettings'); await local.initializeLocalSettings();
+  const pendingRead = local.reloadLocalSchedule();
+  const draft = defaultSchedule(); draft.rules[0].times[0] = '08:15';
+  const pendingWrite = local.saveLocalSchedule(draft);
+  await Promise.resolve();
+  expect(save).not.toHaveBeenCalled();
+  finishRead({ settings: defaults(), notice: 'Mostramos sugestões.' });
+  expect((await pendingRead).notice).toBe('Mostramos sugestões.');
+  await pendingWrite;
+  expect(local.readLocalSchedule().config.rules[0].times[0]).toBe('08:15');
+  expect(local.localSettingsNotice()).toBe('');
+});
+

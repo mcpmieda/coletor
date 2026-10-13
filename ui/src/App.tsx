@@ -1,3 +1,4 @@
+import limits from '../../app/coletor/preview-limits.json';
 import { useRef, useState } from 'react';
 import { Button, Input, Label, TextField } from '@heroui/react';
 import { FileUp, FlaskConical, LayoutDashboard, ShieldCheck, Monitor, Clock3, X } from 'lucide-react';
@@ -23,20 +24,23 @@ export default function App() {
   const [view, setView] = useState<'preview' | 'roadmap' | 'schedule'>('preview');
   const fileRef = useRef<HTMLInputElement>(null);
   const operation = useRef(0);
+  const running = useRef(false);
   const abort = useRef<AbortController | null>(null);
   async function run(work: (signal: AbortSignal) => Promise<Preview>) {
+    if (running.current) return;
+    running.current = true;
     const id = ++operation.current;
     abort.current?.abort();
     const controller = new AbortController(); abort.current = controller;
     setBusy(true); setError(''); setPreview(null);
     try { const result = await work(controller.signal); if (operation.current === id) setPreview(result); }
     catch (e) { if (operation.current === id && !controller.signal.aborted) setError(e instanceof Error ? e.message : 'Não foi possível abrir o arquivo.'); }
-    finally { if (operation.current === id) setBusy(false); }
+    finally { running.current = false; setBusy(false); }
   }
-  function clear() { operation.current++; abort.current?.abort(); setPreview(null); setBusy(false); setError(''); if (fileRef.current) fileRef.current.value = ''; }
+  function clear() { operation.current++; setPreview(null); setError(''); if (fileRef.current) fileRef.current.value = ''; }
   function importFile(file?: File) {
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) { clear(); setError('Escolha um arquivo de até 8 MB.'); return; }
+    if (!file || running.current) return;
+    if (file.size > limits.htmlBytes) { clear(); setError(`Arquivo com ${(file.size / 1048576).toFixed(1)} MiB; escolha um arquivo de até 24 MiB.`); return; }
     if (!classId.trim() || !/^\d{4}$/.test(year)) { setError('Preencha o código da turma e o ano com quatro números.'); return; }
     void run(async signal => previewHtml(await file.text(), classId, Number(year), signal));
   }
@@ -62,7 +66,7 @@ export default function App() {
         <section className="panel source-panel" aria-labelledby="source-title"><div className="section-heading"><div><h2 id="source-title">Diário da turma</h2><p>Abra um diário do Smecel ou use os dados de exemplo.</p></div><FileUp size={22} className="muted" /></div>
           <div className="source-controls"><TextField value={classId} onChange={setClassId} isDisabled={busy}><Label>Código da turma</Label><Input /></TextField><TextField value={year} onChange={setYear} isDisabled={busy}><Label>Ano</Label><Input inputMode="numeric" maxLength={4} /></TextField><div className="source-actions"><Button variant="secondary" isDisabled={busy} onPress={() => { void run(loadDemo); }}><FlaskConical size={16} />Usar dados de exemplo</Button><Button isDisabled={busy} onPress={() => fileRef.current?.click()}><FileUp size={16} />Abrir diário</Button></div></div>
           <input className="sr-only" ref={fileRef} type="file" accept=".html,.htm,text/html" aria-label="Selecionar arquivo do diário" onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} />
-          {busy && <div className="status-line" role="status">Lendo o diário…<Button size="sm" variant="ghost" onPress={clear}>Cancelar</Button></div>}
+          {busy && <div className="status-line" role="status">Lendo o diário. Descartar oculta o resultado; aguarde a leitura terminar.<Button size="sm" variant="ghost" onPress={clear}>Descartar resultado</Button></div>}
           {error && <div className="error-message" role="alert">{error}</div>}
         </section>
         {preview ? <><div className="preview-context"><span>{preview.mode === 'demo' ? 'Dados de exemplo' : 'Arquivo deste computador'} · Lido às {new Date(preview.processed_at).toLocaleTimeString('pt-BR')}</span><Button size="sm" variant="ghost" onPress={clear}><X size={14} />Fechar diário</Button></div><div className="summary-grid"><div><span>Alunos no diário</span><strong>{preview.snapshot.students.length}</strong></div><div><span>Faltas</span><strong>{states?.absent ?? 0}</strong></div><div><span>Marcações sem confirmação</span><strong>{states?.planned_unknown ?? 0}</strong></div><div><span>Dados enviados</span><strong>0</strong></div></div><div className="content-grid"><AttendancePreview key={preview.snapshot.snapshot_id} preview={preview} /><ValidationPanel preview={preview} /></div></> : !busy && <section className="empty-state"><span className="empty-icon"><ShieldCheck size={30} /></span><h2>Vamos conferir a frequência?</h2><p>Abra um diário ou use os dados de exemplo.</p><div className="empty-footnote">Seus dados não são enviados.</div></section>}

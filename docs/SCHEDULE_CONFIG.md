@@ -65,3 +65,15 @@ Antes da automação: confirmar vigência, calendário/exceções, política de 
 compensação de horários perdidos, login expirado, fuso na mudança de data e eleição
 do líder. Abrir/coletar/fechar navegador, Coletar agora e Pausar são etapas futuras.
 
+
+## Concorrência local da janela Windows
+
+Gravações usam lock interprocessual do SO em `settings.lock` (sidecar sem dados
+acadêmicos/segredos) e substituição atômica de `settings.json`. A agenda enviada
+precisa ter `localRevision` exatamente uma unidade acima da salva; uma edição
+obsoleta recebe `SCHEDULE_REVISION_CONFLICT`, sem sobrescrever o arquivo.
+O operador pode recarregar e descartar suas alterações para partir da revisão
+atual. O lock persiste no disco para evitar corrida entre nomes de arquivos;
+o SO libera a trava no encerramento/crash. Se a aquisição falhar, não há gravação.
+Essa proteção não cria sincronização entre computadores e não transforma o
+localStorage do navegador em armazenamento compartilhado transacional.

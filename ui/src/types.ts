@@ -16,4 +16,4 @@ export interface Snapshot {
   summary: { students: number; records: number; states: Partial<Record<AttendanceState, number>>; blocking_issues: number };
 }
 export interface Preview { snapshot: Snapshot; validation: { allowed: boolean; issues: Issue[] }; mode: 'demo' | 'local'; processed_at: string }
-export const STATE_LABELS: Record<AttendanceState, string> = { present: 'Presença marcada', absent: 'Falta marcada', planned_unknown: 'Aula prevista / sem confirmação', unmarked: 'Sem marcação', unknown: 'Marca não reconhecida', excused_absent: 'Falta justificada', non_school_day: 'Dia não letivo', outside_enrollment: 'Fora do período de matrícula' };
+export const STATE_LABELS: Record<AttendanceState, string> = { present: 'Presença marcada', absent: 'Falta marcada', planned_unknown: 'Ponto / sem confirmação', unmarked: 'Sem marcação', unknown: 'Marca não reconhecida', excused_absent: 'Falta justificada', non_school_day: 'Dia não letivo', outside_enrollment: 'Fora do período de matrícula' };

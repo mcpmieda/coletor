@@ -1,5 +1,6 @@
 """Local, non-secret desktop settings; never browser profiles or diary storage."""
 from copy import deepcopy
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -83,12 +84,42 @@ def user_settings_directory():
     return Path(base) / "ColetorFrequenciaSmecel"
 
 
+class ScheduleConflict(ValueError):
+    """The operator must reload before saving an outdated schedule."""
+
+
 class LocalSettings:
-    """Only this fixed JSON file is used; construction performs no filesystem IO."""
+    """Fixed preference JSON and lock sidecar; construction performs no IO."""
     def __init__(self, directory=None):
         self._directory = Path(directory) if directory is not None else user_settings_directory()
         self._path = self._directory / "settings.json"
         self._lock = threading.RLock()
+
+    @contextmanager
+    def _process_lock(self):
+        # Persistent sidecar: removing a lock file would create an inode race.
+        # The OS releases the byte/flock lock on process exit, including crashes.
+        self._directory.mkdir(parents=True, exist_ok=True)
+        with (self._directory / "settings.lock").open("a+b") as lock:
+            if os.name == "nt":
+                import msvcrt
+                if lock.tell() == 0:
+                    lock.write(b"\0")
+                    lock.flush()
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def _read(self):
         try:
@@ -113,8 +144,13 @@ class LocalSettings:
     def update(self, field, value):
         if field not in {"schedule", "theme", "fox"}:
             raise ValueError("Unknown preference")
-        with self._lock:
+        with self._lock, self._process_lock():
             settings, _ = self._read()  # Preserve unrelated allowed preferences.
+            if field == "schedule":
+                value = validate_schedule(value)
+                revision = settings["schedule"]["localRevision"] if settings["schedule"] else 0
+                if value["localRevision"] != revision + 1:
+                    raise ScheduleConflict("SCHEDULE_REVISION_CONFLICT")
             settings[field] = value
             clean = validate_settings(settings)
             payload = (json.dumps(clean, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")

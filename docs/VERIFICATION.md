@@ -1,3 +1,16 @@
+# Estado da verificação em 13/10/2026
+
+A [matriz da auditoria #3](AUDIT_3_REMEDIATION.md) distingue testes desta correção
+dos relatos históricos abaixo. A implementação atual já possui bandeja WinForms
+e empacotamento portátil com CI nativo Windows; o CI anterior de `6fc0489`
+[passou](https://github.com/mcpmieda/coletor-frequencia-smecel/actions/runs/38022334544).
+Isso não é piloto na escola nem integração Smecel/API. Declarações antigas sobre
+bandeja/Windows ausentes descrevem apenas a etapa histórica em que foram escritas.
+O CI do novo SHA e a revisão independente devem ser conferidos antes de encerrar
+a auditoria. Envio, login, coleta automática e integração produtiva continuam ausentes.
+
+---
+
 # Verificação do primeiro marco
 
 ## Executado localmente

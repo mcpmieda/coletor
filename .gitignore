@@ -1,4 +1,6 @@
 node_modules/
+.tmp/
+.coverage
 ui/dist/
 __pycache__/
 *.py[cod]
