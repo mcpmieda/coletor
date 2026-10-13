@@ -162,7 +162,7 @@ class WindowsDeviceKey:
     def public_jwk(self):
         self._validate()
         blob = self._crypto.public_blob(self._key)
-        if not isinstance(blob, bytes) or len(blob) != 72 or struct.unpack('<II', blob[:8]) != (0x314B4345, 32):
+        if not isinstance(blob, bytes) or len(blob) != 72 or struct.unpack('<II', blob[:8]) != (0x31534345, 32):
             raise DeviceKeyError()
         encode = lambda value: base64.urlsafe_b64encode(value).decode('ascii').rstrip('=')
         return {'kty': 'EC', 'crv': 'P-256', 'x': encode(blob[8:40]), 'y': encode(blob[40:72]), 'ext': True}

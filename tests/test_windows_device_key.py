@@ -44,7 +44,7 @@ class FakeCrypto:
 
     def public_blob(self, key):
         self.calls.append(('public_only', key))
-        return struct.pack('<II', 0x314B4345, 32) + bytes(range(64))
+        return struct.pack('<II', 0x31534345, 32) + bytes(range(64))
 
     def sign_digest(self, key, digest):
         self.calls.append(('sign', digest))
@@ -149,6 +149,15 @@ class WindowsDeviceKeyTests(unittest.TestCase):
             WindowsDeviceKey(crypto=crypto).create(activation_authorized=True)
         self.assertTrue(crypto.exists)
         self.assertFalse(any(call[0] == 'delete' for call in crypto.calls))
+
+    def test_ecdh_public_blob_is_rejected_for_signing_key(self):
+        class WrongBlob(FakeCrypto):
+            def public_blob(self, key):
+                return struct.pack('<II', 0x314B4345, 32) + bytes(range(64))
+        crypto = WrongBlob()
+        with self.assertRaises(DeviceKeyError):
+            WindowsDeviceKey(crypto=crypto).create(activation_authorized=True)
+        self.assertFalse(crypto.exists)
 
 
 if __name__ == '__main__':

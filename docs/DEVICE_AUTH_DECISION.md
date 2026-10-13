@@ -110,9 +110,12 @@ Não cria key por load, não sobrescreve key existente, valida políticas no loa
 exporta apenas ECCPUBLICBLOB, assina SHA256 domain-separated em modo silencioso.
 close não apaga; forget exige remoção explícita e apaga somente a chave gerenciada.
 
-9 testes com FakeCrypto aprovados, sem chamar CNG nem criar credencial real.
-Isso não é QA nativo de TPM/CNG; ainda falta testar interoperabilidade de assinatura,
-segurança do desafio/nonce e emissão/renovação/revogação server. O gate anterior
+10 testes com FakeCrypto aprovados, sem chamar CNG nem criar credencial real.
+QA Windows de Software KSP com chave efêmera NULL-name passou: assinatura
+P-256/P1363 validada pelo Node, desafio alterado rejeitado e exportação privada
+negada. Não foi criada chave persistente nem vínculo/credencial de conta.
+TPM/armazenamento persistente não foram testados. Ainda falta validar segurança
+do desafio/nonce e emissão/renovação/revogação server. O gate anterior
 tem12regressões; ambas preparações permanecem sem ativação.
 
 Fila de envio: planejar idempotencyKey/snapshot autorizado e confirmação backend
