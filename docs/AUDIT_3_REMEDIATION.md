@@ -15,7 +15,7 @@ Todos os dados de teste são gerados sinteticamente.
 | AUD-003 | Melhoria de extensibilidade, sem corrupção demonstrada nas amostras de seis posições. | Cardinalidade suportada continua explicitamente em seis. Regressões 4/5/7 rejeitam o cabeçalho e mantêm transmissão bloqueada; seis permanece coberto. | Ampliação por modalidade exige novo contrato observado. Nenhum DDL/contrato acadêmico foi alterado; item triado para evolução futura. |
 | AUD-004 | Erro real da UI: deduplicação por mensagem escondia fichas distintas. | União deduplica apenas cópias exatas do diagnóstico; resumo conta diagnósticos/fichas, detalhes mostram referência/data/aula, filtro e páginas de 20. Testes com duas fichas e 25 diagnósticos. | Parser já agrega por código/ficha e retém a primeira localização. Não anunciamos contagem exata de eventos. Nomes ficam fora dos detalhes/logs. |
 | AUD-005 | Advisory confirmado na fonte oficial; versões 3.2.7 afetadas. | Vitest/mocker atualizados para 4.1.11 com lockfile regenerado; `npm ci`, testes, lint, tipos/build e `npm audit` verificados. | Escopo desenvolvimento; não foi demonstrada exploração no desktop. SCA é fotografia do momento. |
-| AUD-006 | Configuração real: `main protected=false`, required checks off, rulesets vazio. API somente leitura em 13/10/2026. | Proposta mínima abaixo; workflow ganha também `push` em main como defesa secundária. | **Pendente de autorização administrativa específica e disponibilidade no plano GitHub. Alterar workflow não resolve proteção de branch.** |
+| AUD-006 | Confirmado na base: `main protected=false`, required checks off, rulesets vazio. | Proteção aplicada por API após autorização específica em 13/10/2026; readback confirma PR/checks/conversas e administradores sujeitos às regras, strict=true, force-push/exclusão bloqueados. | Zero aprovações humanas obrigatórias é a escolha explícita do responsável para mantenedor único. Não foram feitos testes de push/merge em main; integração permanece não autorizada. |
 | AUD-007 | Lacuna de automação; não prova vulnerabilidade por cada ferramenta ausente nem ausência de controles externos. | CI adiciona Ruff (sintaxe/erros), ESLint (regras básicas e eval), Bandit (regras perigosas selecionadas), Gitleaks com redação e histórico, auditorias npm produção/dev e Python runtime/teste; cobertura mínima de 80% nas três regras sensíveis. | Não equivale a auditoria completa ou habilitação de CodeQL/secret scanning/push protection na plataforma. Configurações externas permanecem intactas e dependem de diagnóstico/autorização próprios. |
 | AUD-008 | Erro real: duas instâncias sobrescreviam a mesma revisão 1 sem aviso. | Lock SO entre processos em sidecar persistente, comparação de revisão sucessora e gravação atômica. Corrida de dois processos: um salva, outro recebe conflito. Ponte retorna conflito; UI preserva erro e permite recarregar. | Escopo desktop no mesmo perfil/arquivo; navegador continua com armazenamento próprio. Sem sincronização entre máquinas. Lock falha fechado se não adquirido; SO libera após encerramento. |
 | AUD-009 | Defesa em profundidade real, sem compromisso demonstrado. Python oficial já tinha hash; manifesto já tinha versões/hashes finais. | Actions fixadas nos SHAs oficiais das versões usadas; dependências Windows e ferramentas de build ganham hashes PyPI antecipados; pip exige hashes e não usa build isolation para baixar dependências não fixadas. Gitleaks também tem hash antecipado. | O lock aceita os artefatos publicados da versão exata, escolhidos conforme plataforma. O job Windows deve comprovar resolução/build final. npm preserva integrity; manifesto final continua obrigatório. Ferramentas de análise dev estão fixadas por versão, não têm lock transitivo completo. |
@@ -43,7 +43,7 @@ completo da janela WebView nem projeção de todo computador da escola.
 | 50 | 14.647.442 | 15.407.118 | 100.200 | 3,427 | 11.109.271 | 220.774.400 |
 | 64 | 18.748.602 | 19.720.952 | 128.256 | 4,424 | 14.224.747 | 274.149.376 |
 
-## AUD-006: proposta administrativa, não aplicada
+## AUD-006: configuração aprovada, aplicada e verificada
 
 Nomes reais dos checks do workflow: `verify` e `windows-portable`, emitidos por
 GitHub Actions (App ID `15368`), confirmados no CI do SHA original.
@@ -59,13 +59,13 @@ segundo revisor humano com write estiver disponível e autorizado, subir para 1.
 Não tornar CodeRabbit um check obrigatório sem confirmar que produz um check
 de aprovação utilizável — a PR draft original foi apenas ignorada pelo bot.
 
-Rota possível após confirmação específica: REST
+Rota aplicada após confirmação específica do responsável: REST
 `PUT /repos/mcpmieda/coletor-frequencia-smecel/branches/main/protection` pela CLI
-GitHub já autenticada. Leitura atual retorna `permissions.admin=true`; isso não
-garante plano elegível. O repositório é privado; proteção para privados exige
-plano compatível. Não mudar visibilidade, plano, permissões ou bypass para contornar.
+GitHub já autenticada e autorizada. A operação e o readback tiveram sucesso no
+repositório privado, sem alterar plano, visibilidade, permissões ou criar bypass.
+Veja a [evidência administrativa sanitizada](MAIN_PROTECTION_READBACK.json).
 
-Payload proposto (somente documentação):
+Payload aprovado e aplicado (registro documental):
 
 ```json
 {
@@ -91,9 +91,11 @@ Payload proposto (somente documentação):
 }
 ```
 
-Após configuração aprovada: reler a regra e verificar PR válida / rejeição de
-checks falhos e push direto em teste administrativo autorizado. Nenhum teste
-de escrita em main foi feito nesta entrega.
+Readback confirmou exatamente os checks e flags aprovados. Por orientação
+expressa do responsável, não foram feitos testes de push/merge em main. A leitura
+do auditor por outro conector não tinha acesso à rota administrativa; a evidência
+aqui é da rota CLI/API já autorizada, sem mudar autenticação para contornar esse
+conector. Não confundir verificação de configuração com teste destrutivo executado.
 
 ## Fontes e critério de encerramento
 
@@ -114,9 +116,16 @@ job Windows do novo SHA, não deste teste headless.
 - [Proteção e disponibilidade por plano](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
 - [REST branch protection](https://docs.github.com/en/rest/branches/branch-protection).
 
-Encerramento continua bloqueado enquanto houver requisito material pendente:
-AUD-006 administrativo, decisão explícita sobre itens triados, review independente
-do head corrigido e CI completo desse SHA (incluindo Windows portátil/nativo).
+A implementação do SHA `68d97240715e46aaf760a9c19beae17f563e8619` recebeu aprovação
+da revisão independente após corrigir os achados da recarga. O [CI 38434075500](https://github.com/mcpmieda/coletor-frequencia-smecel/actions/runs/38434075500)
+passou em `verify` e `windows-portable`, incluindo os três smokes nativos, cleanup
+verificado/zero processos restantes e ZIP de teste. Esta atualização posterior é
+documental; conferir também o CI do novo SHA antes do encerramento.
+
+AUD-003 está triado como limitação do formato observado nesta prévia: não há
+prova de corrupção nas seis posições suportadas, e a ampliação de modalidade
+permanece evolução de contrato, sem autorização de integração. Encerramento só
+é cabível com triagens/limites aceitos e nenhuma pendência material neste marco.
 Sucesso local não substitui esses gates. A publicação é PR draft, sem merge.
 
 
@@ -137,3 +146,34 @@ mostra o aviso recebido. Testes unitários e QA renderizado com bridge sintétic
 pendente cobrem recovery por corrupção/inacessibilidade, recarga seguida de save
 e impossibilidade de editar/salvar durante recarga. Novas alterações depois da
 conclusão permanecem no rascunho e no save seguinte.
+
+
+## Pedido adicional Sonar — diagnóstico sem ampliação de acesso
+
+O Ecossistema já emite `SonarCloud Code Analysis` com sucesso pelo app
+`sonarqubecloud` e usa `.sonarcloud.properties` para análise automática. Não foi
+encontrado check Sonar no head do Coletor nem configuração Sonar neste checkout.
+Isso não prova ausência de acesso concedido na instalação existente.
+
+A CLI retornou 403 ao listar instalações (`GET /user/installations`: exige token
+autorizado para GitHub App). Não houve troca de rota/credencial para contornar.
+Próximo passo mínimo: confirmar a seleção de repositórios da instalação existente
+e acesso de criação de projeto na conta Sonar. Se o Coletor já estiver autorizado,
+pode-se investigar importação/análise na organização existente. Se não estiver,
+apresentar e confirmar inclusão **somente deste repositório**, preservando os
+outros acessos e sem escolher todos os repositórios.
+
+Permissões declaradas publicamente pelo app em 13/10/2026: leitura de contents,
+metadata, emails, members e organization_copilot_seat_management; escrita de
+checks, statuses, pull_requests e security_events. A seleção deste repositório
+privado permite leitura externa de código/metadata e publicação dos resultados.
+Qualquer nova permissão, OAuth, token ou acesso persistente adicional exige
+confirmação específica. Nenhum desses atos ocorreu nesta entrega.
+
+A [análise automática](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/automatic-analysis.md)
+suporta as linguagens do projeto, mas não importa cobertura; esse gate continua
+no CI. `main` ainda tem somente README, portanto elegibilidade e utilidade da
+análise inicial precisam conferência. Não forçar análise sem código útil, pagar
+plano ou tornar o Sonar obrigatório antes de obter um check real neste repo.
+Alternativa de scanner no CI requer configuração/credencial própria; não foi
+criado token. O pedido Sonar permanece separado do código da auditoria validado.
