@@ -17,6 +17,7 @@ class PortableBuildTests(unittest.TestCase):
                   "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed",
                   "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
                   "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
+                  "discard_blocks_new_reads", "discarded_result_stays_hidden",
                   "error_state_static_and_generic", "hidden_fox_uses_neutral_icon", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
         report = {"test":"portable_windows_tray", "status":"passed", "cleanup":{"verified":True,"remaining_processes":0},
                   "only_nonsecret_settings_retained":True, "workers":[{"scenario":s,"status":"passed","cleanup":{"verified":True,"remaining_processes":0},"checks":{k:True for k in checks}} for s in ("quit","close")]}

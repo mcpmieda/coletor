@@ -29,6 +29,7 @@ REQUIRED_CHECKS = {
 EXTENDED_CHECKS = {
     "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
     "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
+    "discard_blocks_new_reads", "discarded_result_stays_hidden",
     "error_state_static_and_generic", "hidden_fox_uses_neutral_icon",
 }
 
@@ -158,8 +159,13 @@ def exercise(window,args,result):
             settings.click(window,"Descartar resultado")
             smoke.wait_js(window,"document.body.innerText.includes('Lendo o diário')")
             require("cancel_keeps_actual_native_read_truthful",inspect(tray)["activity"]=="reading")
+            require("discard_blocks_new_reads", window.evaluate_js("[...document.querySelectorAll('button')].filter(n=>['Usar dados de exemplo','Abrir diário'].includes(n.textContent.trim())).every(n=>n.disabled) && document.querySelector('input[inputmode=numeric]')?.disabled===true"))
             gate.set()
             wait(lambda:inspect(tray)["activity"]=="idle" and not inspect(tray)["timer"])
+            # Native end_read occurs before the bridge promise reaches React.
+            # Wait for both layers; do not race the legitimately disabled input.
+            smoke.wait_js(window, "document.querySelector('input[inputmode=numeric]')?.disabled===false && !document.body.innerText.includes('Lendo o diário')")
+            require("discarded_result_stays_hidden", window.evaluate_js("![...document.querySelectorAll('h2')].some(n=>n.textContent==='Prévia da turma')"))
             # A real invalid year reaches the existing local preview validator.
             settings.set_input(window,"Ano","0000")
             expression="""(() => {const input=document.querySelector('input[type=file]');const d=new DataTransfer();d.items.add(new File(['<html>synthetic-invalid</html>'],'synthetic-invalid.html',{type:'text/html'}));input.files=d.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()"""
@@ -177,7 +183,7 @@ def exercise(window,args,result):
         result["status"]="passed"
     except Exception as error:
         result["status"]="failed"
-        result["failure"]=str(error) if isinstance(error,smoke.SmokeFailure) else "native_tray_flow_failed"
+        result["failure"]=str(error) if isinstance(error,(smoke.SmokeFailure, settings.smoke.SmokeFailure)) else "native_tray_flow_failed"
         result["error_type"]=type(error).__name__
     finally:
         gate.set()
