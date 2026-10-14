@@ -36,16 +36,20 @@ from urllib.parse import urlparse
 SCHEMA = 1
 
 
-def synthetic_institutional_access():
+def synthetic_institutional_access(authorized=True):
     """Python QA fixture, outside the package. No runtime flag/JS bypass exists.
 
     Exercises the actual strict receipt validation with a synthetic transport;
     does not prove Microsoft login or production backend authorization.
     """
-    from coletor.institutional_access import InstitutionalAccess, OnlineResponse, PROPOSED_ACCESS_URL
+    from coletor.institutional_access import AccessDenied, InstitutionalAccess, OnlineResponse, PROPOSED_ACCESS_URL
 
     class Provider:
+        active = authorized
+
         def verify_online(self):
+            if not self.active:
+                raise AccessDenied("ACCESS_REQUIRED")
             now = datetime.now(timezone.utc)
             from datetime import timedelta
             body = {"contractVersion": 2, "authenticated": True, "authorized": True,
@@ -61,13 +65,17 @@ def synthetic_institutional_access():
         def close(self):
             return None
 
-    return InstitutionalAccess(Provider())
+    provider = Provider()
+    access = InstitutionalAccess(provider)
+    access._synthetic_enable = lambda: setattr(provider, "active", True)
+    return access
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 EXPECTED_NAMES = [f"Aluno sintético {number:03}" for number in range(1, 4)]
 LABELS = ["Conferir frequência", "Não envia dados", "Prévia da turma",
           "Alunos no diário", "Este exemplo usa alunos fictícios.",
           "Nenhum dado foi enviado", "• não confirma presença", "Envio desativado"]
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",
+                   "institutional_entry_visible", "native_denial_before_work", "fixture_authorized_only_python",
                    "native_window_visible", "edgechromium_control", "loopback_ui",
                    "dom_and_bridge_ready", "real_demo_button_clicked", "bridge_demo_verified",
                    "demo_rendered", "three_synthetic_options", "student_filter_works",
@@ -426,8 +434,30 @@ def run_worker(args) -> int:
             fail("unexpected_pywebview_version")
         evidence["stage"] = "launch_native_window"
         write_json(args.worker_output, {key: value for key, value in evidence.items() if not key.startswith("_")})
-        desktop.run_desktop(callback=lambda window: exercise_window(window, evidence, args.output_dir / "windows-portable.png"),
-                            settings_directory=args.output_dir / "isolated-settings", access=synthetic_institutional_access())
+        access = synthetic_institutional_access(authorized=False)
+
+        def institutional_entry(window):
+            try:
+                wait_js(window, "!!window.pywebview?.api?.get_institutional_access_status && [...document.querySelectorAll('h1')].some(n=>n.textContent==='Entrar no Ecossistema')")
+                evidence["checks"]["institutional_entry_visible"] = True
+                window.evaluate_js("window.__deniedNativeDemo=null;window.pywebview.api.load_demo().then(r=>window.__deniedNativeDemo=r);true")
+                wait_js(window, "!!window.__deniedNativeDemo")
+                denied = window.evaluate_js("window.__deniedNativeDemo")
+                if denied.get("code") != "ACCESS_REQUIRED" or "snapshot" in denied:
+                    fail("native_command_not_denied")
+                evidence["checks"]["native_denial_before_work"] = True
+                access._synthetic_enable()
+                evidence["checks"]["fixture_authorized_only_python"] = True
+                window.evaluate_js("window.dispatchEvent(new Event('coletoraccesschanged'));true")
+                exercise_window(window, evidence, args.output_dir / "windows-portable.png")
+            except Exception as error:
+                evidence["failure"] = str(error) if isinstance(error, SmokeFailure) else "institutional_entry_check_failed"
+                evidence["error_type"] = type(error).__name__
+                evidence["status"] = "failed"
+                window.destroy()
+
+        desktop.run_desktop(callback=institutional_entry,
+                            settings_directory=args.output_dir / "isolated-settings", access=access)
         evidence["checks"]["window_closed"] = True
         evidence["stage"] = "window_closed"
         if evidence["status"] != "passed" or not all(evidence["checks"].get(key) is True for key in REQUIRED_CHECKS):
