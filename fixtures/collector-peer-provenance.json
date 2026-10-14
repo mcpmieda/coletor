@@ -1,6 +1,7 @@
 {
   "scope": "QA-only stdin peer; never distributed with the desktop application",
-  "backend_repository": "mcpmieda/Ecossistema",
+  "backend_repository": "mcpmieda/ecossistema-escola",
+  "backend_commit": "1c86c0c71d8a2b40962a210f74acb86ef7bc4123",
   "bundle_sha256": "a683d1ddb1168ca0859fc8c18f676408847a02255f61abd39c8be7bbaec34d2d",
   "sources": {
     "scripts/ci/collector-auth-trial/peer-fixture-v1.ts": "75b1f2c6d1bb8d4ffd8ff62a3dbe8fc4b273056efd4deabdd40b6d5138899e32",

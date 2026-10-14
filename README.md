@@ -2,6 +2,11 @@
 
 Coletor de frequência escolar para integração com o Ecossistema Escolar.
 
+A PR draft de autorização prepara a entrada protegida e o vínculo revogável do
+computador. O pacote 0.4.0-teste bloqueia uso até o backend estar configurado e
+validado; a primeira chave exige confirmação explícita. A ativação real ainda
+não foi feita. Consulte [estado e limites](docs/DEVICE_AUTH_DECISION.md).
+
 ## Prévia local e sessão manual, sem envio
 
 Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo o
