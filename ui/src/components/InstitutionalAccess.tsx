@@ -7,7 +7,7 @@ import { paintTheme, readTheme } from '../theme';
 import App from '../App';
 
 export interface InstitutionalBridge {
-  get_institutional_access_status(): Promise<{ authenticated: boolean; authorized: boolean; code?: string }>;
+  get_institutional_access_status(): Promise<{ authenticated: boolean; authorized: boolean; code?: string; pairingCode?: string }>;
   open_institutional_login(): Promise<{ ok: true } | { error: string; code?: string }>;
   logout_institutional_access(): Promise<{ ok: true } | { error: string; code?: string }>;
 }
@@ -31,6 +31,8 @@ async function bridge(): Promise<InstitutionalBridge> {
 export default function InstitutionalAccess() {
   const [authorized, setAuthorized] = useState(false), [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
+  const [pairingCode, setPairingCode] = useState('');
+  const [cleanupPending, setCleanupPending] = useState(false);
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
   const previouslyAuthorized = useRef(false);
   const recheck = useCallback(async () => {
@@ -40,6 +42,8 @@ export default function InstitutionalAccess() {
     try {
       const result = await (await bridge()).get_institutional_access_status();
       if (!mounted.current || current !== epoch.current) return;
+      setPairingCode(typeof result.pairingCode === 'string' && /^[0-9]{6}$/.test(result.pairingCode) ? result.pairingCode : '');
+      setCleanupPending(result.code === 'ACCESS_CLEANUP_PENDING' || result.code === 'SERVER_REVOCATION_PENDING');
       if (result.authenticated === true && result.authorized === true) {
         if (!previouslyAuthorized.current) await initializeLocalSettings();
         const confirmed = await (await bridge()).get_institutional_access_status();
@@ -84,8 +88,8 @@ export default function InstitutionalAccess() {
       const result = await (await bridge()).logout_institutional_access();
       if ('error' in result) throw new Error(result.error);
       setNotice('Este computador foi desconectado.');
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Confira a conexão para encerrar o vínculo.'); }
-    finally { operation.current = false; setBusy(false); }
+    } catch (error) { setCleanupPending(true); setNotice(error instanceof Error ? error.message : 'Confira a conexão para encerrar o vínculo.'); }
+    finally { operation.current = false; setBusy(false); setPairingCode(''); void recheck(); }
   }
   if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div><App /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
@@ -93,6 +97,8 @@ export default function InstitutionalAccess() {
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>
     <Button isDisabled={busy} onPress={() => { void login(); }}><LogIn size={18} />Entrar no Ecossistema</Button>
     <Button variant="ghost" isDisabled={busy} onPress={() => { void recheck(); }}>Verificar acesso</Button>
+    {(pairingCode || cleanupPending) && <Button variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>{cleanupPending ? 'Concluir saída' : 'Cancelar autorização'}</Button>}
     {notice && <p role="status">{notice}</p>}<p className="muted">O login é feito no navegador. Não informe sua senha neste programa.</p>
+    {pairingCode && <p role="status">Digite este código no navegador: <strong>{pairingCode}</strong></p>}
   </section></main>;
 }

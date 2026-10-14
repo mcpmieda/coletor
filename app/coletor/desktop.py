@@ -50,5 +50,8 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         try:
             api._manual_session.close()
         finally:
-            if api._tray is not None: api._tray.stop()
+            try:
+                api._access.shutdown()
+            finally:
+                if api._tray is not None: api._tray.stop()
 

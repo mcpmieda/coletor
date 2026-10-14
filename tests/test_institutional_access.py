@@ -132,6 +132,31 @@ class InstitutionalAccessTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             gate.open_login()
 
+    def test_successful_explicit_cleanup_retry_clears_pending_but_does_not_authorize(self):
+        from unittest.mock import Mock
+        provider = Provider([])
+        provider.close = Mock(side_effect=[RuntimeError('synthetic-transient'), None])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW)
+        with self.assertRaises(AccessDenied):
+            gate.logout()
+        self.assertTrue(gate._cleanup_pending)
+        gate.logout()
+        self.assertFalse(gate._cleanup_pending)
+        gate.open_login()
+        self.assertTrue(provider.opened)
+
+    def test_source_cleanup_failure_does_not_skip_device_revocation_and_key_deletion(self):
+        from unittest.mock import Mock
+        provider = Provider([])
+        provider.close = Mock()
+        cleanup = Mock(side_effect=RuntimeError('synthetic-temporary-cleanup'))
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        with self.assertRaises(AccessDenied):
+            gate.logout()
+        provider.close.assert_called_once()
+        self.assertTrue(gate._cleanup_pending)
+        self.assertEqual(gate.status()['code'], 'ACCESS_CLEANUP_PENDING')
+
     def test_local_check_cannot_extend_expired_directory_evidence(self):
         with self.assertRaises(AccessDenied):
             validate_authorization(response(directoryCheckedAt=stamp(NOW-301),

@@ -25,7 +25,7 @@ try:
           window.pywebview={api:{
             get_institutional_access_status:async()=>{const f=window.__fixture;f.statusCalls++;
               if(f.defer) return new Promise(resolve=>f.pending.push(resolve));
-              return {authenticated:f.authorized,authorized:f.authorized};},
+              return {authenticated:f.authorized,authorized:f.authorized,pairingCode:f.pairingCode,code:f.code};},
             open_institutional_login:async()=>({ok:true}),
             logout_institutional_access:async()=>{window.__fixture.logoutCalls++;window.__fixture.authorized=false;return {ok:true};},
             get_local_settings:async()=>{window.__fixture.settingsCalls++;return {settings:{schemaVersion:1,schedule:null,theme:'system',fox:{version:1,show:true,animate:true}}};},
@@ -40,6 +40,14 @@ try:
         assert page.evaluate("window.__fixture.settingsCalls") == 0
         assert page.locator('input[type=password]').count() == 0
         page.screenshot(path=str(out / "blocked.png"), full_page=True)
+        page.evaluate("window.__fixture.pairingCode='123456';window.dispatchEvent(new Event('coletoraccesschanged'))")
+        expect(page.get_by_text('123456', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Cancelar autorização')).to_be_visible()
+        page.screenshot(path=str(out / 'pairing.png'), full_page=True)
+        page.evaluate("window.__fixture.pairingCode='';window.__fixture.code='SERVER_REVOCATION_PENDING';window.dispatchEvent(new Event('coletoraccesschanged'))")
+        expect(page.get_by_role('button', name='Concluir saída')).to_be_visible()
+        page.screenshot(path=str(out / 'revocation-pending.png'), full_page=True)
+        page.evaluate("window.__fixture.code=undefined")
         page.evaluate("window.__fixture.authorized=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_role("button", name="Usar dados de exemplo")).to_be_visible()
         assert page.evaluate("window.__fixture.settingsCalls") > 0
@@ -59,7 +67,7 @@ try:
         assert not errors, errors
         (out / "results.json").write_text(json.dumps({"passed": True, "synthetic_bridge_only": True,
             "native_authorization_proven": False, "checks": ["denied-before-settings", "login-without-password-field",
-            "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
+            "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
         browser.close()
 finally:
     server.shutdown()

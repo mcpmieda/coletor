@@ -9,7 +9,7 @@ O upload ao OneDrive é uma etapa separada. Um ZIP só de fontes não é o progr
 
 ## Conteúdo e execução
 
-`ColetorFrequencia-0.3.0-teste-windows-x64.zip` contém `Abrir Coletor.cmd`,
+`ColetorFrequencia-0.4.0-teste-windows-x64.zip` contém `Abrir Coletor.cmd`,
 `LEIA-ME.txt`, `MANIFEST.json`, avisos de licença e a pasta `programa` com runtime,
 bibliotecas, código necessário à execução e UI compilada. O usuário extrai toda
 a pasta e abre o comando. O Python não é instalado globalmente; não há elevação.

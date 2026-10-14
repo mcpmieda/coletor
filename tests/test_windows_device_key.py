@@ -29,7 +29,7 @@ class FakeCrypto:
     def open(self, provider):
         self.calls.append(('open', provider))
         if not self.exists:
-            raise RuntimeError('missing')
+            raise DeviceKeyError('DEVICE_KEY_MISSING')
         return 2
 
     def set_dword(self, key, name, value):

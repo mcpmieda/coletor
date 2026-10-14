@@ -1,0 +1,10 @@
+{
+  "scope": "QA-only stdin peer; never distributed with the desktop application",
+  "backend_repository": "mcpmieda/Ecossistema",
+  "bundle_sha256": "a683d1ddb1168ca0859fc8c18f676408847a02255f61abd39c8be7bbaec34d2d",
+  "sources": {
+    "scripts/ci/collector-auth-trial/peer-fixture-v1.ts": "75b1f2c6d1bb8d4ffd8ff62a3dbe8fc4b273056efd4deabdd40b6d5138899e32",
+    "server/collector/pairing-proof-v1.ts": "d4d38d32da763c808a20596ba308b52d27ef1bac157259125447387e1d805a72",
+    "server/collector/device-proof-v1.ts": "40f8e627a1fb13e76bfc42a3ce2344f8148b3effc8d824da241854c8f290e92e"
+  }
+}

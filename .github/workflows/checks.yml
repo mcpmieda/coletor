@@ -111,7 +111,7 @@ jobs:
       - name: Verify official Python signatures
         shell: pwsh
         run: |
-          $Runtime = 'dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa'
+          $Runtime = 'dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa'
           foreach ($Name in @('python.exe', 'pythonw.exe')) {
             $Signature = Get-AuthenticodeSignature "$Runtime/$Name"
             if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
@@ -119,17 +119,21 @@ jobs:
             }
           }
       - name: Open real native window from portable runtime
-        run: python scripts/check_windows_portable.py --python "dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
+        run: python scripts/check_windows_portable.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
       - name: Verify local settings across native close and reopen
-        run: python scripts/check_windows_settings.py --python "dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-settings --timeout 150
+        run: python scripts/check_windows_settings.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-settings --timeout 150
       - name: Verify real notification-area menu, preferences and native shutdown
-        run: python scripts/check_windows_tray.py --python "dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-tray --timeout 150
+        run: python scripts/check_windows_tray.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-tray --timeout 150
       - name: Verify isolated external Edge with every request intercepted or blocked
-        run: python scripts/check_manual_browser.py --python "dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/manual-browser.json
+        run: python scripts/check_manual_browser.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/manual-browser.json
       - name: Verify native manual session, consent and cancellation through external worker
-        run: python scripts/check_windows_manual.py --python "dist/windows-portable/ColetorFrequencia-0.3.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/windows-manual.json
+        run: python scripts/check_windows_manual.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/windows-manual.json
+      - name: Verify anonymous Windows CNG signatures against backend validators
+        env:
+          PYTHONPATH: app
+        run: python scripts/check_windows_device_provider.py --output artifacts/device-auth/provider.json
       - name: Create portable test ZIP only after native success
-        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json --manual-evidence artifacts/windows-manual/windows-manual.json --browser-evidence artifacts/windows-manual/manual-browser.json
+        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json --manual-evidence artifacts/windows-manual/windows-manual.json --browser-evidence artifacts/windows-manual/manual-browser.json --device-evidence artifacts/device-auth/provider.json
       - name: Preserve native test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -140,6 +144,7 @@ jobs:
             artifacts/windows-settings/
             artifacts/windows-tray/
             artifacts/windows-manual/
+            artifacts/device-auth/
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve private portable test package

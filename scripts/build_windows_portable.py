@@ -18,7 +18,7 @@ import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.3.0-teste"
+VERSION = "0.4.0-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -172,7 +172,7 @@ def validate_manual_evidence(report, browser=False):
         raise ValueError("Denied redirect destinations must never be contacted")
 
 
-def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, manual_evidence=None, browser_evidence=None):
+def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, manual_evidence=None, browser_evidence=None, device_evidence=None):
     bundle = output / NAME
     report = json.loads(evidence.read_text(encoding="utf-8"))
     if report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True:
@@ -198,12 +198,24 @@ def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, ma
         raise ValueError("Manual session QA must pass before creating a distributable")
     validate_manual_evidence(json.loads(manual_evidence.read_text(encoding="utf-8")))
     validate_manual_evidence(json.loads(browser_evidence.read_text(encoding="utf-8")), browser=True)
+    if device_evidence is None:
+        raise ValueError("Anonymous native device proof QA must pass before packaging")
+    device = json.loads(device_evidence.read_text(encoding="utf-8"))
+    required = {"native-cng-pairing-verified-by-backend", "native-cng-access-verified-by-backend", "native-cng-revoke-verified-by-backend"}
+    if (device.get("passed") is not True or device.get("synthetic_backend") is not True
+            or device.get("real_network") is not False or device.get("real_accounts") is not False
+            or device.get("named_keys_created") != 0 or device.get("anonymous_keys_created") != 1
+            or device.get("anonymous_keys_released") != 1 or not required.issubset(device.get("checks", []))):
+        raise ValueError("Anonymous native device proof QA must pass before packaging")
     manifest_path = bundle / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["native_smoke"] = "passed-in-private-windows-ci"
     manifest["local_settings_smoke"] = "passed-in-private-windows-ci"
     manifest["tray_smoke"] = "passed-in-private-windows-ci"
     manifest["manual_session_smoke"] = "passed-synthetic-native-and-external-edge"
+    manifest["device_proof_smoke"] = "anonymous-cng-verified-by-backend-fixture"
+    manifest["institutional_activation"] = "pending-backend-configuration-and-authorized-tenant-validation"
+    manifest["persistent_key_qa"] = "not-proven; requires-explicit-human-activation"
     manifest["tray_scope"] = "same-window-show-hide-exit; local-preview-state; no-autostart-or-collection"
     manifest["local_settings"] = "agenda-theme-fox-only; private-browser-profile"
     for item in manifest["files"]:
@@ -229,9 +241,10 @@ if __name__ == "__main__":
     parser.add_argument("--tray-evidence", type=Path, help="Successful native notification-area flows JSON")
     parser.add_argument("--manual-evidence", type=Path, help="Successful native manual-session flow JSON")
     parser.add_argument("--browser-evidence", type=Path, help="Successful isolated Edge synthetic QA JSON")
+    parser.add_argument("--device-evidence", type=Path, help="Successful anonymous CNG/backend interoperability QA JSON")
     args = parser.parse_args()
     if args.package:
-        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence, args.manual_evidence, args.browser_evidence)
+        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence, args.manual_evidence, args.browser_evidence, args.device_evidence)
     else:
         build(args.output, args.source_commit or "")
 

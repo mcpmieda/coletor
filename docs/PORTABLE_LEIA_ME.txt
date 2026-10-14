@@ -80,3 +80,6 @@ Consulte MANIFEST.json e a PR privada para versão e evidências.
 LICENÇAS
 Python: pasta programa. Bibliotecas Python: programa/Lib/site-packages.
 Interface: LICENCAS-UI.txt.
+
+ACESSO INSTITUCIONAL — 0.4.0 TESTE
+A entrada protegida está incluída, mas o backend ainda precisa de configuração e validação autorizadas. Iniciar não cria chave. A primeira ativação exige confirmação explícita no Windows. Nenhuma senha Microsoft fica no programa. Envio continua desativado.

@@ -62,7 +62,10 @@ class NativeCng:
 
     def open(self, provider):
         handle = ctypes.c_size_t()
-        self._check(self.dll.NCryptOpenKey(provider, ctypes.byref(handle), KEY_NAME, 0, SILENT))
+        status = self.dll.NCryptOpenKey(provider, ctypes.byref(handle), KEY_NAME, 0, SILENT)
+        if status & 0xffffffff in {0x80090016, 0x80090011}:
+            raise DeviceKeyError('DEVICE_KEY_MISSING')
+        self._check(status)
         return handle.value
 
     def set_dword(self, key, name, value):
@@ -155,6 +158,9 @@ class WindowsDeviceKey:
             self._key = self._crypto.open(self._provider)
             self._validate()
             return self.public_jwk()
+        except DeviceKeyError:
+            self.close()
+            raise
         except Exception:
             self.close()
             raise DeviceKeyError() from None

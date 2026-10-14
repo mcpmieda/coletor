@@ -136,47 +136,42 @@ consulta transacional em cada operação. Sem invalidar sessões de outros módu
 Só isso, porém, NÃO detecta remoção de grupo/bloqueio Entra automaticamente; essa
 limitação não pode ser escondida para eliminar consultas de diretório.
 
-## Preparação de código e testes
+## Implementação candidata e validação, 14/10/2026
 
-windows_device_key.py é adaptador candidato privado, ainda sem ligação à UI,
-bridge ou backend. Criação exige activation_authorized Python-only; padrãonega.
-Não cria key por load, não sobrescreve key existente, valida políticas no load,
-exporta apenas ECCPUBLICBLOB, assina SHA256 domain-separated em modo silencioso.
-close não apaga; forget exige remoção explícita e apaga somente a chave gerenciada.
+A branch instala DeviceProvider na ponte desktop e os brokers concretos nas
+rotas Pages da PR backend. A abertura do programa não cria chave nem chama login.
+A primeira autorização exige backend pronto e confirmação nativa explícita antes
+de criar chave Windows. TPM é padrão; Software KSP exige decisão adicional.
+A chave privada nunca é exportada. device.json guarda somente identificadores
+públicos e estado de limpeza, nunca senha, cookie, refresh ou segredo de polling.
 
-10 testes com FakeCrypto aprovados, sem chamar CNG nem criar credencial real.
-QA Windows de Software KSP com chave efêmera NULL-name passou: assinatura
-P-256/P1363 validada pelo Node, desafio alterado rejeitado e exportação privada
-negada. Não foi criada chave persistente nem vínculo/credencial de conta.
-TPM/armazenamento persistente não foram testados. Ainda falta validar segurança
-do desafio/nonce e emissão/renovação/revogação server. O gate anterior
-tem12regressões; ambas preparações permanecem sem ativação.
+O navegador oficial exige código de seis dígitos mostrado exclusivamente no PC,
+checkbox explícito, CSRF, state/nonce exclusivo e PKCE. Microsoft permanece no
+navegador; o callback valida o ID token e consulta somente o próprio usuário.
+O PC salva os metadados antes de confirmar recebimento; até esse claim o backend
+não libera acesso. Pareamentos expirados sem claim revogam seu grant e descartam
+o refresh cifrado. As 17 operações da ponte verificam autorização antes/depois.
 
-Fila de envio: planejar idempotencyKey/snapshot autorizado e confirmação backend
-antes de remover item. Não implementar fila com dados reais/pessoais sem contrato
-e escopo próprios. Nenhum envio, aluno, consent, chave persistente real, migration,
-merge, deploy ou pacote autenticado foi produzido por esta preparação.
+Reabrir usa a mesma chave após prova online, sem novo login ordinário. Fechar
+libera handles/RAM; Sair da conta tenta revogar e apaga a chave local mesmo
+offline. Se faltar a confirmação servidor, permanece bloqueado com metadados
+públicos e oferece concluir revogação no navegador autenticado. Revogação própria
+não depende de Graph nem do refresh estar disponível. Uma falha de limpeza da
+sessão de origem não impede tentar apagar a chave institucional.
 
-## Ponte e tela de entrada, 14/10/2026
+Revisão interna independente não encontrou achado concreto restante no escopo
+sintético após correções de finalidade de revogação, expiração sem claim,
+recuperação de exclusão e limpeza independente. CI do SHA final é gate de entrega.
+QA Windows usa apenas chave CNG anônima, sem nome, liberada ao final, e os
+validadores reais do backend por stdin: pareamento, acesso e revogação. A fixture
+compilada, hashes de proveniência e licença Zod ficam fora do pacote desktop.
+Ela não comprova TPM, persistência/exclusão de chave real ou ativação humana.
 
-O gate agora protege as 17 funções de uso na ponte Python antes e depois da
-operação. Somente status/login/logout e limpeza de sessão permanecem acessíveis
-sem autorização. A janela desktop mostra a entrada no Ecossistema antes de montar
-a interface principal. Ao sair, remove a interface e ignora consultas tardias;
-a autorização da UI não substitui a verificação Python. O modo de desenvolvimento
-loopback continua separado; ele não é um login institucional.
-
-O provedor real permanece ausente: o padrão mostra ACCESS_NOT_CONFIGURED e
-nega operações. Nenhuma chave persistente é criada pela janela nem por iniciar
-o programa. Esta branch ainda não oferece um pacote autenticado utilizável.
-
-Validação local: 180 testes Python; 63 testes UI; lint/tipos/build aprovados;
-QA visual com Edge instalado e ponte sintética aprovou bloqueio antes de ler
-preferências, ausência de campo de senha, entrada autorizada simulada e descarte
-de resposta tardia após sair. Evidência: artifacts/institutional-ui/results.json.
-Esse QA não comprova Microsoft, permissão real ou autorização nativa.
-
-Os scripts Windows existentes recebem a fixture por parâmetro Python exclusivo
-de QA, definido fora do pacote. Não existe flag de ambiente/CLI nem função JS
-para liberar o gate. CI cobre também a base da PR empilhada e a regressão visual.
-As provas Windows deste SHA serão exigidas antes de declarar o pacote pronto.
+O pacote 0.4.0-teste inclui a entrada protegida, mas a ativação institucional real
+continua bloqueada: DDL aguardando readback Deploy to production OFF, binding e
+chave dedicada não configurados, merge/deploy e prova tenant não realizados.
+O comportamento real de auth_time e User.Read (accountEnabled e marcador de
+revogação) ainda requer operador autorizado. Falta/403/null bloqueiam acesso.
+Nenhum aluno, envio, credencial persistente real ou permissão Microsoft foi criado.
+Remover a pasta não remove chave CNG; use Sair da conta antes de excluir quando
+houver ativação. A coleção Smecel permanece separada e envio desativado.

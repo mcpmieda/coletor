@@ -154,7 +154,11 @@ class InstitutionalAccess:
             self._verify(generation)
             return {"authenticated": True, "authorized": True}
         except AccessDenied as error:
-            return {"authenticated": False, "authorized": False, "code": error.code}
+            status = {"authenticated": False, "authorized": False, "code": error.code}
+            details = getattr(self._provider, "public_status", lambda: {})()
+            if isinstance(details, dict) and isinstance(details.get("pairingCode"), str) and len(details["pairingCode"]) == 6 and details["pairingCode"].isascii() and details["pairingCode"].isdigit():
+                status["pairingCode"] = details["pairingCode"]
+            return status
 
     def open_login(self):
         self._invalidate()
@@ -164,14 +168,28 @@ class InstitutionalAccess:
             raise AccessDenied("ACCESS_NOT_CONFIGURED")
         try:
             self._provider.open_official_login()
+        except AccessDenied:
+            raise
         except Exception:
             raise AccessDenied("LOGIN_UNAVAILABLE") from None
 
     def logout(self):
         self._invalidate()
+        failed = False
+        try:
+            self._on_locked()
+        except Exception:
+            failed = True
         if self._provider is not None:
             try:
                 self._provider.close()
             except Exception:
-                self._cleanup_pending = True
-                raise AccessDenied("ACCESS_CLEANUP_PENDING") from None
+                failed = True
+        self._cleanup_pending = failed
+        if failed:
+            raise AccessDenied("ACCESS_CLEANUP_PENDING") from None
+
+    def shutdown(self):
+        release = getattr(self._provider, "release", None)
+        if release is not None:
+            release()

@@ -4,6 +4,7 @@ from .service import PreviewApi
 from .desktop_state import DesktopState
 from .manual_session import ManualSession, SessionError
 from .institutional_access import InstitutionalAccess, AccessDenied
+from .device_provider import DeviceProvider
 from functools import wraps
 
 
@@ -13,7 +14,7 @@ class DesktopApi(PreviewApi):
         self._desktop_state = DesktopState(self._read_settings()["settings"]["fox"])
         self._tray = None
         self._manual_session = ManualSession(settings_directory=settings_directory)
-        self._access = access or InstitutionalAccess(on_locked=self._manual_session.close)
+        self._access = access or InstitutionalAccess(DeviceProvider(settings_directory), on_locked=self._manual_session.close)
 
     def get_institutional_access_status(self):
         return self._access.status()
