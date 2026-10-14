@@ -43,6 +43,11 @@ try:
         page.evaluate("window.__fixture.authorized=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_role("button", name="Usar dados de exemplo")).to_be_visible()
         assert page.evaluate("window.__fixture.settingsCalls") > 0
+        settings_calls = page.evaluate("window.__fixture.settingsCalls")
+        status_calls = page.evaluate("window.__fixture.statusCalls")
+        page.evaluate("window.dispatchEvent(new Event('coletoraccesschanged'))")
+        page.wait_for_function("before => window.__fixture.statusCalls >= before + 2", arg=status_calls)
+        assert page.evaluate("window.__fixture.settingsCalls") == settings_calls, "Authorization polling must not reload preferences"
         page.screenshot(path=str(out / "synthetic-authorized.png"), full_page=True)
         page.evaluate("window.__fixture.defer=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
         page.wait_for_function("window.__fixture.pending.length>0")
@@ -54,7 +59,7 @@ try:
         assert not errors, errors
         (out / "results.json").write_text(json.dumps({"passed": True, "synthetic_bridge_only": True,
             "native_authorization_proven": False, "checks": ["denied-before-settings", "login-without-password-field",
-            "authorized-ui", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
+            "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
         browser.close()
 finally:
     server.shutdown()

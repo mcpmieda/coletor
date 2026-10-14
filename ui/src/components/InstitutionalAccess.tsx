@@ -32,6 +32,7 @@ export default function InstitutionalAccess() {
   const [authorized, setAuthorized] = useState(false), [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
+  const previouslyAuthorized = useRef(false);
   const recheck = useCallback(async () => {
     if (checking.current === epoch.current || operation.current || !mounted.current) return;
     const current = epoch.current;
@@ -40,21 +41,21 @@ export default function InstitutionalAccess() {
       const result = await (await bridge()).get_institutional_access_status();
       if (!mounted.current || current !== epoch.current) return;
       if (result.authenticated === true && result.authorized === true) {
-        await initializeLocalSettings();
+        if (!previouslyAuthorized.current) await initializeLocalSettings();
         const confirmed = await (await bridge()).get_institutional_access_status();
         if (!mounted.current || current !== epoch.current) return;
         if (confirmed.authenticated !== true || confirmed.authorized !== true) {
-          setAuthorized(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
+          previouslyAuthorized.current = false; setAuthorized(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
         }
-        paintTheme(readTheme()); setAuthorized(true); setNotice('');
+        previouslyAuthorized.current = true; paintTheme(readTheme()); setAuthorized(true); setNotice('');
       } else {
-        setAuthorized(false);
+        previouslyAuthorized.current = false; setAuthorized(false);
         setNotice(result.code === 'ACCESS_NOT_CONFIGURED' ? 'A configuração do acesso ainda não foi concluída.'
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
     } catch (error) {
       if (mounted.current && current === epoch.current) {
-        setAuthorized(false); setNotice(error instanceof Error ? error.message : 'Não foi possível verificar o acesso.');
+        previouslyAuthorized.current = false; setAuthorized(false); setNotice(error instanceof Error ? error.message : 'Não foi possível verificar o acesso.');
       }
     } finally { if (checking.current === current) checking.current = null; }
   }, []);
@@ -78,7 +79,7 @@ export default function InstitutionalAccess() {
   }
   async function logout() {
     if (operation.current) return;
-    operation.current = true; epoch.current++; setAuthorized(false); setBusy(true);
+    operation.current = true; previouslyAuthorized.current = false; epoch.current++; setAuthorized(false); setBusy(true);
     try {
       const result = await (await bridge()).logout_institutional_access();
       if ('error' in result) throw new Error(result.error);

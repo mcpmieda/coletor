@@ -15,7 +15,9 @@ class DesktopAccessTests(unittest.TestCase):
                            api.prepare_manual_login(2026), api.get_manual_class_selection_preferences(),
                            api.get_local_settings(), api.save_theme('dark'), api.save_schedule({}),
                            api.save_fox({}), api.discover_manual_classes(1, True),
-                           api.save_manual_class_selection(1, ['11'], 0), api.capture_selected_class(1, '11', True)]:
+                           api.save_manual_class_selection(1, ['11'], 0), api.capture_selected_class(1, '11', True),
+                           api.clear_manual_class_selection(1, 0), api.open_manual_session(1, True),
+                           api.get_manual_session_status(), api.get_desktop_status(), api.hide_window(), api.set_tray_context({})]:
                 self.assertEqual(result['code'], 'ACCESS_NOT_CONFIGURED')
                 self.assertNotIn('private-html', str(result))
             api._manual_session.prepare_login.assert_not_called()

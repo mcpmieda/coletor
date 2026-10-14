@@ -212,7 +212,7 @@ try:
         prefs = {'schemaVersion':1,'schedule':config,'theme':'light','fox':{'version':1,'show':True,'animate':False}}
         recovery_page=browser.new_page(viewport={'width':1440,'height':1000},locale='pt-BR')
         recovery_page.on('pageerror',lambda error: errors.append(str(error)))
-        recovery_page.add_init_script("window.syntheticSettings="+json_module.dumps(prefs)+";window.syntheticSaves=[];window.settingsReads=0;window.pywebview={api:{get_local_settings:()=>++window.settingsReads===1?Promise.resolve({settings:window.syntheticSettings}):new Promise(resolve=>window.finishReload=resolve),save_schedule:schedule=>{window.syntheticSaves.push(schedule);window.syntheticSettings.schedule=schedule;return Promise.resolve({settings:window.syntheticSettings});}}};")
+        recovery_page.add_init_script("window.syntheticSettings="+json_module.dumps(prefs)+";window.syntheticSaves=[];window.settingsReads=0;window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),get_local_settings:()=>++window.settingsReads===1?Promise.resolve({settings:window.syntheticSettings}):new Promise(resolve=>window.finishReload=resolve),save_schedule:schedule=>{window.syntheticSaves.push(schedule);window.syntheticSettings.schedule=schedule;return Promise.resolve({settings:window.syntheticSettings});}}};")
         recovery_page.goto(url)
         recovery_page.get_by_role('button',name='Horários de coleta',exact=True).click()
         recovery_page.get_by_role('button',name='Recarregar e descartar alterações').click()
