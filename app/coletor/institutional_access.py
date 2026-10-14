@@ -75,8 +75,9 @@ def validate_authorization(response, now):
         raise AccessDenied("INVALID_ACCESS_RESPONSE") from None
     if (not isinstance(body, dict)
             or set(body) != {"contractVersion", "authenticated", "authorized", "capability",
-                             "identityKey", "expiresAt", "checkedAt", "revocationChecked"}
-            or type(body["contractVersion"]) is not int or body["contractVersion"] != 1
+                             "identityKey", "expiresAt", "checkedAt", "revocationChecked",
+                             "directoryCheckedAt", "directoryValidUntil"}
+            or type(body["contractVersion"]) is not int or body["contractVersion"] != 2
             or body["authenticated"] is not True or body["authorized"] is not True
             or body["revocationChecked"] is not True
             or body["capability"] != PROPOSED_CAPABILITY):
@@ -85,8 +86,14 @@ def validate_authorization(response, now):
     if not isinstance(identity, str) or not 1 <= len(identity) <= 160 or not identity.isascii() or any(ord(c) < 33 for c in identity):
         raise AccessDenied("INVALID_ACCESS_RESPONSE")
     expiry, checked = _timestamp(body["expiresAt"]), _timestamp(body["checkedAt"])
+    directory_checked = _timestamp(body["directoryCheckedAt"])
+    directory_until = _timestamp(body["directoryValidUntil"])
     if expiry <= now or checked > now + 5 or now - checked > 10 or checked >= expiry:
         raise AccessDenied("ACCESS_EXPIRED")
+    if (directory_checked > now + 5 or directory_until <= now
+            or directory_until - directory_checked != 300
+            or expiry > directory_until):
+        raise AccessDenied("DIRECTORY_ACCESS_EXPIRED")
     return Authorization(identity, expiry)
 
 

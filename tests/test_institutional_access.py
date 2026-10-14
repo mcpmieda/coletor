@@ -12,9 +12,10 @@ def stamp(seconds):
 
 
 def response(**changes):
-    body = {"contractVersion": 1, "authenticated": True, "authorized": True,
+    body = {"contractVersion": 2, "authenticated": True, "authorized": True,
             "capability": PROPOSED_CAPABILITY, "identityKey": "synthetic-account:1",
-            "expiresAt": stamp(NOW+60), "checkedAt": stamp(NOW), "revocationChecked": True}
+            "expiresAt": stamp(NOW+60), "checkedAt": stamp(NOW), "revocationChecked": True,
+            "directoryCheckedAt": stamp(NOW), "directoryValidUntil": stamp(NOW+300)}
     body.update(changes)
     return OnlineResponse(200, PROPOSED_ACCESS_URL, json.dumps(body).encode())
 
@@ -130,6 +131,21 @@ class InstitutionalAccessTests(unittest.TestCase):
         self.assertEqual(provider.reads, 1)
         with self.assertRaises(AccessDenied):
             gate.open_login()
+
+    def test_local_check_cannot_extend_expired_directory_evidence(self):
+        with self.assertRaises(AccessDenied):
+            validate_authorization(response(directoryCheckedAt=stamp(NOW-301),
+                directoryValidUntil=stamp(NOW-1)), NOW)
+
+    def test_lease_cannot_outlive_directory_window(self):
+        with self.assertRaises(AccessDenied):
+            validate_authorization(response(expiresAt=stamp(NOW+301)), NOW)
+        with self.assertRaises(AccessDenied):
+            validate_authorization(response(directoryValidUntil=stamp(NOW+600)), NOW)
+
+    def test_old_identity_contract_without_directory_proof_is_rejected(self):
+        with self.assertRaises(AccessDenied):
+            validate_authorization(response(contractVersion=1), NOW)
 
 
 if __name__ == '__main__':
