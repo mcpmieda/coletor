@@ -193,7 +193,7 @@ def worker(args):
             window.destroy()
     try:
         checks['bundled_application'] = Path(desktop.__file__).resolve().parents[2] == program
-        desktop.run_desktop(callback=exercise, settings_directory=args.output.parent / 'settings')
+        desktop.run_desktop(callback=exercise, settings_directory=args.output.parent / 'settings', access=smoke.synthetic_institutional_access())
         checks['window_closed'] = True
     except BaseException:
         report['status'] = 'failed'

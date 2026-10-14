@@ -211,7 +211,7 @@ def worker(args):
         smoke.write_json(args.worker_output,result)
         with (args.output_dir/("tray-thread-diagnostic-"+args.scenario+".txt")).open("w",encoding="utf-8") as diagnostic:
             faulthandler.dump_traceback_later(25, file=diagnostic)
-            try: desktop.run_desktop(callback=callback,settings_directory=args.settings_directory)
+            try: desktop.run_desktop(callback=callback,settings_directory=args.settings_directory, access=smoke.synthetic_institutional_access())
             finally: faulthandler.cancel_dump_traceback_later()
         tray=holder.get("tray")
         result["checks"]["native_exit_removed_icon_and_timer"]=bool(tray and tray._disposed and tray._cleanup_ok and not tray._icons and not tray._notify.Visible and not tray._timer.Enabled)

@@ -34,6 +34,34 @@ import time
 from urllib.parse import urlparse
 
 SCHEMA = 1
+
+
+def synthetic_institutional_access():
+    """Python QA fixture, outside the package. No runtime flag/JS bypass exists.
+
+    Exercises the actual strict receipt validation with a synthetic transport;
+    does not prove Microsoft login or production backend authorization.
+    """
+    from coletor.institutional_access import InstitutionalAccess, OnlineResponse, PROPOSED_ACCESS_URL
+
+    class Provider:
+        def verify_online(self):
+            now = datetime.now(timezone.utc)
+            from datetime import timedelta
+            body = {"contractVersion": 2, "authenticated": True, "authorized": True,
+                    "capability": "frequency.collector.use", "identityKey": "synthetic-native-fixture",
+                    "checkedAt": now.isoformat(), "expiresAt": (now + timedelta(minutes=5)).isoformat(),
+                    "directoryCheckedAt": now.isoformat(), "directoryValidUntil": (now + timedelta(minutes=5)).isoformat(),
+                    "revocationChecked": True}
+            return OnlineResponse(200, PROPOSED_ACCESS_URL, json.dumps(body).encode("utf-8"))
+
+        def open_official_login(self):
+            raise RuntimeError("synthetic-fixture-does-not-login")
+
+        def close(self):
+            return None
+
+    return InstitutionalAccess(Provider())
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 EXPECTED_NAMES = [f"Aluno sintético {number:03}" for number in range(1, 4)]
 LABELS = ["Conferir frequência", "Não envia dados", "Prévia da turma",
@@ -399,7 +427,7 @@ def run_worker(args) -> int:
         evidence["stage"] = "launch_native_window"
         write_json(args.worker_output, {key: value for key, value in evidence.items() if not key.startswith("_")})
         desktop.run_desktop(callback=lambda window: exercise_window(window, evidence, args.output_dir / "windows-portable.png"),
-                            settings_directory=args.output_dir / "isolated-settings")
+                            settings_directory=args.output_dir / "isolated-settings", access=synthetic_institutional_access())
         evidence["checks"]["window_closed"] = True
         evidence["stage"] = "window_closed"
         if evidence["status"] != "passed" or not all(evidence["checks"].get(key) is True for key in REQUIRED_CHECKS):

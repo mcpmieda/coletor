@@ -122,7 +122,7 @@ def worker(args):
         program=smoke.validate_package(args.package_root)
         import coletor.desktop as desktop
         if Path(desktop.__file__).resolve().parent.parent.parent!=program: smoke.fail("bundled_settings_application_required")
-        desktop.run_desktop(callback=lambda window:exercise(window,args,result),settings_directory=args.settings_directory)
+        desktop.run_desktop(callback=lambda window:exercise(window,args,result),settings_directory=args.settings_directory, access=smoke.synthetic_institutional_access())
         result["checks"]["window_closed"]=True
     except BaseException as error:
         result["failure"]=str(error) if isinstance(error,smoke.SmokeFailure) else "settings_worker_failed"

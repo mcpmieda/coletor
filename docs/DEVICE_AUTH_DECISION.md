@@ -156,3 +156,27 @@ Fila de envio: planejar idempotencyKey/snapshot autorizado e confirmação backe
 antes de remover item. Não implementar fila com dados reais/pessoais sem contrato
 e escopo próprios. Nenhum envio, aluno, consent, chave persistente real, migration,
 merge, deploy ou pacote autenticado foi produzido por esta preparação.
+
+## Ponte e tela de entrada, 14/10/2026
+
+O gate agora protege as 17 funções de uso na ponte Python antes e depois da
+operação. Somente status/login/logout e limpeza de sessão permanecem acessíveis
+sem autorização. A janela desktop mostra a entrada no Ecossistema antes de montar
+a interface principal. Ao sair, remove a interface e ignora consultas tardias;
+a autorização da UI não substitui a verificação Python. O modo de desenvolvimento
+loopback continua separado; ele não é um login institucional.
+
+O provedor real permanece ausente: o padrão mostra ACCESS_NOT_CONFIGURED e
+nega operações. Nenhuma chave persistente é criada pela janela nem por iniciar
+o programa. Esta branch ainda não oferece um pacote autenticado utilizável.
+
+Validação local: 180 testes Python; 63 testes UI; lint/tipos/build aprovados;
+QA visual com Edge instalado e ponte sintética aprovou bloqueio antes de ler
+preferências, ausência de campo de senha, entrada autorizada simulada e descarte
+de resposta tardia após sair. Evidência: artifacts/institutional-ui/results.json.
+Esse QA não comprova Microsoft, permissão real ou autorização nativa.
+
+Os scripts Windows existentes recebem a fixture por parâmetro Python exclusivo
+de QA, definido fora do pacote. Não existe flag de ambiente/CLI nem função JS
+para liberar o gate. CI cobre também a base da PR empilhada e a regressão visual.
+As provas Windows deste SHA serão exigidas antes de declarar o pacote pronto.

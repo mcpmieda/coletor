@@ -1,3 +1,4 @@
+from synthetic_access import SyntheticAccess
 """Portable contracts for truthful local tray state; not native Windows proof."""
 import tempfile
 from pathlib import Path
@@ -33,7 +34,7 @@ class DesktopStateTests(unittest.TestCase):
 
     def test_bridge_activity_is_tied_to_actual_preview_and_resets_on_exception(self):
         with tempfile.TemporaryDirectory() as directory:
-            api = DesktopApi(Path(directory) / "isolated")
+            api = DesktopApi(Path(directory) / "isolated", access=SyntheticAccess())
             states = []
             api._desktop_state._changed = lambda: states.append(api._desktop_state.snapshot()["activity"])
             result = api.load_demo()
@@ -52,7 +53,7 @@ class DesktopStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = LocalSettings(Path(directory))
             store.update("fox", {"version": 1, "show": False, "animate": False})
-            api = DesktopApi(Path(directory))
+            api = DesktopApi(Path(directory), access=SyntheticAccess())
             self.assertFalse(api._desktop_state.snapshot()["fox"]["show"])
             with patch.object(api._settings, "update", side_effect=OSError("DO_NOT_ECHO")):
                 self.assertIn("error", api.save_fox({"version": 1, "show": True, "animate": True}))

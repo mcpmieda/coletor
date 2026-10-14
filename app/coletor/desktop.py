@@ -11,7 +11,7 @@ from .desktop_api import DesktopApi
 APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel.Preview"
 
 
-def run_desktop(callback=None, settings_directory=None):
+def run_desktop(callback=None, settings_directory=None, *, access=None):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
     entry = ROOT / "ui/dist/index.html"
@@ -23,7 +23,7 @@ def run_desktop(callback=None, settings_directory=None):
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    api = DesktopApi(settings_directory)
+    api = DesktopApi(settings_directory, access=access)
     window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry) + "#coletor-desktop", js_api=api,
                           width=1240, height=820, min_size=(900, 620),
                           background_color="#faf7f8", text_select=True)

@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, feat/preview-diario-anual]
+    branches: [main, feat/preview-diario-anual, feat/manual-session-capture]
 permissions:
   contents: read
 concurrency:
@@ -68,7 +68,9 @@ jobs:
           python -m pip install -r requirements-test.txt
           python -m playwright install --with-deps chromium
       - name: Synthetic UI smoke test
-        run: PYTHONPATH=app QA_OUTPUT=test-results python scripts/check_ui.py
+        run: |
+          PYTHONPATH=app QA_OUTPUT=test-results python scripts/check_ui.py
+          PYTHONPATH=app QA_OUTPUT=test-results/institutional python scripts/check_institutional_ui.py
       - name: Preserve synthetic UI screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
