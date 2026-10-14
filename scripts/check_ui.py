@@ -214,9 +214,25 @@ try:
         prefs = {'schemaVersion':1,'schedule':config,'theme':'light','fox':{'version':1,'show':True,'animate':False}}
         recovery_page=browser.new_page(viewport={'width':1440,'height':1000},locale='pt-BR')
         recovery_page.on('pageerror',lambda error: errors.append(str(error)))
-        recovery_page.add_init_script("window.syntheticSettings="+json_module.dumps(prefs)+";window.syntheticSaves=[];window.settingsReads=0;window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),get_local_settings:()=>++window.settingsReads===1?Promise.resolve({settings:window.syntheticSettings}):new Promise(resolve=>window.finishReload=resolve),save_schedule:schedule=>{window.syntheticSaves.push(schedule);window.syntheticSettings.schedule=schedule;return Promise.resolve({settings:window.syntheticSettings});}}};")
+        shared = {'timezone': 'America/Bahia', 'rules': [{'weekday': r['weekday'] % 7, 'shift': r['shift'],
+                  'enabled': r['selected'], 'times': r['times'], 'recheck': r['reconciliation'] or None} for r in config['rules']]}
+        collector = {'state': 'connect', 'code': None, 'active': False, 'localPaused': False, 'persistent': False,
+                     'progress': {'completed': 0, 'total': 0, 'classLabel': None}, 'lastReceipt': None,
+                     'settings': {'revision': 2, 'paused': False, 'schedule': shared}}
+        recovery_page.add_init_script('window.syntheticSettings='+json_module.dumps(prefs)+';window.syntheticCollector='+json_module.dumps(collector)+''';
+          window.syntheticSaves=[];window.holdSharedReload=false;window.syntheticConflict=true;
+          window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),
+            open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),
+            get_local_settings:async()=>({settings:window.syntheticSettings}),
+            get_collector_status:()=>window.holdSharedReload?new Promise(resolve=>window.finishReload=resolve):Promise.resolve(window.syntheticCollector),
+            activate_collector:async()=>window.syntheticCollector,collect_now:async()=>window.syntheticCollector,
+            save_shared_schedule:async(revision,schedule)=>{if(window.syntheticConflict)return {error:'Conflito',code:'revision-conflict'};
+              if(revision!==window.syntheticCollector.settings.revision)return {error:'Conflito',code:'revision-conflict'};
+              window.syntheticSaves.push(schedule);window.syntheticCollector.settings={revision:revision+1,paused:false,schedule};return window.syntheticCollector;}}};''')
         recovery_page.goto(url)
         recovery_page.get_by_role('button',name='Horários de coleta',exact=True).click()
+        recovery_page.get_by_text('Horários da escola carregados.',exact=True).wait_for()
+        recovery_page.evaluate('window.holdSharedReload=true')
         recovery_page.get_by_role('button',name='Recarregar e descartar alterações').click()
         field = recovery_page.get_by_label('Buscar frequência Segunda-feira Manhã',exact=True)
         expect(field).to_be_disabled()
@@ -225,14 +241,15 @@ try:
         expect(recovery_page.get_by_role('button',name='Usar sugestão')).to_be_disabled()
         recovery_page.get_by_role('button',name='Salvar horários').evaluate('button=>button.click()')
         assert recovery_page.evaluate('window.syntheticSaves.length')==0
-        recovery='Não foi possível ler as configurações salvas. Mostramos as sugestões; salve para guardar novamente.'
-        recovery_page.evaluate('reply=>window.finishReload(reply)',{'settings':prefs,'notice':recovery})
+        recovery_page.evaluate('window.holdSharedReload=false;window.finishReload(window.syntheticCollector)')
         expect(field).to_be_enabled()
-        assert recovery_page.get_by_text(recovery,exact=True).count()>=1
-        assert recovery_page.get_by_text('Horários salvos recarregados.',exact=True).count()==0
         field.fill('08:15, 09:00, 09:55, 11:05, 11:55')
         recovery_page.get_by_role('button',name='Salvar horários').click()
-        expect(recovery_page.get_by_text('Horários salvos só neste computador.',exact=True)).to_be_visible()
+        expect(recovery_page.get_by_text('Os horários mudaram em outro computador. Recarregue e compare antes de salvar.',exact=True)).to_be_visible()
+        expect(field).to_have_value('08:15, 09:00, 09:55, 11:05, 11:55')
+        recovery_page.evaluate('window.syntheticConflict=false')
+        recovery_page.get_by_role('button',name='Salvar horários').click()
+        expect(recovery_page.get_by_text('Horários compartilhados com os computadores da escola.',exact=True)).to_be_visible()
         assert recovery_page.evaluate('window.syntheticSaves[0].rules[0].times[0]')=='08:15'
         recovery_page.screenshot(path=str(out/'schedule-recovery-after-save.png'),full_page=True,animations='disabled')
         recovery_page.close()

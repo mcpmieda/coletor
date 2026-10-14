@@ -5,6 +5,8 @@ from .desktop_state import DesktopState
 from .manual_session import ManualSession, SessionError
 from .institutional_access import InstitutionalAccess, AccessDenied
 from .device_provider import DeviceProvider
+from .frequency_runtime import FrequencyRuntime
+from .protected_storage import StorageError
 from functools import wraps
 
 
@@ -14,7 +16,44 @@ class DesktopApi(PreviewApi):
         self._desktop_state = DesktopState(self._read_settings()["settings"]["fox"])
         self._tray = None
         self._manual_session = ManualSession(settings_directory=settings_directory)
-        self._access = access or InstitutionalAccess(DeviceProvider(settings_directory), on_locked=self._manual_session.close)
+        self._provider = getattr(access, '_provider', None) if access else DeviceProvider(settings_directory)
+        self._access = access or InstitutionalAccess(self._provider, on_locked=self._access_locked)
+        self._collector = FrequencyRuntime(self._access, self._provider, self._manual_session, settings_directory,
+                                           on_started=self._desktop_state.begin_read,
+                                           on_finished=self._desktop_state.end_read)
+
+    def _access_locked(self):
+        # Connectivity loss cancels operational work, but is not a revocation
+        # receipt. Retain only the consented encrypted reconciliation queue.
+        self._collector.cancel(purge=self._access._locked_code != 'ACCESS_UNAVAILABLE')
+
+    def _operational(self, work):
+        try: return work()
+        except (AccessDenied, StorageError) as error:
+            return {'error': 'Não foi possível concluir. Confira o estado do coletor e a conexão.', 'code': error.code}
+        except Exception:
+            return {'error': 'Não foi possível concluir. Confira o estado do coletor e a conexão.', 'code': 'unavailable'}
+
+    def get_collector_status(self):
+        return self._operational(self._collector.refresh)
+
+    def activate_collector(self):
+        return self._operational(self._collector.activate)
+
+    def collect_now(self):
+        return self._operational(self._collector.collect)
+
+    def pause_collector(self, paused):
+        return self._operational(lambda: self._collector.local_pause(paused))
+
+    def save_shared_schedule(self, revision, schedule):
+        return self._operational(lambda: self._collector.save_settings(revision, schedule))
+
+    def pause_school_collection(self, revision, paused):
+        return self._operational(lambda: self._collector.school_pause(revision, paused))
+
+    def discard_pending_collection(self):
+        return self._operational(self._collector.discard_queue)
 
     def get_institutional_access_status(self):
         return self._access.status()
@@ -29,6 +68,7 @@ class DesktopApi(PreviewApi):
     def logout_institutional_access(self):
         try:
             self._access.logout()
+            self._collector.cancel(purge=True)
             self._manual_session.close()
             return {"ok": True}
         except AccessDenied as error:
@@ -37,6 +77,7 @@ class DesktopApi(PreviewApi):
             return {"error": "Não foi possível concluir a limpeza da sessão.", "code": "ACCESS_CLEANUP_PENDING"}
 
     def prepare_manual_login(self, year):
+        if self._collector.public_status()['active']: self._collector.local_pause(True)
         return self._manual(lambda: self._manual_session.prepare_login(year))
 
     def get_manual_class_selection_preferences(self):
@@ -45,7 +86,9 @@ class DesktopApi(PreviewApi):
                 "revalidation_required": True, "notice": saved["notice"]}
 
     def discover_manual_classes(self, generation, confirmed):
-        return self._manual(lambda: self._manual_session.discover(generation, confirmed))
+        result = self._manual(lambda: self._manual_session.discover(generation, confirmed))
+        if 'catalog' in result: self._collector.source_ready()
+        return result
 
     def save_manual_class_selection(self, generation, ids, revision):
         return self._manual(lambda: self._manual_session.save_choices(generation, ids, revision))
@@ -57,6 +100,8 @@ class DesktopApi(PreviewApi):
         return self._reading(lambda: self._manual(lambda: self._manual_session.capture_selected(generation, class_id, confirmed)))
 
     def _manual(self, work):
+        if self._collector._operation.locked():
+            return {'error': 'Há uma coleta em andamento. Aguarde terminar ou pause neste computador antes de alterar a sessão.'}
         try:
             return work()
         except SessionError as error:
@@ -68,6 +113,8 @@ class DesktopApi(PreviewApi):
         return self._manual(lambda: self._manual_session.open(generation, confirmed))
 
     def close_manual_session(self):
+        if self._collector.public_status()['active']:
+            return self._operational(lambda: self._collector.local_pause(True))
         return self._manual(self._manual_session.close)
 
     def get_manual_session_status(self):
@@ -91,7 +138,7 @@ class DesktopApi(PreviewApi):
 
     def get_desktop_status(self):
         return {"tray_available": self._tray is not None and self._tray.available(),
-                "automatic_collection": False}
+                "automatic_collection": self._collector.public_status()['active']}
 
     def hide_window(self):
         if self._tray is None:
@@ -152,5 +199,9 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
               "save_schedule", "save_theme", "save_fox"):
+    setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
+
+for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',
+              'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection'):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 

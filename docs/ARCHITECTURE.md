@@ -1,3 +1,5 @@
+> Estado atual: a versão 0.4 operacional está descrita em [FREQUENCY_V2_CANDIDATE.md](FREQUENCY_V2_CANDIDATE.md). Este documento preserva o histórico do marco anterior; as menções a coleta/agenda compartilhada/fila como futuras foram substituídas pela entrega candidata. A ativação real aguarda revisão, merge e publicação autorizados.
+
 # Arquitetura e limites do primeiro marco
 
 ## Decisão de stack

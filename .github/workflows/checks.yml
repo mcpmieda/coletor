@@ -132,8 +132,10 @@ jobs:
         env:
           PYTHONPATH: app
         run: python scripts/check_windows_device_provider.py --output artifacts/device-auth/provider.json
+      - name: Verify bundled frequency runtime, receipts, fencing, cancellation and Windows DPAPI
+        run: python scripts/check_windows_frequency.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-frequency/frequency.json
       - name: Create portable test ZIP only after native success
-        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json --manual-evidence artifacts/windows-manual/windows-manual.json --browser-evidence artifacts/windows-manual/manual-browser.json --device-evidence artifacts/device-auth/provider.json
+        run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json --manual-evidence artifacts/windows-manual/windows-manual.json --browser-evidence artifacts/windows-manual/manual-browser.json --device-evidence artifacts/device-auth/provider.json --frequency-evidence artifacts/windows-frequency/frequency.json
       - name: Preserve native test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -145,6 +147,7 @@ jobs:
             artifacts/windows-tray/
             artifacts/windows-manual/
             artifacts/device-auth/
+            artifacts/windows-frequency/
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve private portable test package

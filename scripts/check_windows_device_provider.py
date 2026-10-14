@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import time
 
-from coletor.device_provider import DeviceProvider, compact, PREFIX, OFFICIAL_ORIGIN, thumbprint
+from coletor.device_provider import DeviceProvider, compact, canonical_frequency, PREFIX, OFFICIAL_ORIGIN, thumbprint
 from coletor.institutional_access import OnlineResponse, validate_authorization
 from coletor.windows_device_key import NativeCng, WindowsDeviceKey, DeviceKeyError, SOFTWARE_PROVIDER
 
@@ -78,8 +78,28 @@ def main():
             elif suffix == 'pairings/claim':
                 body = {'claimed': True}
             elif suffix == 'challenge':
-                self.challenge = call({'operation': 'challenge', 'record': self.record, 'now': now, 'purpose': value['purpose']})
+                request = {'operation': 'challenge', 'record': self.record, 'now': now, 'purpose': value['purpose']}
+                if 'requestHash' in value: request['requestHash'] = value['requestHash']
+                self.challenge = call(request)
                 body = self.challenge
+            elif suffix == 'frequency':
+                import base64
+                proof = value['proof']
+                assert call({'operation': 'verify', 'record': self.record, 'challenge': self.challenge,
+                             'signature': proof['signature'], 'now': now, 'purpose': 'collector-frequency'}) == {'valid': True}
+                request_hash = base64.urlsafe_b64encode(hashlib.sha256(canonical_frequency(value['payload'])).digest()).decode().rstrip('=')
+                assert request_hash == self.challenge['requestHash']
+                altered = {**value['payload'], 'academicYear': 2025}
+                altered_hash = base64.urlsafe_b64encode(hashlib.sha256(canonical_frequency(altered)).digest()).decode().rstrip('=')
+                denied = False
+                try:
+                    denied = call({'operation': 'verify', 'record': self.record,
+                        'challenge': {**self.challenge, 'requestHash': altered_hash},
+                        'signature': proof['signature'], 'now': now, 'purpose': 'collector-frequency'}) != {'valid': True}
+                except RuntimeError: denied = True
+                assert denied
+                validations.extend(['native-cng-frequency-verified-by-backend', 'native-cng-frequency-altered-payload-rejected'])
+                body = {'contractVersion': 2, 'state': 'ready', 'academicYear': 2026}
             elif suffix in {'access', 'revoke'}:
                 purpose = 'collector-access' if suffix == 'access' else 'collector-revoke'
                 assert call({'operation': 'verify', 'record': self.record, 'challenge': self.challenge,
@@ -106,6 +126,7 @@ def main():
         try:
             provider.open_official_login()
             validate_authorization(provider.verify_online(), time.time())
+            provider.frequency_request({'operation': 'status', 'academicYear': 2026})
             provider.close()
             assert not (Path(temporary)/'device.json').exists()
             assert crypto.created == crypto.released == 1

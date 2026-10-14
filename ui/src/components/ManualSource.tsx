@@ -50,7 +50,18 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
   useEffect(()=>{let current=true;void nativeApi().then(api=>api?.get_manual_class_selection_preferences?.()).then(prefs=>{
     if(current && !yearEdited.current && prefs?.last_year)setYear(String(prefs.last_year));
   }).catch(()=>undefined);return()=>{current=false;};},[]);
-  useEffect(() => () => { operation.current++; void window.pywebview?.api.close_manual_session?.().catch(() => undefined); }, []);
+  useEffect(() => () => { operation.current++; }, []);
+  useEffect(() => {
+    let alive = true;
+    const timer = setInterval(() => {
+      if (active.current || closing.current) return;
+      void window.pywebview?.api.get_manual_session_status?.().then(status => {
+        if (!alive || active.current || closing.current) return;
+        if (status.state === 'closed') { setSession(status); setCatalog(null); setClassId(''); }
+      }).catch(() => undefined);
+    }, 20_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
   async function perform(work: () => Promise<ManualStatus | CatalogReply>) {
     if (active.current || busy || closing.current) return;
     active.current = true; onBusy(true); setError('');
@@ -112,7 +123,7 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
   return <section className="panel source-panel" aria-labelledby="manual-source-title">
     <h2 id="manual-source-title">Entrar no Smecel e escolher turmas</h2>
     <p>Entre na janela separada do Edge, carregue as turmas e marque as que quer usar. Suas escolhas ficam salvas neste computador, por ano e contexto; a disponibilidade é conferida novamente em cada acesso.</p>
-    <p className="muted">Senha, cookies e sessão não são salvos. Envio e coleta automática estão desligados. A lista observada não comprova todas as turmas da escola nem a identidade da conta.</p>
+    <p className="muted">Faça o login diretamente no Edge. A sessão poderá ser lembrada somente com autorização na janela do Windows.</p>
     <div className="source-controls"><TextField value={year} onChange={v=>{yearEdited.current=true;setYear(v);}} isDisabled={busy || !!live}><Label>Ano letivo no Smecel</Label><Input inputMode="numeric" maxLength={4}/></TextField>
       {!live && <><label className="status-line"><input type="checkbox" checked={confirmation} disabled={busy} onChange={e=>setConfirmation(e.target.checked)}/>Autorizo abrir o Smecel e ler a lista de turmas deste ano, sem envio.</label><Button isDisabled={busy || !confirmation} onPress={()=>{void enter();}}>Entrar no Smecel</Button></>}
       {opened && <Button isDisabled={busy} onPress={()=>{void discover();}}>Carregar turmas</Button>}

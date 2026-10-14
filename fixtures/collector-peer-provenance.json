@@ -1,11 +1,12 @@
 {
   "scope": "QA-only stdin peer; never distributed with the desktop application",
   "backend_repository": "mcpmieda/ecossistema-escola",
-  "backend_commit": "1c86c0c71d8a2b40962a210f74acb86ef7bc4123",
-  "bundle_sha256": "a683d1ddb1168ca0859fc8c18f676408847a02255f61abd39c8be7bbaec34d2d",
+  "backend_commit": "25767ba5da15b577e22ad052b6429f073a56e9bc",
+  "bundle_sha256": "c82b82f623a3ee8e2ced86a0038eb74d123cf2b4c0577fe552274598bd3940bf",
   "sources": {
-    "scripts/ci/collector-auth-trial/peer-fixture-v1.ts": "75b1f2c6d1bb8d4ffd8ff62a3dbe8fc4b273056efd4deabdd40b6d5138899e32",
+    "scripts/ci/collector-auth-trial/peer-fixture-v1.ts": "7400102bbb27028b94de18adb457209852bf1b96a6a1885163aac0cd84a02155",
     "server/collector/pairing-proof-v1.ts": "d4d38d32da763c808a20596ba308b52d27ef1bac157259125447387e1d805a72",
-    "server/collector/device-proof-v1.ts": "40f8e627a1fb13e76bfc42a3ce2344f8148b3effc8d824da241854c8f290e92e"
+    "server/collector/device-proof-v1.ts": "710f907cf6805a355ee10c12a4a77e830f29c74535dcda4fa94957e46c3ceaad",
+    "server/auth/base64url.ts": "7ece55f12b50a38d3a3103f10483bb8414d84a7d304342ff6778999d51003381"
   }
 }

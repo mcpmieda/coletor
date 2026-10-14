@@ -25,7 +25,18 @@ from .local_settings import LocalSettings, user_settings_directory
 from .windows_device_key import WindowsDeviceKey, DeviceKeyError, TPM_PROVIDER, SOFTWARE_PROVIDER
 
 PREFIX = '/api/frequency-collector/'
-PATHS = {PREFIX + p for p in ('config', 'pairings', 'pairings/poll', 'pairings/cancel', 'pairings/claim', 'challenge', 'access', 'revoke', 'device-status')}
+PATHS = {PREFIX + p for p in ('config', 'pairings', 'pairings/poll', 'pairings/cancel', 'pairings/claim', 'challenge', 'access', 'revoke', 'device-status', 'frequency')}
+FREQUENCY_BYTES = 16 * 1024 * 1024
+FREQUENCY_ERRORS = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy', 'lease-fenced', 'paused', 'source-invalid', 'identity-review'}
+
+
+def canonical_frequency(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+
+
+class FrequencyError(AccessDenied):
+    """A sanitized operational code, never a backend exception or source data."""
+    pass
 
 
 def compact(value):
@@ -65,8 +76,10 @@ class OfficialTransport:
     def request(self, method, path, value=None):
         if path not in PATHS or method not in {'GET', 'POST'} or (method == 'GET') != (path == PREFIX + 'config'):
             raise AccessDenied('INVALID_ACCESS_REQUEST')
-        payload = compact(value) if value is not None else None
-        if payload is not None and len(payload) > 2048:
+        frequency = path == PREFIX + 'frequency'
+        limit = FREQUENCY_BYTES if frequency else 8192
+        payload = canonical_frequency(value) if frequency else compact(value) if value is not None else None
+        if payload is not None and len(payload) > (FREQUENCY_BYTES if frequency else 2048):
             raise AccessDenied('INVALID_ACCESS_REQUEST')
         connection = (self._connection or (lambda: http.client.HTTPSConnection(
             'admin.escolaieda.com', 443, timeout=10, context=ssl.create_default_context())))()
@@ -75,13 +88,13 @@ class OfficialTransport:
                                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
             reply = connection.getresponse()
             length = reply.getheader('Content-Length')
-            if (reply.status != 200 or reply.getheader('Content-Encoding') not in (None, 'identity')
+            if ((reply.status != 200 and not (frequency and reply.status in {400, 401, 403, 409, 503})) or reply.getheader('Content-Encoding') not in (None, 'identity')
                     or not (reply.getheader('Content-Type') or '').lower().startswith('application/json')
-                    or length is not None and (not length.isdigit() or int(length) > 8192)):
+                    or length is not None and (not length.isdigit() or int(length) > limit)):
                 # http.client never follows redirects; no second destination is contacted.
                 raise AccessDenied('ACCESS_NOT_CONFIGURED' if reply.status == 503 or path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
-            raw = reply.read(8193)
-            if len(raw) > 8192:
+            raw = reply.read(limit + 1)
+            if len(raw) > limit:
                 raise AccessDenied('INVALID_ACCESS_RESPONSE')
             return OnlineResponse(reply.status, OFFICIAL_ORIGIN + path, raw)
         except AccessDenied:
@@ -190,21 +203,68 @@ class DeviceProvider:
                 raise AccessDenied('DEVICE_KEY_UNAVAILABLE') from None
         return self._key
 
-    def _proof(self, purpose):
+    def _proof(self, purpose, request_hash=None):
         key = self._load()
-        value = decode(self._request('challenge', {'deviceId': self._state['deviceId'], 'purpose': purpose}))
+        request = {'deviceId': self._state['deviceId'], 'purpose': purpose}
+        if purpose == 'collector-frequency':
+            if not isinstance(request_hash, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', request_hash):
+                raise AccessDenied('INVALID_ACCESS_REQUEST')
+            request['requestHash'] = request_hash
+        elif request_hash is not None:
+            raise AccessDenied('INVALID_ACCESS_REQUEST')
+        value = decode(self._request('challenge', request))
         expected = {'deviceId', 'generation', 'accountKey', 'keyThumbprint', 'nonce', 'audience', 'method', 'path', 'purpose', 'issuedAt', 'expiresAt'}
+        if purpose == 'collector-frequency': expected.add('requestHash')
         if (set(value) != expected or value['deviceId'] != self._state['deviceId'] or value['keyThumbprint'] != self._state['keyThumbprint']
                 or value['audience'] != OFFICIAL_ORIGIN or value['method'] != 'POST' or value['purpose'] != purpose
-                or value['path'] != PREFIX + ('access' if purpose == 'collector-access' else 'revoke')
+                or value['path'] != PREFIX + ('frequency' if purpose == 'collector-frequency' else 'access' if purpose == 'collector-access' else 'revoke')
+                or purpose == 'collector-frequency' and value.get('requestHash') != request_hash
                 or type(value['generation']) is not int or value['generation'] < 1
                 or any(type(value[n]) is not int for n in ('issuedAt', 'expiresAt'))
                 or value['expiresAt'] - value['issuedAt'] != 60_000
                 or value['issuedAt'] > self._clock()*1000 + 5000 or value['expiresAt'] <= self._clock()*1000
                 or any(not isinstance(value[n], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', value[n]) for n in ('nonce', 'accountKey'))):
             raise AccessDenied('INVALID_DEVICE_CHALLENGE')
-        content = compact([value[n] for n in ('deviceId', 'generation', 'accountKey', 'keyThumbprint', 'nonce', 'audience', 'method', 'path', 'purpose', 'issuedAt', 'expiresAt')])
+        fields = ('deviceId', 'generation', 'accountKey', 'keyThumbprint', 'nonce', 'audience', 'method', 'path', 'purpose', 'issuedAt', 'expiresAt')
+        if purpose == 'collector-frequency': fields += ('requestHash',)
+        content = compact([value[n] for n in fields])
+        self._device_generation = value['generation']
         return {'deviceId': value['deviceId'], 'nonce': value['nonce'], 'signature': key.sign_challenge(content)}
+
+    def storage_binding(self):
+        """Private Python consumer only; a fresh challenge supplies generation."""
+        with self._lock:
+            self._load()
+            if not getattr(self, '_device_generation', None):
+                raise AccessDenied('ACCESS_REQUIRED')
+            return self._state['deviceId'], self._device_generation
+
+    def frequency_request(self, payload):
+        with self._lock:
+            if self._closed or not isinstance(payload, dict):
+                raise AccessDenied('ACCESS_REQUIRED')
+            raw = canonical_frequency(payload)
+            if len(raw) > FREQUENCY_BYTES - 1024:
+                raise FrequencyError('invalid-request')
+            request_hash = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode('ascii').rstrip('=')
+            proof = self._proof('collector-frequency', request_hash)
+            response = self._request('frequency', {'proof': proof, 'payload': payload})
+            try:
+                if not isinstance(response.body, bytes) or len(response.body) > FREQUENCY_BYTES:
+                    raise ValueError()
+                value = json.loads(response.body, object_pairs_hook=unique)
+                if not isinstance(value, dict) or value.get('contractVersion') != 2:
+                    raise ValueError()
+                if response.status != 200:
+                    code = value.get('state')
+                    raise FrequencyError(code if code in FREQUENCY_ERRORS else 'unavailable')
+                if value.get('state') not in {'ready', 'committed'}:
+                    raise ValueError()
+                return value
+            except FrequencyError:
+                raise
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                raise FrequencyError('unavailable') from None
 
     def public_status(self):
         with self._lock:
@@ -322,6 +382,12 @@ class DeviceProvider:
             self._state = {**self._state, 'state': 'revokedLocally'}
             self._metadata.save(self._state)
             raise AccessDenied('SERVER_REVOCATION_PENDING')
+
+    def removal_status(self):
+        """Read only public cleanup metadata; never open/create a key or contact a service."""
+        with self._lock:
+            state = self._metadata.read()
+            return {} if state is None else {name: state[name] for name in ('state', 'deviceId')}
 
     def close(self):
         with self._lock:

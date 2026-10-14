@@ -10,9 +10,11 @@ import type { Preview } from './types';
 import AttendancePreview from './components/AttendancePreview';
 import ValidationPanel from './components/ValidationPanel';
 import ScheduleSettings from './components/ScheduleSettings';
+import SharedScheduleSettings from './components/SharedScheduleSettings';
+import CollectorControl from './components/CollectorControl';
 import FoxCompanion from './components/FoxCompanion';
 import ManualSource from './components/ManualSource';
-import { useLocalSettingsNotice } from './localSettings';
+import { useLocalSettingsNotice, isDesktopSettings } from './localSettings';
 import { useDesktopTray } from './desktop';
 export default function App() {
   const [theme, setTheme, themeNotice] = useTheme();
@@ -50,22 +52,22 @@ export default function App() {
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-icon brand-fox"><img src="./mascot/head.png" alt="" width="32" height="32" /></span><div><strong>Coletor de Frequência</strong><span>Ecossistema Escolar</span></div></div>
       <nav aria-label="Navegação principal"><button className={view === 'preview' ? 'nav-item active' : 'nav-item'} aria-current={view === 'preview' ? 'page' : undefined} onClick={() => setView('preview')}><LayoutDashboard size={18} />Conferir frequência</button><button className={view === 'schedule' ? 'nav-item active' : 'nav-item'} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><Clock3 size={18} />Horários de coleta</button><button className={view === 'roadmap' ? 'nav-item active' : 'nav-item'} aria-current={view === 'roadmap' ? 'page' : undefined} onClick={() => setView('roadmap')}><Monitor size={18} />Próximos passos</button></nav>
-      <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Versão de teste · {version}</StatusChip><p>Dados ficam neste computador</p><SelectField label="Tema" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automático' }, { id: 'light', label: 'Claro' }, { id: 'dark', label: 'Escuro' }]} /></div></div>
+      <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Versão de teste · {version}</StatusChip><p>{isDesktopSettings() ? 'Frequência da escola' : 'Prévia neste computador'}</p><SelectField label="Tema" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automático' }, { id: 'light', label: 'Claro' }, { id: 'dark', label: 'Escuro' }]} /></div></div>
     </aside>
-    <main><header className="page-header"><div><h1>{view === 'preview' ? 'Conferir frequência' : view === 'schedule' ? 'Horários de coleta' : 'Próximos passos'}</h1><p>{view === 'preview' ? 'Veja o diário e o que precisa conferir.' : view === 'schedule' ? 'Escolha os dias e horários.' : 'O que falta para começar a coleta.'}</p></div><StatusChip tone="warning">Não envia dados</StatusChip></header>
+    <main><header className="page-header"><div><h1>{view === 'preview' ? 'Conferir frequência' : view === 'schedule' ? 'Horários de coleta' : 'Próximos passos'}</h1><p>{view === 'preview' ? 'Veja o diário e o que precisa conferir.' : view === 'schedule' ? 'Escolha os dias e horários.' : 'Como usar a coleta da escola.'}</p></div><StatusChip tone="warning">{isDesktopSettings() ? 'Coleta autorizada' : 'Prévia local'}</StatusChip></header>
       {settingsNotice && <p className="local-settings-notice" role="status">{settingsNotice}</p>}
       {themeNotice && <p role="status">{themeNotice}</p>}
-      {tray.available && <div className="status-line"><Button size="sm" variant="ghost" onPress={() => { void tray.hide(); }}>Ocultar na bandeja</Button><span>Coleta desligada. Para sair, feche a janela ou use Sair na bandeja.</span></div>}
+      {tray.available && <div className="status-line"><Button size="sm" variant="ghost" onPress={() => { void tray.hide(); }}>Ocultar na bandeja</Button><span>Para sair, feche a janela ou use Sair na bandeja.</span></div>}
       {tray.notice && <p role="status">{tray.notice}</p>}
-      <div hidden={view !== 'schedule'}><ScheduleSettings /></div>
+      <div hidden={view !== 'schedule'}>{isDesktopSettings() ? <SharedScheduleSettings /> : <ScheduleSettings />}</div>
       {view === 'schedule' ? null : view === 'roadmap' ? <section className="panel roadmap"><h2>Antes de começar</h2><ol>
         <li><strong>Conferir o diário</strong><p>Checar os alunos, as faltas e os dias de aula.</p></li>
-        <li><strong>Entrar nas contas</strong><p>Preparar o acesso seguro ao Ecossistema e ao Smecel.</p></li>
+        <li><strong>Entrar nas contas</strong><p>Entre no Ecossistema e depois no Smecel, nas janelas de cada site.</p></li>
         <li><strong>Organizar os computadores</strong><p>Um computador coleta por vez. Os demais computadores autorizados ficam de reserva.</p></li>
         <li><strong>Compartilhar os horários</strong><p>Usuários e computadores autorizados usarão os mesmos horários da escola.</p></li>
-        <li><strong>Definir a tela das famílias</strong><p>Combinar o que as famílias verão antes de enviar qualquer dado.</p></li>
-      </ol><p className="muted">Estas etapas ainda não estão prontas. Por enquanto, você pode conferir arquivos e ajustar horários.</p></section> : <>
-        <ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
+        <li><strong>Definir a tela das famílias</strong><p>O Portal mostra as marcações recebidas e indica quando a cobertura ainda está incompleta.</p></li>
+      </ol><p className="muted">No programa Windows, entre nas contas, selecione as turmas e ative a coleta. Acompanhe os computadores na aba Frequência da Importação, no Ecossistema.</p></section> : <>
+        <CollectorControl /><ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
         <section className="panel source-panel" aria-labelledby="source-title"><div className="section-heading"><div><h2 id="source-title">Arquivo HTML ou exemplo</h2><p>Abra um diário do Smecel ou use os dados de exemplo.</p></div><FileUp size={22} className="muted" /></div>
           <div className="source-controls"><TextField value={classId} onChange={setClassId} isDisabled={busy}><Label>Código da turma</Label><Input /></TextField><TextField value={year} onChange={setYear} isDisabled={busy}><Label>Ano</Label><Input inputMode="numeric" maxLength={4} /></TextField><div className="source-actions"><Button variant="secondary" isDisabled={busy} onPress={() => { void run(loadDemo); }}><FlaskConical size={16} />Usar dados de exemplo</Button><Button isDisabled={busy} onPress={() => fileRef.current?.click()}><FileUp size={16} />Abrir diário</Button></div></div>
           <input className="sr-only" ref={fileRef} type="file" accept=".html,.htm,text/html" aria-label="Selecionar arquivo do diário" onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} />

@@ -88,6 +88,43 @@ class DeviceProviderTests(unittest.TestCase):
         self.transport.completed = True
         return self.provider.verify_online()
 
+    def test_frequency_challenge_binds_full_utf8_payload_and_legacy_bytes_remain_unchanged(self):
+        import base64
+        import hashlib
+        from coletor.device_provider import canonical_frequency
+        self.activate()
+        request = self.transport.request
+        captured = {}
+        def frequency(method, path, value=None):
+            if path == PREFIX + 'challenge' and value['purpose'] == 'collector-frequency':
+                body = {'deviceId': DEVICE, 'generation': 1, 'accountKey': 'a'*43, 'keyThumbprint': self.provider._state['keyThumbprint'],
+                        'nonce': 'n'*43, 'audience': OFFICIAL_ORIGIN, 'method': 'POST', 'path': PREFIX+'frequency',
+                        'purpose': 'collector-frequency', 'issuedAt': NOW*1000, 'expiresAt': NOW*1000+60_000,
+                        'requestHash': value['requestHash']}
+                captured['challenge'] = body
+                return OnlineResponse(200, OFFICIAL_ORIGIN+path, compact(body))
+            if path == PREFIX+'frequency':
+                captured['payload'] = value['payload']
+                return OnlineResponse(200, OFFICIAL_ORIGIN+path, compact({'contractVersion': 2, 'state': 'ready'}))
+            return request(method, path, value)
+        self.transport.request = frequency
+        payload = {'operation': 'status', 'academicYear': 2026, 'synthetic': 'ação'}
+        self.provider.frequency_request(payload)
+        self.assertIn('ação'.encode('utf-8'), canonical_frequency(payload))
+        wanted = base64.urlsafe_b64encode(hashlib.sha256(canonical_frequency(payload)).digest()).decode().rstrip('=')
+        self.assertEqual(captured['challenge']['requestHash'], wanted)
+        fields = ('deviceId','generation','accountKey','keyThumbprint','nonce','audience','method','path','purpose','issuedAt','expiresAt','requestHash')
+        content = compact([captured['challenge'][n] for n in fields])
+        digest = hashlib.sha256(b'Ecossistema.Coletor.DeviceProof.v1\0' + content).digest()
+        self.assertIn(('sign', digest), self.crypto.calls)
+        self.assertEqual(captured['payload'], payload)
+        self.assertNotIn('requestHash', (self.root/'device.json').read_text())
+
+    def test_frequency_challenge_cannot_add_unbound_purpose_fields_to_legacy_proof(self):
+        self.activate()
+        self.transport.change = lambda suffix, body: {**body, 'requestHash': 'x'*43} if suffix == 'challenge' else body
+        with self.assertRaises(AccessDenied): self.provider.verify_online()
+
     def test_construction_and_unpaired_status_create_nothing_and_contact_no_service(self):
         self.assertFalse(self.root.exists())
         with self.assertRaises(AccessDenied):

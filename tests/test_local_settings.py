@@ -108,7 +108,7 @@ class LocalSettingsTests(unittest.TestCase):
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
         api = DesktopApi(self.directory, access=SyntheticAccess())
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["capture_selected_class", "clear_manual_class_selection", "close_manual_session", "discover_manual_classes", "get_desktop_status", "get_institutional_access_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "prepare_manual_login", "preview_html", "save_fox", "save_manual_class_selection", "save_schedule", "save_theme", "set_tray_context"])
+                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "discard_pending_collection", "discover_manual_classes", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_school_collection", "prepare_manual_login", "preview_html", "save_fox", "save_manual_class_selection", "save_schedule", "save_shared_schedule", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())

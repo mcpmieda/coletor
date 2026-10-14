@@ -44,7 +44,7 @@ def theme(window,label):
 def stored(window,predicate):
     deadline=time.monotonic()+15
     while time.monotonic()<deadline:
-        window.evaluate_js("window.__localSettingsProbe=null;window.pywebview.api.get_local_settings().then(r=>window.__localSettingsProbe=r);true")
+        window.evaluate_js("window.__localSettingsProbe=null;Promise.all([window.pywebview.api.get_local_settings(),window.pywebview.api.get_collector_status()]).then(([r,c])=>{if(c.settings?.schedule)r.settings.schedule={rules:c.settings.schedule.rules.map(v=>({...v,weekday:v.weekday===0?7:v.weekday,selected:v.enabled,reconciliation:v.recheck||''})).sort((a,b)=>a.weekday-b.weekday||a.shift.localeCompare(b.shift))};window.__localSettingsProbe=r;});true")
         smoke.wait_js(window,"!!window.__localSettingsProbe",timeout=10)
         result=window.evaluate_js("window.__localSettingsProbe")
         if predicate(result): return result
@@ -67,7 +67,7 @@ def exercise(window,args,result):
             require("fresh_default_schedule",window.evaluate_js(monday_js("08:05")))
             set_input(window,"Buscar frequência Segunda-feira Manhã","08:15, 09:00, 09:55, 11:05, 11:55")
             click(window,"Salvar horários")
-            smoke.wait_js(window,"document.body.innerText.includes('Horários salvos só neste computador.')")
+            smoke.wait_js(window,"document.body.innerText.includes('Horários compartilhados com os computadores da escola.')")
             theme(window,"Escuro")
             smoke.wait_js(window,"document.documentElement.dataset.theme==='dark'")
             checkbox(window,"Animar raposa")
@@ -100,6 +100,7 @@ def exercise(window,args,result):
             require("corrupt_file_notice_visible",window.evaluate_js("document.querySelector('.local-settings-notice')?.textContent.includes('Não foi possível ler')"))
             require("corrupt_file_restores_nonsecret_preferences",window.evaluate_js("document.querySelector('.fox-stage')!==null"))
             click(window,"Salvar horários")
+            theme(window,"Escuro")
             stored(window,lambda r:not r.get("notice") and r["settings"]["schedule"]["rules"][0]["times"][0]=="08:05")
             smoke.wait_js(window,"!document.querySelector('.local-settings-notice')")
             require("explicit_save_recovers_valid_file_and_clears_notice")
@@ -122,7 +123,7 @@ def worker(args):
         program=smoke.validate_package(args.package_root)
         import coletor.desktop as desktop
         if Path(desktop.__file__).resolve().parent.parent.parent!=program: smoke.fail("bundled_settings_application_required")
-        desktop.run_desktop(callback=lambda window:exercise(window,args,result),settings_directory=args.settings_directory, access=smoke.synthetic_institutional_access())
+        desktop.run_desktop(callback=lambda window:exercise(window,args,result),settings_directory=args.settings_directory, access=smoke.synthetic_institutional_access(shared_fixture=args.settings_directory.parent/"shared-school-fixture.json"))
         result["checks"]["window_closed"]=True
     except BaseException as error:
         result["failure"]=str(error) if isinstance(error,smoke.SmokeFailure) else "settings_worker_failed"
@@ -164,7 +165,7 @@ def orchestrator(args):
                     if sentinel.read_bytes()!=b"UNRELATED_APP_SENTINEL": smoke.fail("other_application_modified")
                     data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
                     if set(data)!={"schemaVersion","schedule","theme","fox"}: smoke.fail("unexpected_persistent_data")
-                    if sorted(p.name for p in isolated.iterdir())!=["settings.json", "settings.lock"]: smoke.fail("unexpected_settings_file")
+                    if sorted(p.name for p in isolated.iterdir())!=["collector-instance.lock", "settings.json", "settings.lock"]: smoke.fail("unexpected_settings_file")
                 finally:
                     job.close()
                     if process is not None and process.poll() is None: process.kill();process.wait(timeout=10)

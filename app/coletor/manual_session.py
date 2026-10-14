@@ -42,7 +42,7 @@ def matches_source(url, class_id, year):
             == sorted([("ct", class_id), ("ano", str(year))]))
 
 
-def captured_preview(payload, class_id, year):
+def captured_preview(payload, class_id, year, *, allow_partial=False):
     if not isinstance(payload, dict) or not matches_source(payload.get("url", ""), class_id, year):
         raise SessionError("A janela não está no diário da turma e do ano confirmados. Confira o site.")
     if payload.get("password_form"):
@@ -51,6 +51,8 @@ def captured_preview(payload, class_id, year):
     result = preview(html, class_id, year, "manual")
     snapshot = result["snapshot"]
     permitted = {"CLASS_ID_UNVERIFIED", "ROSTER_COMPLETENESS_UNVERIFIED"}
+    if allow_partial:
+        permitted |= {'SOURCE_SYMBOL_UNKNOWN', 'GRID_COVERAGE_INVALID', 'TOTALS_ROW_INVALID'}
     if (snapshot["source_format"] != "smecel-annual-v1" or not snapshot["students"]
             or any(i["severity"] == "error" and i["code"] not in permitted for i in snapshot["issues"])):
         raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.")
@@ -141,7 +143,7 @@ class ManualSession:
             self._selections.save(self._catalog["scope"], list(set(ids) | pending), revision)
             return self._catalog_reply()
 
-    def capture_selected(self, generation, class_id, confirmed):
+    def capture_selected(self, generation, class_id, confirmed, *, _operational=False):
         with self._lock:
             self._check(generation, confirmed, {"list_ready", "preview_ready"})
             choices = self._catalog_reply()["selected_class_ids"]
@@ -152,7 +154,7 @@ class ManualSession:
         try:
             # Worker checks the fresh listing again immediately before opening
             # the annual diary. A saved selection never authorizes this itself.
-            result = captured_preview(driver.capture_selected(class_id, year, context), class_id, year)
+            result = captured_preview(driver.capture_selected(class_id, year, context), class_id, year, allow_partial=_operational)
             with self._lock:
                 self._check(generation, True, {"capturing"})
                 self._state = "preview_ready"
@@ -173,6 +175,49 @@ class ManualSession:
     def status(self):
         with self._lock:
             return self._status()
+
+    def operational_catalog(self, storage):
+        """Python-only collection adapter; never accepts HTML/catalog from UI."""
+        with self._lock:
+            driver, state, scope = self._driver, self._state, self._scope
+        if driver is None:
+            saved = storage.load_session()
+            if saved is None: raise SessionError('SOURCE_LOGIN_REQUIRED')
+            prepared = self.prepare_login(2026)
+            # Supply restored state before the isolated worker is started.
+            driver = self._factory()
+            driver._storage_state = saved
+            with self._lock:
+                self._check(prepared['generation'], True, {'prepared'})
+                self._driver = driver
+                self._state = 'opening'
+            try:
+                driver.open(prepared['scope']['url'])
+                with self._lock:
+                    self._check(prepared['generation'], True, {'opening'})
+                    self._state = 'awaiting_user'
+            except Exception:
+                self._fail_current(prepared['generation'], driver)
+                raise SessionError('SOURCE_LOGIN_REQUIRED') from None
+        elif state not in {'list_ready', 'preview_ready'} or not scope or scope['year'] != 2026:
+            raise SessionError('SOURCE_LOGIN_REQUIRED')
+        generation = self.status()['generation']
+        return self.discover(generation, True)
+
+    def operational_capture(self, class_id):
+        generation = self.status()['generation']
+        return self.capture_selected(generation, class_id, True, _operational=True)['preview']
+
+    def preserve_and_close(self, storage):
+        with self._lock: driver = self._driver
+        if driver is not None:
+            try: storage.save_session(driver.export_state())
+            finally: self.close()
+
+    def remember_if_ready(self, storage):
+        with self._lock:
+            driver = self._driver if self._state in {'list_ready', 'preview_ready'} else None
+        if driver is not None: storage.save_session(driver.export_state())
 
     def prepare(self, class_id, year):
         url = source_url(class_id, year)  # Validate before replacing any active session.

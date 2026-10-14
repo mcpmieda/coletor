@@ -1,3 +1,5 @@
+> Estado atual: a versão 0.4 operacional está descrita em [FREQUENCY_V2_CANDIDATE.md](FREQUENCY_V2_CANDIDATE.md). Este documento preserva o histórico do marco anterior; as menções a coleta/agenda compartilhada/fila como futuras foram substituídas pela entrega candidata. A ativação real aguarda revisão, merge e publicação autorizados.
+
 # Roteiro de teste e ativação do Coletor
 
 ## Amanhã: o que já pode ser testado
@@ -49,3 +51,24 @@ apenas o pacote validado do novo SHA é a versão corrente da mesma entrega.
 
 O preparo usa fixtures sintéticas e CNG anônimo. Não criamos credencial real,
 alteramos produção ou usamos dados de alunos para obter evidência de teste.
+
+## Remoção portátil após o uso
+
+Fechar a janela conserva o vínculo para reabrir depois. Para retirar o acesso
+antes de excluir a pasta, feche o Coletor e execute **Remover acesso deste PC.cmd**,
+confirmando a ação. O equivalente técnico é
+`programa/python.exe -B -m coletor --safe-removal`.
+
+O comando não instala/desinstala software nem apaga arquivos do programa ou
+preferências. Usa a chave gerenciada desse perfil Windows para retirar somente
+o dispositivo correspondente; outros PCs e outras chaves não são removidos.
+A exclusão manual da pasta não é interceptada e não limpa a chave por si só.
+
+Com rede, aguarde a confirmação de retirada remota e remoção da chave local.
+Sem rede, a saída pode remover a chave local e retornar código 2: guarde o UUID
+público e o link `/frequency-collector/revoke?device=...` mostrado, para retirar
+esse dispositivo no Ecossistema quando a rede voltar. O registro público fica
+nos dados locais; remover a pasta não garante fila nem conclusão automática.
+Se a limpeza local falhar (código 1), preserve a pasta e resolva antes de removê-la.
+Código 0 confirma limpeza ou ausência de vínculo registrado; neste último caso,
+o comando informa que nenhuma chave foi verificada ou apagada.

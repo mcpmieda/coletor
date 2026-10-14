@@ -1,85 +1,84 @@
-COLETOR DE FREQUÊNCIA — 0.4.0 TESTE
+COLETOR DE FREQUÊNCIA — 0.4.0 CANDIDATO
 Pacote portátil para Windows de 64 bits
 
+ESTADO DA ENTREGA
+Implementação para revisão e merge com o backend do Ecossistema.
+O pacote não comprova login Microsoft/TPM/Smecel real nem publicação produtiva.
+Consulte MANIFEST.json e a PR privada para versão, commit e evidências.
+Não substitua a versão em uso antes da aprovação do responsável.
+
 COMO ABRIR
-1. Baixe o arquivo ZIP completo.
-2. Clique com o botão direito e escolha "Extrair tudo".
-3. Na pasta extraída, abra "Abrir Coletor.cmd".
-Mantenha a pasta "programa" junto desse arquivo.
+1. Extraia o ZIP inteiro em uma pasta do seu usuário.
+2. Mantenha a pasta programa junto de Abrir Coletor.cmd.
+3. Abra Abrir Coletor.cmd.
+Não precisa instalar Python ou executar como administrador.
+Requer Windows 10/11 x64, Microsoft Edge, WebView2 e .NET Framework 4.8 existentes.
+Nenhuma dependência, serviço ou tarefa de inicialização é instalada pelo pacote.
 
-Não precisa instalar Python. Não precisa executar como administrador.
-O computador precisa ter WebView2, .NET Framework 4.8 e Microsoft Edge existentes.
-Este pacote não instala dependências automaticamente.
+ENTRAR E PREPARAR
+1. Entre no Ecossistema, pelo navegador oficial, com uma conta autorizada.
+2. Confirme na janela do Windows a autorização deste computador.
+   A chave fica protegida pelo Windows; TPM é padrão. Software exige outra confirmação.
+   A senha e os tokens Microsoft não ficam no Coletor.
+3. Use Entrar no Smecel e faça o login diretamente na janela separada do Edge.
+   Não informe senha no Coletor e não use seu perfil pessoal do Edge.
+4. Clique Carregar turmas e selecione as turmas pelos nomes observados na lista.
+   Escolhas ficam salvas por ano/contexto e são revalidadas a cada captura.
+5. Use Ativar coleta neste computador.
+   O Windows pergunta se pode guardar sessão Smecel e fila cifradas para este usuário.
+   Recusar mantém os dados somente na memória até fechar o programa.
 
-O QUE VOCÊ PODE TESTAR
-- Usar dados de exemplo, sem alunos reais.
-- Abrir um diário HTML escolhido por você e conferir a leitura.
-- Escolher o ano, autorizar e usar Entrar no Smecel.
-- Fazer login na janela separada e clicar em Carregar turmas.
-- Marcar as turmas pelo nome. As escolhas são salvas automaticamente.
-- Escolher uma turma marcada, autorizar e usar Ler diário manualmente.
-- Encerrar sessão e descartar prévia. Nenhum código de turma precisa ser digitado.
-- Ajustar os horários, tema e preferências da raposa.
-- Usar "Ocultar na bandeja" e mostrar a mesma janela pelo ícone.
-- Menu da bandeja: Mostrar janela, Ocultar janela e Sair.
-Clique esquerdo ou duplo no ícone também mostra a janela.
-O Windows pode colocar o ícone entre os ícones ocultos.
+COLETAR E ACOMPANHAR
+Coletar agora processa todas as turmas selecionadas disponíveis no contexto atual.
+Um computador autorizado recebe a concessão para coletar; os demais são reservas.
+Os horários são compartilhados pela escola e vêm do servidor. Uma edição concorrente
+pede recarregar e comparar. Não há recuperação automática de horários perdidos.
+Pausar neste computador interrompe só este PC. Pausar para a escola vale para todos.
+Sessão Smecel expirada pede reconectar e carregar as turmas; não repete login em loop.
+A nova aba Frequência, dentro de Importação do Ecossistema, acompanha computadores,
+coletas, agenda, pausas, pendências de identidade e conflitos.
+Uma coleta só aparece como recebida depois da confirmação do servidor.
 
-LIMITES IMPORTANTES
-O operador pode entrar no Smecel em uma janela separada do Edge e autorizar
-uma leitura manual do diário da turma/ano confirmados. O coletor não digita
-senha nem confirma identidade da escola ou lista completa de alunos.
-Não envia ao Ecossistema e não acessa banco. Coleta automática e horários compartilhados não estão ativos.
-A bandeja controla somente a janela e informa espera, leitura local ou erro.
-Todo estado informa Coleta desligada.
-Uma marcação de aula prevista não confirma presença.
+DADOS E SEGURANÇA
+A origem é conferida por URL, turma, ano, contexto observado e cabeçalhos.
+O contexto observado não é prova criptográfica da identidade da conta Smecel.
+X e justificadas são enviados como marcações conhecidas. Pontos e vazios não viram
+presença. Cobertura incompleta não vira percentual ou total confiável.
+As posições 1 a 6 do diário são preservadas. O servidor resolve a identidade central.
+Dados de exemplo, HTML escolhido e prévia manual não são enviados.
+Somente HTTPS no domínio autorizado do Smecel é permitido; outros são bloqueados.
+Não desative proteções nem amplie domínios se o site pedir outro destino.
 
-CONFIGURAÇÕES LOCAIS
-Horários, tema, opções da raposa e escolha de turmas por ano/contexto ficam na pasta própria
-ColetorFrequenciaSmecel, nos dados locais do seu usuário Windows.
-Não exporta alunos, HTML, senhas, cookies ou estado autenticado para arquivos.
-A sessão usa um contexto de navegador sem persistência e temporários próprios,
-removidos ao encerrar. Fechar o programa também encerra seus processos.
-Nunca use perfil pessoal do Edge, nem informe senha no coletor.
-A escolha de turmas fica em class-selection.json, sem nomes/dados de alunos.
-Depois de novo login, a lista é lida de novo. Ausência numa lista filtrada não
-apaga escolhas anteriores. Para remover todas, use Limpar seleção deste ano e contexto.
-Só turmas observadas no contexto/ano atual podem ter diário lido.
-Configurações não são compartilhadas com outros computadores.
-Se o arquivo for inválido, mostra aviso e sugestões. Salve novamente para recuperar.
-O Atualizador de Planilhas usa arquivos separados e não é alterado.
+PROTEÇÃO LOCAL
+Tema, raposa e seleção de turmas usam arquivos próprios, sem alunos ou segredos.
+Com autorização nativa, sessão e fila ficam em blobs cifrados pelo Windows,
+ligados ao dispositivo, geração e propósito. Não se grava storage_state em JSON.
+A fila tem limite de 64 lotes, 64 MiB e sete dias. Perda de rede não confirma
+revogação; a fila cifrada consentida pode aguardar reconciliação.
+Troca do computador ativo ou conflito de revisão exige conferir e recapturar,
+sem alterar silenciosamente o lote pendente.
+O Atualizador de Planilhas, suas chaves e seus arquivos não são alterados.
 
-RAPOSA E MOVIMENTO
-A bandeja só anima durante leitura local. Em espera ou erro fica estática.
-Desmarque Animar raposa para desligar animações no painel e na bandeja.
-Movimento reduzido do sistema também é respeitado.
-Desmarque Mostrar raposa para ocultar o mascote e usar ícone neutro na bandeja.
-O ícone neutro mantém os controles de mostrar e sair.
+Bandeja: Mostrar janela, Ocultar janela e Sair. Clique ou duplo clique mostra a janela.
+O ícone pode ficar entre ícones ocultos. Ocultar mantém o Coletor aberto e sua agenda.
+Fechar pelo X ou Sair encerra o programa e seus processos próprios.
+A raposa informa atividade real; movimento reduzido e preferências são respeitados.
+Não há autostart: após ligar o computador, abra e ative o Coletor conscientemente.
+Sair da conta interrompe trabalho, limpa sessão/fila locais e retira o vínculo do PC.
 
-PARA FECHAR
-Fechar a janela pelo X encerra o programa.
-Ocultar na bandeja deixa apenas esta sessão aberta; não agenda coleta.
-Use Mostrar janela para voltar ou Sair para encerrar.
-Se a bandeja falhar, a janela continua disponível e pode ser fechada normalmente.
+ANTES DE REMOVER A PASTA PORTÁTIL
+Feche o Coletor. Abra Remover acesso deste PC.cmd e confirme a ação.
+Isso remove a chave gerenciada e solicita revogação deste dispositivo no Ecossistema.
+Não apaga a pasta, preferências, outras chaves Windows nem o acesso dos outros PCs.
+Excluir a pasta manualmente não executa essa limpeza.
+Sem rede, a chave local pode ser removida com revogação remota ainda pendente.
+Guarde o identificador público/link exibidos e conclua a retirada no Ecossistema.
+Não declare a saída remota concluída sem confirmação. Se a limpeza falhar,
+preserve a pasta e peça ajuda antes de removê-la.
+Equivalente técnico: programa\python.exe -B -m coletor --safe-removal.
 
-SEGURANÇA
-Não cria tarefa de inicialização, conta, senha ou serviço.
-Se Windows ou antivírus bloquear, pare e peça ajuda. Não desative proteções.
-Python incluído é o runtime oficial. O coletor não tem assinatura digital própria.
-Não é instalador nem versão final para uso diário.
-
-COMPATIBILIDADE
-Windows 10/11 x64 com WebView2 e .NET Framework 4.8 existentes.
-O CI testa janela, preferências, bandeja e sessão manual com dados fictícios no Windows antes de gerar o ZIP.
-O fluxo real de login/SSO e diário ainda requer validação autorizada com o operador.
-Somente HTTPS em www.smecel.com.br é permitido; outros domínios ficam bloqueados.
-Se a página precisar de outro domínio, pare: não amplie acesso nem desative proteção.
-Isso não certifica todos os computadores, leitores de tela ou escalas de DPI.
-Consulte MANIFEST.json e a PR privada para versão e evidências.
-
-LICENÇAS
-Python: pasta programa. Bibliotecas Python: programa/Lib/site-packages.
-Interface: LICENCAS-UI.txt.
-
-ACESSO INSTITUCIONAL — 0.4.0 TESTE
-A entrada protegida está incluída, mas o backend ainda precisa de configuração e validação autorizadas. Iniciar não cria chave. A primeira ativação exige confirmação explícita no Windows. Nenhuma senha Microsoft fica no programa. Envio continua desativado.
+COMPATIBILIDADE E LICENÇAS
+O CI testa somente dados e contas sintéticos, incluindo janela Windows, Edge isolado,
+DPAPI e assinaturas CNG anônimas. O responsável valida o uso real após aprovação.
+Python incluído é oficial. O Coletor não tem assinatura digital própria.
+Licenças: pasta programa; bibliotecas em programa/Lib/site-packages; LICENCAS-UI.txt.

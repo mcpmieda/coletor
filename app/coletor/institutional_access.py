@@ -105,6 +105,7 @@ class InstitutionalAccess:
         self._lock = threading.RLock()
         self._generation = 0
         self._cleanup_pending = False
+        self._locked_code = None
 
     def _verify(self, generation):
         try:
@@ -117,16 +118,17 @@ class InstitutionalAccess:
                 if generation != self._generation:
                     raise AccessDenied()
             return proof
-        except AccessDenied:
-            self._invalidate()
+        except AccessDenied as error:
+            self._invalidate(error.code)
             raise
         except Exception:
-            self._invalidate()
+            self._invalidate('ACCESS_UNAVAILABLE')
             raise AccessDenied("ACCESS_UNAVAILABLE") from None
 
-    def _invalidate(self):
+    def _invalidate(self, code='ACCESS_REQUIRED'):
         with self._lock:
             self._generation += 1
+            self._locked_code = code
         try:
             self._on_locked()
         except Exception:
@@ -161,7 +163,7 @@ class InstitutionalAccess:
             return status
 
     def open_login(self):
-        self._invalidate()
+        self._invalidate('ACCOUNT_CHANGED')
         if self._cleanup_pending:
             raise AccessDenied("ACCESS_CLEANUP_PENDING")
         if self._provider is None:
@@ -174,7 +176,7 @@ class InstitutionalAccess:
             raise AccessDenied("LOGIN_UNAVAILABLE") from None
 
     def logout(self):
-        self._invalidate()
+        self._invalidate('LOGOUT')
         failed = False
         try:
             self._on_locked()

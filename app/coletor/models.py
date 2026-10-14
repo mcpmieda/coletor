@@ -28,6 +28,7 @@ class Student:
     display_name: str
     # This report has no structured MAT. A name never supplies one.
     mat: str | None = None
+    original_class: str | None = None
 
 
 @dataclass(frozen=True)

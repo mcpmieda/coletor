@@ -147,7 +147,7 @@ def worker(args):
             controls.click(window,'Ler diário manualmente')
             smoke.wait_js(window,"document.body.textContent.includes('Prévia da turma') && document.body.textContent.includes('Leitura manual do Smecel')")
             checks['manual_preview_rendered']=True
-            checks['transmission_blocked']=window.evaluate_js("document.body.textContent.includes('Envio desativado') && document.body.textContent.includes('Não envia dados')")
+            checks['transmission_blocked']=window.evaluate_js("document.body.textContent.includes('Envio desativado') && document.querySelector('.summary-grid>div:last-child strong')?.textContent==='0'")
             checks['no_student_link_opened']=not (args.output.parent/'unexpected-student-navigation.json').exists()
             window.evaluate_js("""(() => {
               const api=window.pywebview.api, close=api.close_manual_session.bind(api);

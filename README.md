@@ -2,42 +2,27 @@
 
 Coletor de frequência escolar para integração com o Ecossistema Escolar.
 
-A PR draft de autorização prepara a entrada protegida e o vínculo revogável do
-computador. O pacote 0.4.0-teste bloqueia uso até o backend estar configurado e
-validado; a primeira chave exige confirmação explícita. A ativação real ainda
-não foi feita. Consulte [estado e limites](docs/DEVICE_AUTH_DECISION.md).
+A versão 0.4 é candidata operacional para revisão junto do backend Ecossistema.
+Implementa entrada Microsoft e vínculo revogável do PC, coleta manual/agendada,
+computador ativo e reservas, agenda escolar compartilhada, fila e sessão Smecel
+protegidas pelo Windows mediante consentimento nativo. Não cria autostart.
 
-## Prévia local e sessão manual, sem envio
+O operador entra no Smecel diretamente no Edge, carrega as turmas e marca nomes.
+Cada captura revalida contexto/ano/turma e usa o worker isolado. O envio assinado
+contém apenas observações X/J e referências locais de ficha; a identificação é
+resolvida centralmente no Ecossistema, sem studentUid escolhido pelo PC.
+Pontos, vazios e cobertura incompleta não viram presença ou percentual.
 
-Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo o
-padrão de interface do Atualizador de Planilhas 1.3.0: HeroUI, Segoe UI e temas
-claro, escuro e automático. A identidade do coletor usa vermelho/bordô, conforme
-a escolha posterior do usuário.
+A prévia de HTML e os exemplos sintéticos continuam sem envio. A janela Windows
+usa agenda do servidor com CAS, independentemente de rascunhos localStorage.
+Coletar agora processa todas as turmas selecionadas, com uma lease por escola/ano,
+heartbeat, cancelamento, retries limitados e confirmação por recibo servidor.
 
-Implementado:
-- Login primeiro em Edge separado, descoberta dinâmica de turmas por nome e seleção local por ano/contexto.
-- Revalidação da disponibilidade após login e imediatamente antes da leitura do diário.
-- Login digitado pelo operador diretamente no site, sem senha na bridge do coletor.
-- Abertura de HTML selecionado pelo operador, processado somente em memória.
-- Parser de diário anual: fichas, FEV–DEZ, dias válidos e seis posições de aula.
-- Prévia por aluno/mês, paginação e alertas de validação.
-- Demonstração gerada com três alunos inteiramente sintéticos.
-- Falha fechada para HTML desconhecido, login, truncamento e escopo divergente.
-- Testes de parser, calendário, ambiguidades, identidade e adaptadores locais.
-- Raposa animada no painel, com preferências de exibição e movimento reduzido.
-
-A marca `•` é “aula prevista/presença” e continua **sem confirmação**. Não existe
-presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total de
-fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
-
-Não implementado: autenticação validada da escola/Ecossistema, login automático,
-coleta automática, credenciais persistentes, API de produção, banco,
-execução agendada, coordenação dos computadores autorizados, portal ou instalador.
-A interface mostra essas etapas como futuras. A leitura manual não prova identidade
-ou completude da turma; o fluxo real de login/SSO aguarda validação autorizada.
-Veja [escopo e segurança da sessão manual](docs/MANUAL_SESSION_MILESTONE.md). Não há endpoint de sincronização.
-O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
-exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
+O pacote exige CI completo e provas nativas no SHA final. Implementação candidata
+e validação real são estados separados: nenhum login, dado de aluno, chave real,
+merge, deploy ou DDL produtivo é executado pelos testes. Consulte o
+[estado operacional V2](docs/FREQUENCY_V2_CANDIDATE.md) e o
+[roteiro de ativação](docs/TESTE_E_ATIVACAO.md).
 
 ## Raposa do coletor
 
@@ -49,15 +34,7 @@ janela e sair. Fechar pelo X também encerra o programa. Não cria autostart ou 
 
 ## Agenda pré-configurada e editável
 
-A página Horários de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
-versão 75, separados por dia e turno, com fuso America/Bahia editável. Na janela Windows,
-agenda, tema e preferências da raposa ficam no arquivo próprio
-`%LOCALAPPDATA%/ColetorFrequenciaSmecel/settings.json`, mesmo depois de fechar.
-Na prévia no navegador, ficam no armazenamento desse navegador. Nenhuma tarefa é executada. O escopo futuro é a escola:
-a mesma configuração para os usuários e computadores autorizados, após login e sincronização ainda não
-implementados. A quantidade é variável; o desenho prevê um coletor ativo por vez
-e os demais computadores autorizados como reservas. Não guarda credenciais.
-Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
+No Windows, Horários de coleta carrega e salva a revisão compartilhada da escola no servidor. Alteração concorrente pede recarregar e comparar, sem sobrescrever. Fuso IANA America/Bahia, horários por dia/turno e fins de semana opcionais são editáveis. Sugestões não confirmam dias letivos nem aula ministrada. A prévia de desenvolvimento mantém seu rascunho local, que não ativa o runtime.
 
 ## Executar a prévia no desenvolvimento
 

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKS = ["external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
           "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
           "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
-          "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled"]
+          "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored']
 
 
 async def exercise_browser(output):
@@ -87,6 +87,19 @@ async def exercise_browser(output):
                 checks['post308_destination_uncontacted'] &= source.post_checks == [True, True]
                 checks['http2_disabled'] = bool(source.alpns) and 'h2' not in source.alpns
                 synthetic_cookie_exists = any(cookie['name'] == 'coletor_synthetic_qa' for cookie in await context.cookies())
+                from coletor.protected_storage import ProtectedStorage
+                with tempfile.TemporaryDirectory(prefix='coletor-dpapi-browser-fixture-') as protected_directory:
+                    protected = ProtectedStorage(protected_directory, consent=lambda: True)
+                    protected.bind('11111111-1111-4111-8111-111111111111', 1)
+                    protected.enable()  # Synthetic consent; no production dialog/key/account.
+                    state = await context.storage_state()
+                    protected.save_session(state)
+                    raw = (protected.directory / 'session.dpapi').read_bytes()
+                    restored = await browser.new_context(accept_downloads=False, service_workers='block', storage_state=protected.load_session())
+                    checks['dpapi_source_session_restored'] = (b'coletor_synthetic_qa' not in raw and
+                        any(c['name'] == 'coletor_synthetic_qa' for c in await restored.cookies()))
+                    await restored.close()
+                    protected.clear()
                 await context.close()
                 fresh = await browser.new_context(accept_downloads=False, service_workers="block")
                 checks["ephemeral_context_closed"] = synthetic_cookie_exists and len(browser.contexts) == 1 and await fresh.cookies() == []

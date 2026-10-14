@@ -36,7 +36,7 @@ from urllib.parse import urlparse
 SCHEMA = 1
 
 
-def synthetic_institutional_access(authorized=True):
+def synthetic_institutional_access(authorized=True, shared_fixture=None):
     """Python QA fixture, outside the package. No runtime flag/JS bypass exists.
 
     Exercises the actual strict receipt validation with a synthetic transport;
@@ -46,6 +46,31 @@ def synthetic_institutional_access(authorized=True):
 
     class Provider:
         active = authorized
+        revision = 0
+
+        def frequency_request(self, payload):
+            # Server-shaped operational settings fixture, never local app
+            # preferences promoted into a shared revision or production request.
+            preset = json.loads((Path(__file__).resolve().parents[1] / 'ui/src/schedule-presets.json').read_text(encoding='utf-8'))
+            state = {'revision': 0, 'paused': False, 'schedule': {'timezone': 'America/Bahia', 'rules': [
+                {'weekday': r['weekday'] % 7, 'shift': r['shift'], 'enabled': r['selected'], 'times': r['times'], 'recheck': r['reconciliation'] or None} for r in preset['rules']]}}
+            if shared_fixture is not None and Path(shared_fixture).is_file():
+                state = json.loads(Path(shared_fixture).read_text(encoding='utf-8'))
+            if payload['operation'] == 'status':
+                return {'contractVersion': 2, 'state': 'ready', 'academicYear': 2026, 'serverTime': datetime.now(timezone.utc).isoformat(),
+                        'settings': state, 'classes': [], 'devices': [], 'collections': [], 'conflicts': [], 'lease': None}
+            if payload['operation'] in {'save-settings', 'set-paused'}:
+                if payload['expectedRevision'] != state['revision']:
+                    from coletor.device_provider import FrequencyError
+                    raise FrequencyError('revision-conflict')
+                if payload['operation'] == 'save-settings': state['schedule'] = payload['schedule']
+                else: state['paused'] = payload['paused']
+                state['revision'] += 1
+                if shared_fixture is not None: Path(shared_fixture).write_text(json.dumps(state), encoding='utf-8')
+                return {'contractVersion': 2, 'state': 'committed', 'operation': payload['operation'], 'requestId': payload['requestId'], 'settingsRevision': state['revision']}
+            raise RuntimeError('fixture-operation-unavailable')
+
+        def storage_binding(self): return '11111111-1111-4111-8111-111111111111', 1
 
         def verify_online(self):
             if not self.active:
@@ -71,7 +96,7 @@ def synthetic_institutional_access(authorized=True):
     return access
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 EXPECTED_NAMES = [f"Aluno sintético {number:03}" for number in range(1, 4)]
-LABELS = ["Conferir frequência", "Não envia dados", "Prévia da turma",
+LABELS = ["Conferir frequência", "Coleta autorizada", "Prévia da turma",
           "Alunos no diário", "Este exemplo usa alunos fictícios.",
           "Nenhum dado foi enviado", "• não confirma presença", "Envio desativado"]
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",

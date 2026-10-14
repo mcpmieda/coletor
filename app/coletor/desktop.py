@@ -23,6 +23,8 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    from .instance_lock import CollectorInstance
+    instance = CollectorInstance(settings_directory).acquire()
     api = DesktopApi(settings_directory, access=access)
     window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry) + "#coletor-desktop", js_api=api,
                           width=1240, height=820, min_size=(900, 620),
@@ -48,10 +50,12 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)
     finally:
         try:
-            api._manual_session.close()
+            api._collector.shutdown()
         finally:
             try:
                 api._access.shutdown()
             finally:
-                if api._tray is not None: api._tray.stop()
+                try:
+                    if api._tray is not None: api._tray.stop()
+                finally: instance.close()
 

@@ -98,7 +98,8 @@ def configure_page(page):
 
 
 class BrowserWorker:
-    def __init__(self):
+    def __init__(self, storage_state=None):
+        self._storage_state = storage_state
         self._process = None
         self._job = None
         self._temporary = None
@@ -161,7 +162,10 @@ class BrowserWorker:
                                              creationflags=subprocess.CREATE_NO_WINDOW)
             # Child waits on stdin: containment is established before any Edge/Node child.
             self._job.assign(self._process.pid)
-        self._rpc({"command": "open", "url": url})
+        initial = {"command": "open", "url": url}
+        if self._storage_state is not None: initial['storage_state'] = self._storage_state
+        self._rpc(initial)
+        self._storage_state = None
 
     def discover(self, year):
         return self._rpc({"command": "list", "year": year})
@@ -172,9 +176,14 @@ class BrowserWorker:
     def capture(self):
         return self._rpc({"command": "capture"})
 
+    def export_state(self):
+        # This private pipe is never the privileged webview bridge.
+        return self._rpc({"command": "state"})['storage_state']
+
     def close(self):
         with self._close_lock:
             self._closed = True
+            self._storage_state = None
             process, self._process = self._process, None
             if process is not None:
                 try:
@@ -202,7 +211,7 @@ class BrowserWorker:
                     process.wait(timeout=3)
                 process.stdout.close()
             if self._temporary is not None:
-                for attempt in range(7):
+                for attempt in range(9):
                     try:
                         self._temporary.cleanup()
                         break
@@ -212,7 +221,7 @@ class BrowserWorker:
                         # Windows can retain a handle briefly after the owned
                         # process tree exits. Retry only this sharing violation,
                         # on our own TemporaryDirectory, without relaxing QA.
-                        if getattr(error, "winerror", None) != 32 or attempt == 6:
+                        if getattr(error, "winerror", None) != 32 or attempt == 8:
                             raise
                         time.sleep(0.05 * 2 ** attempt)
                 self._temporary = None
@@ -232,7 +241,8 @@ async def browser_session(initial):
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(**browser_options(proxy))
             try:
-                context = await browser.new_context(accept_downloads=False, service_workers="block")
+                context = await browser.new_context(accept_downloads=False, service_workers="block",
+                                                    storage_state=initial.get('storage_state'))
                 page = await context.new_page()
                 configure_page(page)
                 await verify_proxy(page, proxy)
@@ -252,6 +262,14 @@ async def browser_session(initial):
 
                 async def capture_reply(command):
                     try:
+                        if command['command'] == 'state':
+                            state = await context.storage_state()
+                            state = {'cookies': [c for c in state['cookies'] if c['domain'] in {'www.smecel.com.br', '.smecel.com.br', 'smecel.com.br'}],
+                                     'origins': [o for o in state['origins'] if o['origin'] == 'https://www.smecel.com.br']}
+                            encoded = json.dumps({'storage_state': state}, ensure_ascii=False)
+                            if len(encoded.encode('utf-8')) > 1024 * 1024: raise ValueError('state_limit')
+                            print(encoded, flush=True)
+                            return
                         if command["command"] == "list":
                             payload = await read_catalog(command["year"])
                             print(json.dumps(payload, ensure_ascii=False), flush=True)
@@ -293,7 +311,7 @@ async def browser_session(initial):
                             if not line:
                                 break
                             command = json.loads(line)
-                            if command.get("command") not in {"capture", "list"}:
+                            if command.get("command") not in {"capture", "list", "state"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")
@@ -314,7 +332,9 @@ def main():
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     # Before browser creation this blocking read is the Job Object handshake.
-    initial = json.loads(sys.stdin.readline(2048))
+    initial_line = sys.stdin.readline(1024 * 1024 + 2048)
+    if not initial_line.endswith('\n'): raise ValueError('invalid_initial')
+    initial = json.loads(initial_line)
     asyncio.run(browser_session(initial))
 
 
