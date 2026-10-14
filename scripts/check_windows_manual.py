@@ -110,7 +110,7 @@ def worker(args):
             checks['native_window_visible'] = bool(window.native.Visible)
             alpha="[...document.querySelectorAll('input')].find(n=>n.getAttribute('aria-label')==='Selecionar Turma sintética Alpha')"
             year_ready="(()=>{const label=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()==='Ano letivo no Smecel');return document.getElementById(label?.htmlFor)?.disabled===false;})()"
-            smoke.wait_js(window, '!!window.pywebview?.api.prepare_manual_login')
+            smoke.wait_js(window, '!!window.pywebview?.api.prepare_manual_login && '+year_ready)
             checks['prepared_without_browser']=not drivers
             checks['opening_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Entrar no Smecel')?.disabled===true")
             controls.checkbox(window,'Autorizo abrir o Smecel e ler a lista de turmas deste ano, sem envio.')
