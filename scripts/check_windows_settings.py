@@ -58,7 +58,7 @@ def exercise(window,args,result):
         if not value: smoke.fail(name)
         checks[name]=True
     try:
-        smoke.wait_js(window,"!!document.querySelector('h1') && typeof window.pywebview?.api?.get_local_settings==='function'")
+        smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Horários de coleta'&&!n.disabled) && typeof window.pywebview?.api?.get_local_settings==='function'")
         info,handle=smoke.native_info(window)
         require("native_window_visible",info["visible"] and info["edgechromium"])
         click(window,"Horários de coleta")

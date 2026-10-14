@@ -343,7 +343,7 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
     checks = evidence["checks"]
     try:
         evidence["stage"] = "dom_and_bridge"
-        wait_js(window, "document.readyState === 'complete' && !!document.querySelector('h1') && typeof window.pywebview?.api?.load_demo === 'function'")
+        wait_js(window, "document.readyState === 'complete' && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled) && typeof window.pywebview?.api?.load_demo === 'function'")
         checks["dom_and_bridge_ready"] = True
         info, handle = native_info(window)
         checks["native_window_visible"] = info["visible"]
