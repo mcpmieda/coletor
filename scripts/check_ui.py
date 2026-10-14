@@ -23,6 +23,8 @@ try:
         page.on('request', lambda r: atlas_requests.append(r.url) if r.url.endswith('/mascot/atlas.png') else None)
         page.goto(url)
         page.get_by_role('heading', name='Vamos conferir a frequência?').wait_for()
+        version = json.loads((root / 'ui/package.json').read_text(encoding='utf-8'))['version']
+        expect(page.get_by_text(f'Versão de teste · {version}', exact=True)).to_be_visible()
         fox = page.get_by_role('img', name='Raposa vermelha, mascote do coletor')
         fox.wait_for()
         expect(fox).to_have_js_property('complete', True)

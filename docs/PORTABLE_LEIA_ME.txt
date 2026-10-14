@@ -1,4 +1,4 @@
-COLETOR DE FREQUÊNCIA — 0.3.0 TESTE
+COLETOR DE FREQUÊNCIA — 0.4.0 TESTE
 Pacote portátil para Windows de 64 bits
 
 COMO ABRIR

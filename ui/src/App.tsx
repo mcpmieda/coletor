@@ -1,4 +1,5 @@
 import limits from '../../app/coletor/preview-limits.json';
+import { version } from '../package.json';
 import { useRef, useState } from 'react';
 import { Button, Input, Label, TextField } from '@heroui/react';
 import { FileUp, FlaskConical, LayoutDashboard, ShieldCheck, Monitor, Clock3, X } from 'lucide-react';
@@ -49,7 +50,7 @@ export default function App() {
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-icon brand-fox"><img src="./mascot/head.png" alt="" width="32" height="32" /></span><div><strong>Coletor de Frequência</strong><span>Ecossistema Escolar</span></div></div>
       <nav aria-label="Navegação principal"><button className={view === 'preview' ? 'nav-item active' : 'nav-item'} aria-current={view === 'preview' ? 'page' : undefined} onClick={() => setView('preview')}><LayoutDashboard size={18} />Conferir frequência</button><button className={view === 'schedule' ? 'nav-item active' : 'nav-item'} aria-current={view === 'schedule' ? 'page' : undefined} onClick={() => setView('schedule')}><Clock3 size={18} />Horários de coleta</button><button className={view === 'roadmap' ? 'nav-item active' : 'nav-item'} aria-current={view === 'roadmap' ? 'page' : undefined} onClick={() => setView('roadmap')}><Monitor size={18} />Próximos passos</button></nav>
-      <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Versão de teste · 0.3.0</StatusChip><p>Dados ficam neste computador</p><SelectField label="Tema" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automático' }, { id: 'light', label: 'Claro' }, { id: 'dark', label: 'Escuro' }]} /></div></div>
+      <div className="sidebar-bottom"><FoxCompanion activity={busy ? 'reading' : error ? 'error' : preview ? 'review' : 'idle'} /><div className="sidebar-footer"><StatusChip>Versão de teste · {version}</StatusChip><p>Dados ficam neste computador</p><SelectField label="Tema" value={theme} onChange={v => setTheme(v as ThemeMode)} options={[{ id: 'system', label: 'Automático' }, { id: 'light', label: 'Claro' }, { id: 'dark', label: 'Escuro' }]} /></div></div>
     </aside>
     <main><header className="page-header"><div><h1>{view === 'preview' ? 'Conferir frequência' : view === 'schedule' ? 'Horários de coleta' : 'Próximos passos'}</h1><p>{view === 'preview' ? 'Veja o diário e o que precisa conferir.' : view === 'schedule' ? 'Escolha os dias e horários.' : 'O que falta para começar a coleta.'}</p></div><StatusChip tone="warning">Não envia dados</StatusChip></header>
       {settingsNotice && <p className="local-settings-notice" role="status">{settingsNotice}</p>}

@@ -142,6 +142,50 @@ class DeviceProviderTests(unittest.TestCase):
         finally:
             restarted.release()
 
+    def test_cancelling_pending_pairing_deletes_key_and_cannot_authorize(self):
+        self.provider.open_official_login()
+        self.provider.close()
+        self.assertEqual(sum(c[1] == 'pairings/cancel' for c in self.transport.calls), 1)
+        self.assertFalse(self.crypto.exists)
+        self.assertFalse((self.root/'device.json').exists())
+        self.assertEqual(self.provider.public_status(), {})
+        with self.assertRaises(AccessDenied):
+            self.provider.verify_online()
+        self.assertFalse(self.transport.claimed)
+
+    def test_closing_pending_pairing_offline_drops_secret_and_reopen_stays_denied(self):
+        self.provider.open_official_login()
+        original = self.transport.request
+        def offline_cancel(method, path, value=None):
+            if path == PREFIX+'pairings/cancel':
+                raise AccessDenied('ACCESS_UNAVAILABLE')
+            return original(method, path, value)
+        self.transport.request = offline_cancel
+        self.provider.release()
+        self.assertEqual(self.provider.public_status(), {})
+        self.assertNotIn('z'*43, (self.root/'device.json').read_text())
+        restarted = self.make_provider()
+        try:
+            with self.assertRaises(AccessDenied):
+                restarted.verify_online()
+            self.assertFalse(self.transport.claimed)
+            self.assertEqual(sum(c[0] == 'create' for c in self.crypto.calls), 1)
+        finally:
+            restarted.release()
+
+    def test_unavailable_renewal_denies_then_recovers_without_new_key_or_login(self):
+        self.activate()
+        original = self.transport.request
+        self.transport.request = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+        with self.assertRaises(AccessDenied):
+            self.provider.verify_online()
+        self.assertTrue(self.crypto.exists)
+        self.browser.assert_called_once()
+        self.transport.request = original
+        validate_authorization(self.provider.verify_online(), NOW)
+        self.assertEqual(sum(c[0] == 'create' for c in self.crypto.calls), 1)
+        self.browser.assert_called_once()
+
     def test_refuses_swapped_route_key_time_nonce_and_extra_challenge_fields(self):
         self.activate()
         for changes in [{'path': PREFIX+'revoke'}, {'purpose': 'collector-revoke'}, {'keyThumbprint': 'x'*43},
