@@ -8,7 +8,7 @@ import sys
 from .service import ROOT
 from .desktop_api import DesktopApi
 
-APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel.Preview"
+APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel"
 
 
 def centered_window_geometry(work_area, width=1240, height=820, minimum=(900, 620)):
@@ -57,7 +57,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
     instance = CollectorInstance(settings_directory).acquire()
     api = DesktopApi(settings_directory, access=access)
     geometry = centered_window_geometry(primary_work_area())
-    window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry) + "#coletor-desktop", js_api=api,
+    window = webview.create_window("Coletor de Frequência · 0.4.0", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):
