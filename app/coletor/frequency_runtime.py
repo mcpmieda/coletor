@@ -207,8 +207,12 @@ class FrequencyRuntime:
 
     def _loop(self):
         while not self._stop.wait(1):
-            if self._clock() - self._last_tick < 30: continue
-            self._last_tick = self._clock()
+            now = self._clock()
+            elapsed = now - self._last_tick
+            # Clock corrections must not suspend collection checks until the
+            # old wall-clock time is reached again. _fired still blocks repeats.
+            if 0 <= elapsed < 30: continue
+            self._last_tick = now
             try: self.tick()
             except Exception as error: self._error(error)
 
