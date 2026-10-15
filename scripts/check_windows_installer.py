@@ -1,0 +1,100 @@
+"""Native Windows installer gate, only a disposable synthetic per-user install.
+
+No account, device key, Smecel login or production endpoint is accessed. The
+private installer can be published only when all native browser/security gates
+and this real install/uninstall test have succeeded.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def run(installer, expected_sha, output):
+    if sys.platform != "win32":
+        raise RuntimeError("windows-required")
+    if not installer.is_file() or installer.stat().st_size < 1_000_000:
+        raise RuntimeError("installer-missing-or-incomplete")
+    if len(expected_sha) != 40 or any(x not in "0123456789abcdef" for x in expected_sha):
+        raise RuntimeError("invalid-head-sha")
+    with tempfile.TemporaryDirectory(prefix="collector-installer-qa-") as parent:
+        root = Path(parent)
+        installed = root / "installed"
+        unrelated = root / "unrelated"
+        unrelated.mkdir()
+        sentinel = unrelated / "do-not-touch.txt"
+        sentinel.write_text("synthetic-sentinel", encoding="utf-8")
+        report = {"status": "failed", "checks": {}, "real_accounts": False, "real_network": False}
+        uninstaller = installed / "unins000.exe"
+        try:
+            command = [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                       "/CURRENTUSER", "/NOICONS", "/DIR=" + str(installed)]
+            result = subprocess.run(command, capture_output=True, timeout=150, check=False)
+            if result.returncode != 0:
+                raise RuntimeError("installer-failed")
+            report["checks"]["installed_without_admin"] = True
+            manifest_path = installed / "MANIFEST.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("source_commit") != expected_sha or manifest.get("credentials_included") is not False:
+                raise RuntimeError("installer-source-mismatch")
+            files = manifest["files"]
+            if len(files) < 100:
+                raise RuntimeError("installer-file-inventory-incomplete")
+            for item in files:
+                path = installed / item["path"]
+                if not path.is_file() or path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
+                    raise RuntimeError("installer-file-hash-mismatch")
+            report["checks"]["source_commit_and_full_inventory"] = True
+            python = installed / "programa" / "python.exe"
+            if not (installed / "programa" / "pythonw.exe").is_file() or not uninstaller.is_file():
+                raise RuntimeError("native-launcher-or-uninstaller-missing")
+            help_run = subprocess.run([str(python), "-B", "-m", "coletor", "--help"],
+                                      cwd=installed / "programa", capture_output=True, timeout=30)
+            if help_run.returncode != 0 or b"--safe-removal" not in help_run.stdout:
+                raise RuntimeError("installed-runtime-unavailable")
+            report["checks"]["installed_runtime_and_uninstaller"] = True
+            uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+                                       capture_output=True, timeout=150)
+            if uninstall.returncode != 0:
+                raise RuntimeError("uninstall-failed")
+            if (installed / "programa" / "python.exe").exists():
+                raise RuntimeError("uninstall-left-program")
+            if sentinel.read_text(encoding="utf-8") != "synthetic-sentinel":
+                raise RuntimeError("uninstall-affected-other-data")
+            report["checks"]["uninstall_preserves_unrelated_data"] = True
+            report["status"] = "passed"
+        finally:
+            if uninstaller.exists():
+                subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+                               capture_output=True, timeout=60, check=False)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--installer", required=True, type=Path)
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    report = run(args.installer.resolve(), args.commit, args.output.resolve())
+    if report["status"] != "passed":
+        raise SystemExit("installer-native-qa-failed")
+    print("installer-native-qa-passed", flush=True)
+
+
+if __name__ == "__main__":
+    main()
