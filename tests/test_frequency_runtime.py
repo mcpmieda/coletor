@@ -206,6 +206,49 @@ class RuntimeTests(unittest.TestCase):
         payload = next(p for p in self.provider.requests if p['operation'] == 'collect')
         self.assertEqual(payload['fencingToken'], 3)
 
+    def test_slow_status_and_lease_do_not_fence_a_fresh_grant(self):
+        original = self.provider.frequency_request
+
+        def delayed(payload):
+            if payload['operation'] == 'status':
+                response = original(payload)
+                self.provider.now += 8  # Delay after serverTime was sampled.
+                return response
+            if payload['operation'] == 'lease':
+                self.provider.now += 7  # Grant is issued after the request begins.
+            return original(payload)
+
+        self.provider.frequency_request = delayed
+        status = self.runtime._fresh()
+        lease_request_started = self.provider.now
+        self.runtime._acquire(status)
+        self.assertEqual(self.runtime._lease['fencingToken'], 1)
+        self.assertEqual(self.runtime._lease['deadline'], lease_request_started + 118)
+        self.assertGreater(self.runtime._lease['deadline'], self.provider.now)
+
+    def test_stale_status_must_not_reuse_an_expired_own_lease(self):
+        status = self.runtime._fresh()
+        status['lease'] = {'deviceId': DEVICE, 'fencingToken': 50,
+                           'expiresAt': stamp(self.provider.now + 10)}
+        self.provider.now += 20  # Transport delay or delayed consumer.
+        self.runtime._acquire(status)
+        self.assertEqual(self.runtime._lease['fencingToken'], 1)
+
+    def test_heartbeat_never_extends_lease_when_response_is_delayed(self):
+        self.runtime._lease = {'fencingToken': 1, 'deadline': NOW + 40}
+        old_deadline = self.runtime._lease['deadline']
+        original = self.provider.frequency_request
+
+        def delayed(payload):
+            response = original(payload)
+            if payload['operation'] == 'heartbeat':
+                self.provider.now += 5
+            return response
+
+        self.provider.frequency_request = delayed
+        self.runtime._heartbeat(self.runtime._epoch)
+        self.assertLessEqual(self.runtime._lease['deadline'], old_deadline)
+
     def test_old_pending_fence_queries_receipt_then_requires_recapture(self):
         payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
                                      {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
