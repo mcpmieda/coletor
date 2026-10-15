@@ -53,7 +53,19 @@ Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.
 [Run]
 Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Description: "Abrir Coletor de Frequência"; Flags: postinstall nowait skipifsilent unchecked
 
-; Inno removes application binaries and shortcuts only. It intentionally does
-; NOT delete per-user DPAPI, device keys, queue or account binding: before
-; uninstall, the operator must explicitly run "Retirar acesso deste PC".
-; Silent uninstall must likewise be preceded by authorized revocation.
+; The uninstaller does not claim or silently perform access revocation.
+; Confirm the operator has reviewed pending receipts and the device binding.
+[Code]
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  if not UninstallSilent then
+    Result := MsgBox(
+      'Antes de remover, confira os lotes pendentes e use o atalho ' +
+      '"Retirar acesso deste PC" no menu Iniciar para revogar o vínculo no Ecossistema.' +
+      #13#10#13#10 +
+      'Desinstalar não apaga chaves, filas cifradas ou configurações e não ' +
+      'revoga automaticamente o computador. Você já concluiu essa conferência ' +
+      'e deseja continuar?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+end;
