@@ -15,3 +15,10 @@ condition = "AND"
 regexTarget = "secret"
 regexes = ['''^signed-v2-frequency$''']
 paths = ['''^scripts/build_windows_portable\.py$''']
+
+[[rules.allowlists]]
+description = "Reviewed Windows installer documentation prose, not an API token or key."
+condition = "AND"
+regexTarget = "line"
+regexes = ['''^CNG anônimo e proof backend, DPAPI, fila/recibos/fencing e ZIP\.$''']
+paths = ['''^docs/WINDOWS_INSTALLER\.md$''']
