@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import Mock
 from coletor.desktop_api import DesktopApi
 from coletor.institutional_access import AccessDenied
+from synthetic_access import SyntheticAccess
 
 
 class DesktopAccessTests(unittest.TestCase):
@@ -22,6 +23,19 @@ class DesktopAccessTests(unittest.TestCase):
                 self.assertNotIn('private-html', str(result))
             api._manual_session.prepare_login.assert_not_called()
             api._settings.update.assert_not_called()
+
+    def test_active_collection_close_returns_manual_session_shape_not_collector_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api = DesktopApi(directory, access=SyntheticAccess())
+            api._manual_session.prepare('13331', 2026)
+            api._collector._active = True
+            result = api.close_manual_session()
+            self.assertEqual(result['state'], 'closed')
+            self.assertIsNone(result['scope'])
+            self.assertIn('generation', result)
+            self.assertFalse(result['transmission_enabled'])
+            self.assertNotIn('localPaused', result)
+            self.assertTrue(api._collector.public_status()['localPaused'])
 
     def test_ui_state_does_not_bypass_native_gate_and_cleanup_remains_available(self):
         class Denied:
