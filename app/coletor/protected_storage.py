@@ -166,7 +166,11 @@ class ProtectedStorage:
             if not isinstance(values, list) or len(values) > MAX_QUEUE_ITEMS: raise StorageError()
             if any(not isinstance(v, dict) or set(v) != {'createdAt', 'payload'} or
                    type(v['createdAt']) not in {int, float} or not isinstance(v['payload'], dict) for v in values): raise StorageError()
-            fresh = [v for v in values if 0 <= self._clock() - v['createdAt'] <= RETENTION_SECONDS]
+            now = self._clock()
+            # A Windows clock rollback must not silently discard an unreceipted
+            # batch. Keep the encrypted queue intact until time is corrected.
+            if any(v['createdAt'] > now for v in values): raise StorageError()
+            fresh = [v for v in values if now - v['createdAt'] <= RETENTION_SECONDS]
             if fresh != values: self._write('queue', fresh)
             return fresh
 
