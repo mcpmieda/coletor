@@ -308,6 +308,7 @@ class RuntimeTests(unittest.TestCase):
             def wait(self, _seconds):
                 self.calls += 1
                 return self.calls > 1
+            def set(self): self.calls = 100
 
         self.runtime._stop = OneCycle()
         self.runtime._loop()
