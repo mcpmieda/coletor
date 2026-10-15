@@ -374,6 +374,14 @@ class StorageTests(unittest.TestCase):
         self.storage.clear()
         self.assertEqual(sentinel.read_text(), 'preserve')
 
+    def test_clock_rollback_preserves_pending_receipts_instead_of_deleting_queue(self):
+        self.storage.enqueue({'requestId': DEVICE, 'marks': ['X']})
+        self.now -= 3600  # Windows clock corrected backward after collection.
+        with self.assertRaises(StorageError):
+            self.storage.queue()
+        self.now += 3600
+        self.assertEqual([v['payload']['requestId'] for v in self.storage.queue()], [DEVICE])
+
     def test_source_restore_rejects_other_origins_and_no_partial_session(self):
         with self.assertRaises(StorageError): self.storage.save_session({'cookies': [], 'origins': [{'origin': 'https://evil.invalid'}]})
 
