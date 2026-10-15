@@ -62,8 +62,7 @@ begin
   if not UninstallSilent then
     Result := MsgBox(
       'Antes de remover, confira os lotes pendentes e use o atalho ' +
-      '"Retirar acesso deste PC" no menu Iniciar para revogar o vínculo no Ecossistema.' +
-      #13#10#13#10 +
+      '"Retirar acesso deste PC" no menu Iniciar para revogar o vínculo no Ecossistema.' + #13#10#13#10 +
       'Desinstalar não apaga chaves, filas cifradas ou configurações e não ' +
       'revoga automaticamente o computador. Você já concluiu essa conferência ' +
       'e deseja continuar?',
