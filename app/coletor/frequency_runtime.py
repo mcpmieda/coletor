@@ -155,6 +155,9 @@ class FrequencyRuntime:
         return reply
 
     def _fresh(self):
+        # A server timestamp is generated after the local request begins. Using
+        # this earlier local bound never overstates an existing lease deadline.
+        requested_at = self._clock()
         value = self._request({'operation': 'status', 'academicYear': 2026})
         try:
             if (value['contractVersion'] != 2 or value['state'] != 'ready' or value['academicYear'] != 2026
@@ -168,6 +171,8 @@ class FrequencyRuntime:
                 if (type(c['classId']) is not int or c['classId'] < 1 or type(c['revision']) is not int
                         or c['revision'] < 0 or not label(c['sourceClassLabel'])): raise ValueError()
         except (KeyError, ValueError, TypeError): raise FrequencyError('unavailable') from None
+        # Internal-only metadata; never exposed through the desktop bridge.
+        value['_request_started_at'] = requested_at
         with self._lock:
             self._status = value
             self._school_paused = value['settings']['paused']
@@ -236,19 +241,24 @@ class FrequencyRuntime:
         if not force and existing is not None:
             device_id, _ = self._provider.storage_binding()
             remaining = stamp(existing['expiresAt']) - stamp(status['serverTime'])
-            if existing.get('deviceId') == device_id and type(existing.get('fencingToken')) is int and remaining > 2:
+            deadline = status['_request_started_at'] + remaining - 2
+            if existing.get('deviceId') == device_id and type(existing.get('fencingToken')) is int and deadline > self._clock():
                 with self._lock:
-                    self._lease = {**existing, 'deadline': self._clock() + remaining - 2}
+                    self._lease = {**existing, 'deadline': deadline}
                 return
         request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': 120}
+        requested_at = self._clock()
         reply = self._committed(self._request(request), request)
         if type(reply.get('fencingToken')) is not int or reply['fencingToken'] < 1: raise FrequencyError('unavailable')
-        # Expiry is from the database; offset by serverTime to avoid trusting PC
-        # time. Never add 120 seconds locally as a replacement for server lease.
-        remaining = stamp(reply['expiresAt']) - stamp(status['serverTime'])
-        if not 0 < remaining <= 125: raise FrequencyError('lease-fenced')
+        # The database issues exactly the requested 120-second lease *after*
+        # this request begins. A deadline based on the request start is a safe
+        # lower bound even when the preceding status or network is slow. Do not
+        # infer 120 seconds of freshness from the time the reply arrived.
+        if stamp(reply['expiresAt']) <= stamp(status['serverTime']): raise FrequencyError('lease-fenced')
+        deadline = requested_at + 120 - 2
+        if deadline <= self._clock(): raise FrequencyError('lease-fenced')
         with self._lock:
-            self._lease = {**reply, 'deadline': self._clock() + remaining - 2}
+            self._lease = {**reply, 'deadline': deadline}
             if self._source_blocked: self._state, self._code = 'login-required', 'SOURCE_LOGIN_REQUIRED'
             elif self._code not in {None, 'lease-busy', 'unavailable', 'CANCELLED', 'paused'}: self._state = 'error'
             else: self._state, self._code = 'ready', None
@@ -268,10 +278,14 @@ class FrequencyRuntime:
         if reply.get('fencingToken') != fencing or reply.get('expiresAt') is None: raise FrequencyError('lease-fenced')
         remaining = stamp(reply['expiresAt']) - stamp(status['serverTime'])
         if not 0 < remaining <= 305: raise FrequencyError('lease-fenced')
+        # Heartbeats report status; the server explicitly does not renew the
+        # grant. A delayed heartbeat must never extend our original deadline.
+        deadline = status['_request_started_at'] + remaining - 2
+        if deadline <= self._clock(): raise FrequencyError('lease-fenced')
         with self._lock:
             if epoch != self._epoch or self._lease is None: raise FrequencyError('CANCELLED')
             if self._lease['fencingToken'] != fencing: return status
-            self._lease['deadline'] = self._clock() + remaining - 2
+            self._lease['deadline'] = min(self._lease['deadline'], deadline)
         return status
 
     def tick(self):
