@@ -145,7 +145,7 @@ jobs:
           $ToolDir = Join-Path $env:RUNNER_TEMP 'InnoCompiler'
           Invoke-WebRequest -Uri $ToolUrl -OutFile $ToolExe
           $Signature = Get-AuthenticodeSignature $ToolExe
-          if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Pyrsys B\\.V\\.') {
+          if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') {
             throw 'Inno Setup compiler publisher signature invalid'
           }
           $Completed = Start-Process -FilePath $ToolExe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=$ToolDir") -Wait -PassThru
