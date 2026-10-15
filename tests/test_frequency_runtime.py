@@ -298,6 +298,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(any(r['state'] == 'absent' for r in result['snapshot']['records']))
         self.assertFalse(result['capture']['roster_complete_verified'])
 
+    def test_clock_rollback_does_not_freeze_scheduler(self):
+        self.runtime._last_tick = NOW + 3600
+        self.provider.now = NOW
+        self.runtime.tick = Mock()
+
+        class OneCycle:
+            def __init__(self): self.calls = 0
+            def wait(self, _seconds):
+                self.calls += 1
+                return self.calls > 1
+
+        self.runtime._stop = OneCycle()
+        self.runtime._loop()
+        self.runtime.tick.assert_called_once()
+        self.assertEqual(self.runtime._last_tick, NOW)
+
     def test_schedule_tick_consumes_only_current_minute_no_replay(self):
         now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(__import__('zoneinfo').ZoneInfo('America/Bahia'))
         value = schedule()
