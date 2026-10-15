@@ -6,7 +6,27 @@ import unittest
 from unittest.mock import patch
 from coletor.desktop_api import DesktopApi
 from coletor.desktop_state import DesktopState
+from coletor.desktop import centered_window_geometry
 from coletor.local_settings import LocalSettings, default_settings
+
+
+class NativeWindowGeometryTests(unittest.TestCase):
+    def test_primary_monitor_work_area_is_centered_and_avoids_taskbar(self):
+        area = (-1920, 20, 0, 1040)
+        bounds = centered_window_geometry(area)
+        self.assertEqual(bounds, {'width': 1240, 'height': 820,
+                                  'x': -1580, 'y': 120, 'min_size': (900, 620)})
+        self.assertEqual(bounds['x'] + bounds['width'] // 2, -960)
+        self.assertEqual(bounds['y'] + bounds['height'] // 2, 530)
+
+    def test_small_screen_fits_inside_work_area_without_offscreen_minimum(self):
+        bounds = centered_window_geometry((0, 0, 800, 600))
+        self.assertEqual(bounds, {'width': 768, 'height': 568,
+                                  'x': 16, 'y': 16, 'min_size': (768, 568)})
+
+    def test_invalid_display_size_fails_before_native_window(self):
+        with self.assertRaises(ValueError):
+            centered_window_geometry((5, 0, 5, 100))
 
 
 class DesktopStateTests(unittest.TestCase):
