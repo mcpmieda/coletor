@@ -1,6 +1,7 @@
 """Synthetic source scope, consent, cancellation and privacy regressions."""
 import json
 from pathlib import Path
+import asyncio
 import re
 import sys
 import threading
@@ -189,6 +190,26 @@ class ManualSessionTests(unittest.TestCase):
         result = self.session.prepare('13332', 2026)
         self.assertFalse(result['cleanup_pending'])
         self.assertEqual(result['state'], 'prepared')
+
+
+class PopupShutdownQaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_waits_for_delayed_close_and_fails_if_popup_remains(self):
+        from scripts.check_manual_browser import wait_for_popup_shutdown
+
+        class Context:
+            pages = [object(), object()]
+
+        context = Context()
+
+        async def close_delayed_popup():
+            await asyncio.sleep(0.2)
+            context.pages.pop()
+
+        closing = asyncio.create_task(close_delayed_popup())
+        self.assertTrue(await wait_for_popup_shutdown(context, timeout=1))
+        await closing
+        context.pages.append(object())
+        self.assertFalse(await wait_for_popup_shutdown(context, timeout=0.25))
 
 
 if __name__ == "__main__":
