@@ -8,18 +8,19 @@ import { StatusChip } from '../ui';
 export default function CollectorControl() {
   const [status, setStatus] = useState<CollectorStatus | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const active = useRef(false), mounted = useRef(false);
+  const active = useRef(false), mounted = useRef(false), commandVersion = useRef(0);
   useEffect(() => {
     mounted.current = true;
     if (!isDesktopSettings()) return () => { mounted.current = false; };
     let reading = false;
     async function read() {
-      if (reading) return;
+      if (reading || active.current) return;
       reading = true;
+      const version = commandVersion.current;
       try {
         const value = checkedCollector(await (await collectorBridge()).get_collector_status());
-        if (mounted.current) { setStatus(value); setError(''); }
-      } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : 'Não foi possível verificar a coleta.'); }
+        if (mounted.current && version === commandVersion.current && !active.current) { setStatus(value); setError(''); }
+      } catch (e) { if (mounted.current && version === commandVersion.current && !active.current) setError(e instanceof Error ? e.message : 'Não foi possível verificar a coleta.'); }
       finally { reading = false; }
     }
     void read();
@@ -29,7 +30,7 @@ export default function CollectorControl() {
   if (!isDesktopSettings()) return null;
   async function run(work: () => Promise<CollectorResult>) {
     if (active.current) return;
-    active.current = true; setBusy(true); setError('');
+    active.current = true; commandVersion.current++; setBusy(true); setError('');
     try { const result = checkedCollector(await work()); if (mounted.current) setStatus(result); }
     catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { active.current = false; if (mounted.current) setBusy(false); }
