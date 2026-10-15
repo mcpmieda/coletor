@@ -11,7 +11,7 @@ AppVersion={#AppVersion}
 AppVerName=Coletor de Frequência 0.4.0 (candidato)
 AppPublisher=Ecossistema Escolar
 UninstallDisplayName=Coletor de Frequência
-UninstallDisplayIcon={app}\programa\pythonw.exe
+UninstallDisplayIcon={app}\programa\app\assets\fox-icons\fox-idle.ico
 DefaultDirName={localappdata}\Programs\ColetorFrequenciaSmecel
 DefaultGroupName=Coletor de Frequência
 PrivilegesRequired=lowest
@@ -22,6 +22,7 @@ OutputBaseFilename=ColetorFrequencia-0.4.0-windows-x64-setup-candidato
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\app\assets\fox-icons\fox-idle.ico
 DisableWelcomePage=no
 CloseApplications=yes
 RestartApplications=no
@@ -44,10 +45,10 @@ Source: "{#BundleRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "LEIA-ME-INSTALADOR.txt"; DestDir: "{app}"; DestName: "INSTALACAO-E-RETIRADA.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Comment: "Coletor de Frequência Escolar"
+Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência Escolar"
 Name: "{autoprograms}\Retirar acesso deste PC"; Filename: "{app}\Remover acesso deste PC.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\Instruções de instalação e retirada"; Filename: "{app}\INSTALACAO-E-RETIRADA.txt"
-Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Tasks: desktopicon
+Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Description: "Abrir Coletor de Frequência"; Flags: postinstall nowait skipifsilent unchecked
