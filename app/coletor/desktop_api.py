@@ -114,7 +114,12 @@ class DesktopApi(PreviewApi):
 
     def close_manual_session(self):
         if self._collector.public_status()['active']:
-            return self._operational(lambda: self._collector.local_pause(True))
+            # Pausing collection closes its source session. The desktop caller
+            # expects ManualStatus, never a frequency CollectorStatus.
+            result = self._operational(lambda: self._collector.local_pause(True))
+            if 'error' in result:
+                return result
+            return self._manual_session.status()
         return self._manual(self._manual_session.close)
 
     def get_manual_session_status(self):
