@@ -41,6 +41,25 @@ def primary_work_area():
     return 0, 0, ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
 
 
+def finish_native_form(window):
+    """Finish real WinForms placement after DPI awareness and show event."""
+    from System import Action
+    from System.Drawing import Icon
+    from System.Windows.Forms import Screen
+    from .tray_animation import DEFAULT_ASSET_DIRECTORY
+
+    def place_and_brand():
+        form = window.native
+        area = Screen.PrimaryScreen.WorkingArea
+        form.Left = int(area.Left + (area.Width - form.Width) // 2)
+        form.Top = int(area.Top + (area.Height - form.Height) // 2)
+        icon = Icon(str(DEFAULT_ASSET_DIRECTORY / "fox-idle.ico"))
+        form.Icon = icon
+        window._coletor_native_icon = icon
+
+    window.native.Invoke(Action(place_and_brand))
+
+
 def run_desktop(callback=None, settings_directory=None, *, access=None):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
@@ -64,6 +83,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         # pywebview starts func before creating the native form. Wait for its
         # public shown event; otherwise tray setup races window.native=None.
         if not window.events.shown.wait(20) or window.events.closed.is_set(): return
+        finish_native_form(window)
         from .tray_winforms import WindowsFormsTray
         tray = WindowsFormsTray(window, api._desktop_state)
         try:
