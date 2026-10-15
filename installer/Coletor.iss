@@ -41,10 +41,12 @@ Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; Flags: un
 
 [Files]
 Source: "{#BundleRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "LEIA-ME-INSTALADOR.txt"; DestDir: "{app}"; DestName: "INSTALACAO-E-RETIRADA.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Comment: "Coletor de Frequência Escolar"
 Name: "{autoprograms}\Retirar acesso deste PC"; Filename: "{app}\Remover acesso deste PC.cmd"; WorkingDir: "{app}"
+Name: "{autoprograms}\Instruções de instalação e retirada"; Filename: "{app}\INSTALACAO-E-RETIRADA.txt"
 Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Tasks: desktopicon
 
 [Run]
