@@ -101,7 +101,7 @@ LABELS = ["Conferir frequência", "Coleta autorizada", "Prévia da turma",
           "Nenhum dado foi enviado", "• não confirma presença", "Envio desativado"]
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",
                    "institutional_entry_visible", "native_denial_before_work", "fixture_authorized_only_python",
-                   "native_window_visible", "edgechromium_control", "loopback_ui",
+                   "native_window_visible", "native_window_centered", "edgechromium_control", "loopback_ui",
                    "dom_and_bridge_ready", "real_demo_button_clicked", "bridge_demo_verified",
                    "demo_rendered", "three_synthetic_options", "student_filter_works",
                    "clear_preview_works", "repeat_demo_works", "window_closed"]
@@ -302,12 +302,19 @@ def rendered_js(expected_calls: int) -> str:
 def native_info(window) -> tuple[dict, int]:
     """Inspect the public native control on its own WinForms UI thread."""
     from System import Action
-    info = {"visible": False, "edgechromium": False, "runtime_version": None}
+    info = {"visible": False, "centered": False, "edgechromium": False, "runtime_version": None}
     handle = []
 
     def inspect():
         form = window.native
         info["visible"] = bool(form.Visible) and not bool(form.IsDisposed)
+        from System.Windows.Forms import Screen
+        usable = Screen.PrimaryScreen.WorkingArea
+        center_x = float(usable.Left) + float(usable.Width) / 2
+        center_y = float(usable.Top) + float(usable.Height) / 2
+        form_x = float(form.Left) + float(form.Width) / 2
+        form_y = float(form.Top) + float(form.Height) / 2
+        info["centered"] = abs(center_x - form_x) <= 40 and abs(center_y - form_y) <= 40
         handle.append(int(form.Handle.ToInt64()))
         pending = list(form.Controls)
         while pending:
@@ -372,10 +379,13 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
         checks["dom_and_bridge_ready"] = True
         info, handle = native_info(window)
         checks["native_window_visible"] = info["visible"]
+        checks["native_window_centered"] = info["centered"]
         checks["edgechromium_control"] = info["edgechromium"]
         evidence["webview2_runtime_version"] = info["runtime_version"]
         if not info["visible"] or not info["edgechromium"]:
             fail("real_edgechromium_window_required")
+        if not info["centered"]:
+            fail("real_native_window_not_centered")
         location = urlparse(window.get_current_url() or "")
         checks["loopback_ui"] = location.scheme == "http" and location.hostname in ("127.0.0.1", "localhost", "::1")
         if not checks["loopback_ui"]:
