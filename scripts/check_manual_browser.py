@@ -17,6 +17,22 @@ CHECKS = ["external_edge", "no_privileged_bridge", "exact_scope", "password_form
           "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored']
 
 
+async def wait_for_popup_shutdown(context, timeout=5.0):
+    """Allow Playwright's asynchronous popup/page events to close an aborted popup.
+
+    Check for the entire bounded window, not at one arbitrary 300 ms instant.
+    A popup that survives the deadline remains an explicit security QA failure.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    await asyncio.sleep(0.1)  # Deliver initial page/popup callbacks even on fast Edge.
+    while len(context.pages) != 1:
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(min(0.05, max(0.0, deadline - loop.time())))
+    return True
+
+
 async def exercise_browser(output):
     from coletor.demo import build_fixture
     from coletor.manual_session import captured_preview, source_url
@@ -71,8 +87,7 @@ async def exercise_browser(output):
                 outside = await page.evaluate("fetch('https://unapproved.invalid/blocked').then(()=>false,()=>true)")
                 checks["outside_origin_blocked"] = outside and source.contacts == 0
                 await page.evaluate("window.open('https://unapproved.invalid/popup')")
-                await asyncio.sleep(0.3)
-                checks["popup_closed"] = len(context.pages) == 1
+                checks["popup_closed"] = await wait_for_popup_shutdown(context)
                 for path, method, name in [('/qa-redirect-get', 'GET', 'get_redirect_destination_uncontacted'),
                                            ('/qa-post307', 'POST', 'post307_destination_uncontacted'),
                                            ('/qa-post308', 'POST', 'post308_destination_uncontacted')]:
