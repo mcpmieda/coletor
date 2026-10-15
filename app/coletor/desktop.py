@@ -11,6 +11,36 @@ from .desktop_api import DesktopApi
 APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel.Preview"
 
 
+def centered_window_geometry(work_area, width=1240, height=820, minimum=(900, 620)):
+    """Fit within the primary monitor's usable desktop and center the form.
+
+    Coordinates use the same Win32 logical desktop units as pywebview. Allow
+    smaller windows on compact screens rather than opening outside the display.
+    """
+    left, top, right, bottom = work_area
+    available_width, available_height = right - left, bottom - top
+    if available_width <= 0 or available_height <= 0:
+        raise ValueError("Invalid primary monitor work area")
+    usable_width = max(1, available_width - min(32, available_width // 10))
+    usable_height = max(1, available_height - min(32, available_height // 10))
+    fitted_width, fitted_height = min(width, usable_width), min(height, usable_height)
+    return {
+        "width": fitted_width, "height": fitted_height,
+        "x": left + (available_width - fitted_width) // 2,
+        "y": top + (available_height - fitted_height) // 2,
+        "min_size": (min(minimum[0], fitted_width), min(minimum[1], fitted_height)),
+    }
+
+
+def primary_work_area():
+    import ctypes
+    from ctypes import wintypes
+    rect = wintypes.RECT()
+    if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+        return rect.left, rect.top, rect.right, rect.bottom
+    return 0, 0, ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+
+
 def run_desktop(callback=None, settings_directory=None, *, access=None):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
@@ -26,9 +56,9 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
     from .instance_lock import CollectorInstance
     instance = CollectorInstance(settings_directory).acquire()
     api = DesktopApi(settings_directory, access=access)
+    geometry = centered_window_geometry(primary_work_area())
     window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry) + "#coletor-desktop", js_api=api,
-                          width=1240, height=820, min_size=(900, 620),
-                          background_color="#faf7f8", text_select=True)
+                          **geometry, background_color="#faf7f8", text_select=True)
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):
         # pywebview starts func before creating the native form. Wait for its
