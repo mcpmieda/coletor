@@ -353,8 +353,19 @@ class FrequencyRuntime:
                 self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}
             def renew():
                 while not heartbeat_stop.wait(30):
+                    with self._lock:
+                        lease = self._lease
+                        if lease is None or lease['deadline'] <= self._clock(): continue
+                        fencing = lease['fencingToken']
                     try: self._heartbeat(epoch)
                     except Exception as error:
+                        # A grant that lapsed during a slow capture, or that the
+                        # capture loop already replaced, is renewed before the next
+                        # send. Only a fence on the current grant cancels the work.
+                        with self._lock:
+                            lapsed = (self._lease is None or self._lease['fencingToken'] != fencing
+                                      or self._lease['deadline'] <= self._clock())
+                        if getattr(error, 'code', None) == 'lease-fenced' and lapsed: continue
                         self._error(error)
                         self.cancel(purge=False, school_pause=getattr(error, 'code', None) == 'paused')
                         return

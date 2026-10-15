@@ -4,10 +4,13 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from coletor.device_provider import FrequencyError
+import coletor.frequency_runtime as frequency_runtime
 from coletor.frequency_runtime import FrequencyRuntime, collection_payload, validate_schedule
 from coletor.institutional_access import AccessDenied
 from coletor.protected_storage import Dpapi, ProtectedStorage, StorageError
@@ -205,6 +208,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime.collect()['state'], 'ready')
         payload = next(p for p in self.provider.requests if p['operation'] == 'collect')
         self.assertEqual(payload['fencingToken'], 3)
+
+    def test_capture_slower_than_lease_is_not_cancelled_by_heartbeat(self):
+        class QuickEvent(threading.Event):
+            def wait(self, timeout=None): return super().wait(None if timeout is None else min(timeout, 0.02))
+
+        def slow_capture():
+            self.provider.now = NOW + 130  # The 120-second grant lapses mid-capture.
+            time.sleep(0.3)                # Heartbeat thread runs several times.
+        self.source.on_capture = slow_capture
+        with patch.object(frequency_runtime.threading, 'Event', QuickEvent):
+            result = self.runtime.collect()
+        self.assertEqual(result['state'], 'ready')
+        payload = next(p for p in self.provider.requests if p['operation'] == 'collect')
+        self.assertEqual(payload['fencingToken'], self.provider.fence)
 
     def test_slow_status_and_lease_do_not_fence_a_fresh_grant(self):
         original = self.provider.frequency_request
