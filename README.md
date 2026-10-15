@@ -38,6 +38,22 @@ No Windows, Horários de coleta carrega e salva a revisão compartilhada da esco
 
 ## Executar a prévia no desenvolvimento
 
+### Instalador Windows 0.4 (candidato interno)
+
+O CI também produz um instalador **.exe** para Windows 10/11 x64, por usuário,
+sem exigir administrador ou criar inicialização automática. Cria atalho no
+menu Iniciar (e opcionalmente na área de trabalho); conserva a raposa, a
+bandeja, a interface e as operações do portátil. A janela abre centralizada
+no monitor principal. O pacote `windows-installer-candidate` só é publicado
+depois de testes Windows nativos e instalação/desinstalação reais em pasta
+descartável. Ele ainda depende da homologação Microsoft/TPM/Smecel e do
+backend da PR #1293 antes de uso produtivo. O executável do Coletor ainda
+não tem assinatura digital própria; não contorne avisos de segurança.
+
+Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
+`installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador
+é uma operação consentida **anterior** à desinstalação do aplicativo.
+
 ### Pacote portátil de teste
 
 O CI privado agora prepara um ZIP para Windows x64 com Python oficial embutido,
@@ -108,7 +124,7 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 - [Fixture sintética e cobertura](fixtures/README.md)
 - [Verificação desta versão](docs/VERIFICATION.md)
 
-Trabalho em draft PR. Sem merge, deploy, release, instalador ou escrita em produção.
+Trabalho em PR aberta. Sem merge, deploy, publicação produtiva ou escrita em produção. O instalador candidato é artefato privado do CI, condicionado aos testes.
 
 
 ## Revalidação da auditoria #3
