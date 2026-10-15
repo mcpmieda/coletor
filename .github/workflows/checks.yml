@@ -42,7 +42,7 @@ jobs:
           result=$?
           set -e
           if [ "$result" -ne 0 ] && [ -f /tmp/gitleaks-private.json ]; then
-            python -c 'import json; findings=json.load(open("/tmp/gitleaks-private.json")); [print("redacted scanner metadata:", x.get("RuleID"), x.get("File"), str(x.get("Commit", ""))[:12]) for x in findings]'
+            python -c 'import json; findings=json.load(open("/tmp/gitleaks-private.json")); [print("redacted scanner metadata:", x.get("RuleID"), x.get("File"), x.get("StartLine"), str(x.get("Commit", ""))[:12]) for x in findings]'
           fi
           exit "$result"
       - name: Audit Python runtime and test dependency sets separately
