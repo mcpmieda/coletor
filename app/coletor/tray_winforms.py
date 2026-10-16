@@ -5,6 +5,15 @@ Only an actual local read may animate, at 600 ms or slower. Imports are lazy.
 """
 from .tray_animation import AnimationController, AnimationPolicy, TrayState, resolve_icon_paths
 TEXT = {"idle": "Aguardando arquivo", "reading": "Lendo arquivo local", "error": "Arquivo precisa de atenção"}
+COLLECTOR_TEXT = {"ready": "Coleta ativa", "reserve": "Reserva", "collecting": "Coletando",
+                  "paused": "Coleta pausada", "login-required": "Entrar no Smecel", "error": "Precisa de atenção"}
+
+
+def tray_text(collector, activity):
+    """Notification-area tooltip (63 characters at most on .NET Framework)."""
+    if collector and collector.get("active") and collector.get("state") in COLLECTOR_TEXT:
+        return "Coletor de Frequência · " + COLLECTOR_TEXT[collector["state"]]
+    return "Coletor · Coleta desligada · " + TEXT[activity]
 
 
 class WindowsFormsTray:
@@ -12,7 +21,9 @@ class WindowsFormsTray:
         self._window, self._form, self._state = window, window.native, state
         self._controller = AnimationController(AnimationPolicy(enabled=False))
         self._icons = {}
-        self._notify = self._menu = self._timer = None
+        self._notify = self._menu = self._timer = self._poll = None
+        self.status_provider = None
+        self._current_activity = "idle"
         self._disposed = False
         self._last_icon = None
         self._frame_updates = 0
@@ -67,8 +78,13 @@ class WindowsFormsTray:
             self._mouse = mouse
             self._notify.MouseClick += mouse
             self._notify.MouseDoubleClick += mouse
+            self._notify.BalloonTipClicked += self._open
             self._timer = Timer(); self._timer.Interval = 600
             self._timer.Tick += self._tick
+            # The collector runs in its own threads; its state reaches the tooltip here.
+            self._poll = Timer(); self._poll.Interval = 5000
+            self._poll.Tick += self._poll_tick
+            self._poll.Start()
             self._refresh()
             self._notify.Visible = True
             self._form.FormClosed += self._closed
@@ -86,12 +102,35 @@ class WindowsFormsTray:
         self._controller.set_policy(AnimationPolicy(enabled=animated, reduced_motion=snapshot["reduced_motion"]))
         self._controller.set_state({"idle": TrayState.IDLE, "reading": TrayState.WORKING, "error": TrayState.ERROR}[activity])
         self._current_activity = activity
-        self._notify.Text = "Coletor · Teste · Coleta desligada · " + TEXT[activity]
-        self._status_item.Text = TEXT[activity] + " · Coleta desligada"
+        self._update_text()
         if animated: self._timer.Start()
         else: self._timer.Stop()
         self._paint_icon()
         self._visibility_changed()
+
+    def _collector_status(self):
+        try:
+            return self.status_provider() if self.status_provider else None
+        except Exception:
+            return None
+
+    def _update_text(self):
+        text = tray_text(self._collector_status(), self._current_activity)
+        if self._notify.Text != text:
+            self._notify.Text = text
+            self._status_item.Text = text
+
+    def _poll_tick(self, *_):
+        if not self._disposed and self._notify is not None: self._update_text()
+
+    def notify(self, title, text):
+        """Balloon beside the clock; clicking it opens the window."""
+        def show():
+            from System.Windows.Forms import ToolTipIcon
+            if self._disposed or self._notify is None: return
+            self._notify.ShowBalloonTip(10000, title, text, ToolTipIcon.Warning)
+        try: self._invoke(show)
+        except Exception: pass
 
     def _paint_icon(self):
         key = self._controller.snapshot().frame_key if self._state.snapshot()["fox"]["show"] else "neutral"
@@ -163,6 +202,8 @@ class WindowsFormsTray:
             self._form.VisibleChanged -= self._visibility_changed
             self._form.Resize -= self._visibility_changed
             self._timer.Tick -= self._tick
+            self._poll.Tick -= self._poll_tick
+            self._notify.BalloonTipClicked -= self._open
             self._notify.MouseClick -= self._mouse
             self._notify.MouseDoubleClick -= self._mouse
             self._open_item.Click -= self._open
@@ -170,6 +211,7 @@ class WindowsFormsTray:
             self._quit_item.Click -= self._quit
         if self._notify is not None and self._timer is not None: resources.append(detach_events)
         if self._timer: resources += [self._timer.Stop, self._timer.Dispose]
+        if self._poll: resources += [self._poll.Stop, self._poll.Dispose]
         if self._notify: resources += [lambda: setattr(self._notify, "Visible", False), self._notify.Dispose]
         if self._menu: resources += [self._menu.Dispose]
         resources += [icon.Dispose for icon in set(self._icons.values())]

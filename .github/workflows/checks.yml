@@ -161,12 +161,17 @@ jobs:
           }
       - name: Build per-user Windows installer only after full native success
         shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
           & "$env:RUNNER_TEMP/InnoCompiler/ISCC.exe" /Qp installer/Coletor.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
           $Setup = 'dist/windows-installer/ColetorFrequencia-0.4.0-windows-x64-setup-candidato.exe'
           if (-not (Test-Path $Setup)) { throw 'Installer output missing' }
+          # Signed before hashing and before the real installation test.
+          ./installer/sign-installer.ps1 -Path $Setup
           $Digest = (Get-FileHash $Setup -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -Path "$Setup.sha256" -Value "$Digest  $(Split-Path $Setup -Leaf)" -Encoding ascii
       - name: Verify actual per-user installation, runtime and safe uninstall
@@ -181,7 +186,7 @@ jobs:
             dist/windows-installer/*.exe
             dist/windows-installer/*.sha256
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
       - name: Preserve native test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

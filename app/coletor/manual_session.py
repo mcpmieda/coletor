@@ -176,17 +176,35 @@ class ManualSession:
         with self._lock:
             return self._status()
 
+    def sign_in(self, credential):
+        """Fill the saved Smecel login in the open isolated Edge.
+
+        Raises SOURCE_LOGIN_FAILED only when Smecel kept the login form after
+        the submission (refused e-mail/password): repeating it could lock the
+        account, so the scheduler waits for a person. Other failures are an
+        unavailable source and are retried at the next scheduled time."""
+        with self._lock:
+            driver, state = self._driver, self._state
+        if driver is None or state not in {'awaiting_user', 'list_ready', 'preview_ready'}:
+            raise SessionError('SOURCE_LOGIN_REQUIRED')
+        try:
+            accepted = driver.login(credential['email'], credential['password'])
+        except Exception:
+            raise SessionError('SOURCE_LOGIN_REQUIRED') from None
+        if not accepted: raise SessionError('SOURCE_LOGIN_FAILED')
+
     def operational_catalog(self, storage):
         """Python-only collection adapter; never accepts HTML/catalog from UI."""
+        credential = storage.load_credential() if hasattr(storage, 'load_credential') else None
         with self._lock:
             driver, state, scope = self._driver, self._state, self._scope
         if driver is None:
             saved = storage.load_session()
-            if saved is None: raise SessionError('SOURCE_LOGIN_REQUIRED')
+            if saved is None and credential is None: raise SessionError('SOURCE_LOGIN_REQUIRED')
             prepared = self.prepare_login(2026)
             # Supply restored state before the isolated worker is started.
             driver = self._factory()
-            driver._storage_state = saved
+            if saved is not None: driver._storage_state = saved
             with self._lock:
                 self._check(prepared['generation'], True, {'prepared'})
                 self._driver = driver
@@ -199,10 +217,15 @@ class ManualSession:
             except Exception:
                 self._fail_current(prepared['generation'], driver)
                 raise SessionError('SOURCE_LOGIN_REQUIRED') from None
-        elif state not in {'list_ready', 'preview_ready'} or not scope or scope['year'] != 2026:
+        elif state not in {'awaiting_user', 'list_ready', 'preview_ready'} or not scope or scope['year'] != 2026:
             raise SessionError('SOURCE_LOGIN_REQUIRED')
-        generation = self.status()['generation']
-        return self.discover(generation, True)
+        try:
+            return self.discover(self.status()['generation'], True)
+        except SessionError:
+            # An expired Smecel session redirects the list to the login page.
+            if credential is None: raise
+        self.sign_in(credential)
+        return self.discover(self.status()['generation'], True)
 
     def operational_capture(self, class_id):
         generation = self.status()['generation']

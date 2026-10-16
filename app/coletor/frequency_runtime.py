@@ -17,6 +17,7 @@ from .device_provider import canonical_frequency
 import hashlib
 import ctypes
 import os
+from .history import CollectorHistory
 from .institutional_access import AccessDenied
 from .manual_session import SessionError
 from .protected_storage import ProtectedStorage, StorageError
@@ -25,7 +26,14 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'lease-fenced', 'paused', 'source-invalid', 'identity-review', 'SOURCE_LOGIN_REQUIRED',
               'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
-              'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED'}
+              'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
+              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED'}
+# Problems an operator must see even with the window hidden in the tray.
+ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
+               'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
+               'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
+# Routine waits are not failures: a reserve computer or a school pause.
+QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
 
 
 def discard_confirmation():
@@ -38,6 +46,14 @@ def discard_confirmation():
 
 def label(value):
     return ' '.join(value.split()) if isinstance(value, str) else ''
+
+
+def class_key(value):
+    """Same rule as the Centro (frequencyClassKeyV2): accents, case, spacing and
+    punctuation never distinguish classes, e.g. "8D 2026 -VESPERTINO"."""
+    text = unicodedata.normalize('NFD', value if isinstance(value, str) else '')
+    text = ''.join(c for c in text if not '\u0300' <= c <= '\u036f').upper()
+    return re.sub(r'[^A-Z0-9]', '', text)
 
 
 def stamp(value):
@@ -81,11 +97,11 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
     if (preview.get('mode') != 'manual' or snapshot.get('source_format') != 'smecel-annual-v1'
             or capture.get('destination') != 'local_memory' or snapshot.get('year') != 2026
             or snapshot.get('class_id') != source_class['class_id']): raise FrequencyError('source-invalid')
-    expected_label = label(source_class['name'])
-    if label(server_class['sourceClassLabel']) != expected_label: raise FrequencyError('source-invalid')
+    expected = class_key(source_class['name'])
+    if not expected or class_key(server_class['sourceClassLabel']) != expected: raise FrequencyError('source-invalid')
     students = snapshot['students']
     if not 1 <= len(students) <= 64: raise FrequencyError('source-invalid')
-    if any(label(s.get('original_class')) != expected_label for s in students): raise FrequencyError('source-invalid')
+    if any(class_key(s.get('original_class')) != expected for s in students): raise FrequencyError('source-invalid')
     if len({s['source_student_ref'] for s in students}) != len(students): raise FrequencyError('source-invalid')
     keys, duplicates = {}, {}
     for student in students:
@@ -124,9 +140,12 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
 
 class FrequencyRuntime:
     def __init__(self, access, provider, source, directory=None, *, storage=None, clock=time.time,
-                 on_started=lambda: None, on_finished=lambda failed: None, confirm_discard=discard_confirmation):
+                 on_started=lambda: None, on_finished=lambda failed: None, confirm_discard=discard_confirmation,
+                 history=None, on_alert=lambda code: None):
         self._access, self._provider, self._source, self._clock = access, provider, source, clock
         self._storage = storage or ProtectedStorage(directory, clock=clock)
+        self._history = history or CollectorHistory(self._storage.directory.parent, clock=clock)
+        self._on_alert = on_alert
         self._lock = threading.RLock()
         self._operation = threading.Lock()
         self._epoch = 0
@@ -200,6 +219,7 @@ class FrequencyRuntime:
             if self._closed: raise FrequencyError('CANCELLED')
             self._active, self._paused = True, False
             self._state, self._code = ('paused' if status['settings']['paused'] else 'reserve'), None
+            self._history.record('activated')
             if self._thread is None:
                 self._thread = threading.Thread(target=self._loop, name='collector-scheduler', daemon=True)
                 self._thread.start()
@@ -216,27 +236,68 @@ class FrequencyRuntime:
             try: self.tick()
             except Exception as error: self._error(error)
 
-    def _error(self, error):
-        code = getattr(error, 'code', str(error) if isinstance(error, SessionError) else 'unavailable')
-        if isinstance(error, SessionError): code = 'SOURCE_LOGIN_REQUIRED'
+    @staticmethod
+    def _state_for(code):
+        if code == 'lease-busy': return 'reserve'
+        if code in {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED'}: return 'login-required'
+        if code in {'paused', 'CANCELLED'}: return 'paused'
+        return 'error'
+
+    def _error(self, error, label=None):
+        code = getattr(error, 'code', 'unavailable')
+        if isinstance(error, SessionError):
+            code = 'SOURCE_LOGIN_FAILED' if str(error) == 'SOURCE_LOGIN_FAILED' else 'SOURCE_LOGIN_REQUIRED'
         if code not in SAFE_CODES: code = 'unavailable'
+        # With a saved Smecel login an expired session is retried at the next
+        # scheduled time. A refused password or no saved login waits for a person.
+        blocks_source = code == 'SOURCE_LOGIN_FAILED' or (
+            code == 'SOURCE_LOGIN_REQUIRED' and self._storage.load_credential() is None)
         with self._lock:
+            changed = self._code != code
             self._code = code
-            if code == 'SOURCE_LOGIN_REQUIRED': self._source_blocked = True
-            self._state = 'reserve' if code == 'lease-busy' else 'login-required' if code == 'SOURCE_LOGIN_REQUIRED' else 'paused' if code in {'paused', 'CANCELLED'} else 'error'
+            if blocks_source: self._source_blocked = True
+            self._state = self._state_for(code)
             if code in {'lease-fenced', 'not-authorized', 'paused'}: self._lease = None
+        if code not in QUIET_CODES and changed: self._history.record('failure', code=code, label=label)
+        if code in ALERT_CODES and changed:
+            try: self._on_alert(code)
+            except Exception: pass
 
     def public_status(self):
         with self._lock:
             return {'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
                     'persistent': self._storage.persistent, 'progress': dict(self._progress),
+                    'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
                     # Status shown locally contains operational settings only.
                     'settings': copy.deepcopy(self._status['settings']) if self._status else None}
 
     def refresh(self):
         self._fresh()
+        self._bind_storage()
         return self.public_status()
+
+    def _bind_storage(self):
+        try: self._storage.bind(*self._provider.storage_binding())
+        except Exception: pass  # Unbound storage simply reports no saved login.
+
+    def save_credential(self, email, password):
+        self._storage.bind(*self._provider.storage_binding())
+        self._storage.save_credential(email, password)
+        with self._lock:
+            self._source_blocked = False
+            if self._state == 'login-required': self._state, self._code = 'reserve', None
+        return self.public_status()
+
+    def forget_credential(self):
+        self._storage.bind(*self._provider.storage_binding())
+        self._storage.clear_credential()
+        return self.public_status()
+
+    def saved_credential(self):
+        """Python-only: the login reaches the isolated Edge worker, never the window."""
+        self._bind_storage()
+        return self._storage.load_credential()
 
     def _acquire(self, status, force=False):
         if status['settings']['paused']: raise FrequencyError('paused')
@@ -336,6 +397,7 @@ class FrequencyRuntime:
             self._acquire(status)
             self._check(epoch)
             self._drain(epoch)
+            if not status['classes']: raise FrequencyError('CENTER_CLASSES_REQUIRED')
             if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
             self._check(epoch)
@@ -343,14 +405,11 @@ class FrequencyRuntime:
             sources = [c for c in catalog['catalog']['classes'] if c['class_id'] in selected]
             if catalog['unavailable_class_ids']: raise FrequencyError('SOURCE_CLASS_UNAVAILABLE')
             if not sources: raise FrequencyError('NO_SELECTED_CLASSES')
-            pairs = []
-            for source in sources:
-                matches = [c for c in status['classes'] if label(c['sourceClassLabel']) == label(source['name'])]
-                if len(matches) != 1: raise FrequencyError('SOURCE_CLASS_AMBIGUOUS')
-                if shifts is None or matches[0]['shift'] in shifts: pairs.append((source, matches[0]))
+            pairs, unmatched = self._pair_classes(sources, status['classes'], shifts)
             with self._lock:
                 self._state, self._code = 'collecting', None
                 self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}
+            self._history.record('collection-started', sent=len(pairs))
             def renew():
                 while not heartbeat_stop.wait(30):
                     with self._lock:
@@ -379,8 +438,9 @@ class FrequencyRuntime:
                 # requestId. Heartbeat only reports status; it does not renew.
                 self._acquire(fresh, force=True)
                 self._check(epoch)
-                current = next((c for c in fresh['classes'] if c['classId'] == central['classId']), None)
-                if current is None or label(current['sourceClassLabel']) != label(source['name']): raise FrequencyError('source-invalid')
+                current = next((c for c in fresh['classes'] if c['classId'] == central['classId']
+                                and class_key(c['sourceClassLabel']) == class_key(source['name'])), None)
+                if current is None: raise FrequencyError('source-invalid')
                 with self._lock:
                     self._class = current['classId']
                     self._progress['classLabel'] = source['name']
@@ -398,12 +458,20 @@ class FrequencyRuntime:
                     self._check(epoch)
                     self._storage.enqueue(payload)
                 self._send(payload, epoch)
-                with self._lock: self._progress['completed'] += 1
+                with self._lock:
+                    self._progress['completed'] += 1
+                    receipt = dict(self._last_receipt or {})
+                self._history.record('class-sent', label=source['name'], sent=receipt.get('resolvedRecords'),
+                                     unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'))
             self._check(epoch)
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
                 self._state, self._class = 'ready', None
                 self._progress['classLabel'] = None
+            self._history.record('collection-finished', sent=len(pairs))
+            if unmatched:
+                # The classes the Centro recognizes were sent; the others need a link there.
+                self._error(FrequencyError('CLASS_RECONCILIATION_REQUIRED'), label=', '.join(unmatched))
             return self.public_status()
         except Exception as error:
             self._error(error)
@@ -419,6 +487,23 @@ class FrequencyRuntime:
             if heartbeat: heartbeat.join(timeout=1)
             self._operation.release()
             self._on_finished(self.public_status()['state'] == 'error')
+
+    @staticmethod
+    def _pair_classes(sources, classes, shifts):
+        """Smecel classes matched to the Centro's Relatório/Relação link."""
+        pairs, unmatched = [], []
+        for source in sources:
+            key = class_key(source['name'])
+            matches = {c['classId']: c for c in classes if key and class_key(c['sourceClassLabel']) == key}
+            if len(matches) != 1:
+                unmatched.append(source['name'])
+                continue
+            central = next(iter(matches.values()))
+            if shifts is None or central['shift'] in shifts: pairs.append((source, central))
+        return pairs, unmatched
+
+    def recent_history(self, limit=50):
+        return self._history.recent(limit)
 
     def _receipt(self, payload):
         reply = self._request({'operation': 'receipt', 'academicYear': 2026, 'requestId': payload['requestId']})
@@ -507,6 +592,7 @@ class FrequencyRuntime:
             with self._lock:
                 self._paused = False
                 self._state, self._code = 'reserve', None
+        self._history.record('paused' if paused else 'resumed')
         return self.public_status()
 
     def cancel(self, purge=False, pause=False, school_pause=False):

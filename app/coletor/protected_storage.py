@@ -18,6 +18,8 @@ MAX_QUEUE_BYTES = 64 * 1024 * 1024
 MAX_QUEUE_ITEMS = 64
 RETENTION_SECONDS = 7 * 24 * 60 * 60
 MAX_SESSION_BYTES = 1024 * 1024
+MAX_SMALL_BYTES = 8 * 1024
+PURPOSES = ('session', 'queue', 'consent', 'credential')
 
 
 class StorageError(ValueError):
@@ -86,22 +88,31 @@ class ProtectedStorage:
     def enable(self):
         with self._lock:
             if self._binding is None: raise StorageError()
-            # Even reopening after a previous consent still asks before the
-            # first new write. Existing DPAPI blobs are not proof of consent.
+            # The answer is remembered for this device and server generation,
+            # cifrado like the data it protects: opening with Windows must not
+            # stop at a dialog nobody answers. Logout or revocation forget it.
+            try:
+                remembered = self._read('consent') == {'persistent': True}
+            except StorageError:
+                remembered = False
+            if remembered:
+                self._enabled = True
+                return True
             self._enabled = bool(self._consent())
+            if self._enabled: self._write_disk('consent', {'persistent': True})
             return self._enabled
 
     @property
     def persistent(self): return self._enabled
 
     def _entropy(self, purpose):
-        if self._binding is None or purpose not in {'session', 'queue'}: raise StorageError()
+        if self._binding is None or purpose not in PURPOSES: raise StorageError()
         return ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + self._binding).encode('utf-8')
 
     def _read(self, purpose):
         if purpose in self._memory: return self._memory[purpose]
         path = self.directory / (purpose + '.dpapi')
-        limit = MAX_SESSION_BYTES if purpose == 'session' else MAX_QUEUE_BYTES
+        limit = self._limit(purpose)
         try:
             if path.is_symlink(): raise StorageError()
             with path.open('rb') as file: raw = file.read(limit + 65537)
@@ -115,14 +126,26 @@ class ProtectedStorage:
         except StorageError: raise
         except Exception: raise StorageError() from None
 
+    @staticmethod
+    def _limit(purpose):
+        if purpose == 'session': return MAX_SESSION_BYTES
+        return MAX_QUEUE_BYTES if purpose == 'queue' else MAX_SMALL_BYTES
+
     def _write(self, purpose, value):
-        raw = json.dumps({'version': 2, 'binding': self._binding, 'value': value},
-                         ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
-        limit = MAX_SESSION_BYTES if purpose == 'session' else MAX_QUEUE_BYTES
-        if len(raw) > limit: raise StorageError('PROTECTED_STORAGE_LIMIT')
         if not self._enabled:
+            self._encode(purpose, value)
             self._memory[purpose] = value
             return
+        self._write_disk(purpose, value)
+
+    def _encode(self, purpose, value):
+        raw = json.dumps({'version': 2, 'binding': self._binding, 'value': value},
+                         ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
+        if len(raw) > self._limit(purpose): raise StorageError('PROTECTED_STORAGE_LIMIT')
+        return raw
+
+    def _write_disk(self, purpose, value):
+        raw = self._encode(purpose, value)
         encrypted = b'CFV2\0' + self._crypto.protect(raw, self._entropy(purpose))
         self.directory.mkdir(parents=True, exist_ok=True)
         if self.directory.is_symlink(): raise StorageError()
@@ -188,10 +211,42 @@ class ProtectedStorage:
         with self._lock:
             self._write('queue', [v for v in self.queue() if v['payload'].get('requestId') != request_id])
 
+    def save_credential(self, email, password):
+        """Explicit operator action: the Smecel login is written cifrado by
+        Windows for this user and device, and never returned to the window."""
+        with self._lock:
+            if (not isinstance(email, str) or not 3 <= len(email.strip()) <= 254 or '@' not in email
+                    or any(c.isspace() for c in email.strip())
+                    or not isinstance(password, str) or not 1 <= len(password) <= 256 or chr(0) in password):
+                raise StorageError('SOURCE_CREDENTIAL_INVALID')
+            self._write_disk('credential', {'email': email.strip(), 'password': password})
+
+    def load_credential(self):
+        with self._lock:
+            try:
+                value = self._read('credential')
+            except StorageError:
+                return None
+            if (not isinstance(value, dict) or set(value) != {'email', 'password'}
+                    or not all(isinstance(value[k], str) and value[k] for k in value)):
+                return None
+            return value
+
+    def credential_status(self):
+        value = self.load_credential()
+        if value is None: return {'saved': False}
+        local, _, domain = value['email'].partition('@')
+        return {'saved': True, 'account': (local[:2] + '•••@' + domain) if domain else '•••'}
+
+    def clear_credential(self):
+        with self._lock:
+            self._memory.pop('credential', None)
+            (self.directory / 'credential.dpapi').unlink(missing_ok=True)
+
     def clear(self):
         with self._lock:
             self._memory.clear()
             self._enabled = False
-            # Only the two owned files; no recursive deletion or other app paths.
-            for purpose in ('session', 'queue'):
+            # Only the owned files; no recursive deletion or other app paths.
+            for purpose in PURPOSES:
                 (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)

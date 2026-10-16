@@ -38,6 +38,26 @@ CAPTURE_JS = """() => {
 }""".replace("NODE_LIMIT", str(MAX_NODES)).replace("HTML_LIMIT", str(MAX_HTML_BYTES))
 
 
+# Observed public form of https://www.smecel.com.br/index.php: e-mail #usuario,
+# password #senha and submit button[name=logar]. No CAPTCHA is solved or bypassed.
+LOGIN_URL = "https://www.smecel.com.br/index.php"
+LOGIN_FIELDS = ("#usuario", "#senha", 'button[type="submit"][name="logar"]')
+
+
+async def sign_in(page, email, password):
+    """Fill the Smecel form inside the isolated Edge only. The credential stays
+    in this private worker; it is never logged, echoed or written to disk."""
+    await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    if await page.locator('input[type="password"]').count() == 0:
+        return {"logged_in": True}
+    user, secret, submit = LOGIN_FIELDS
+    await page.fill(user, email)
+    await page.fill(secret, password)
+    async with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+        await page.click(submit)
+    return {"logged_in": await page.locator('input[type="password"]').count() == 0}
+
+
 def browser_options(proxy):
     return {"channel": "msedge", "headless": False, "chromium_sandbox": True,
             "proxy": proxy.configuration,
@@ -176,6 +196,10 @@ class BrowserWorker:
     def capture(self):
         return self._rpc({"command": "capture"})
 
+    def login(self, email, password):
+        # Same private pipe as captures; the reply carries only a boolean.
+        return self._rpc({"command": "login", "email": email, "password": password}, timeout=60).get("logged_in") is True
+
     def export_state(self):
         # This private pipe is never the privileged webview bridge.
         return self._rpc({"command": "state"})['storage_state']
@@ -270,6 +294,10 @@ async def browser_session(initial):
                             if len(encoded.encode('utf-8')) > 1024 * 1024: raise ValueError('state_limit')
                             print(encoded, flush=True)
                             return
+                        if command["command"] == "login":
+                            payload = await sign_in(page, str(command.get("email", "")), str(command.get("password", "")))
+                            print(json.dumps(payload), flush=True)
+                            return
                         if command["command"] == "list":
                             payload = await read_catalog(command["year"])
                             print(json.dumps(payload, ensure_ascii=False), flush=True)
@@ -311,7 +339,7 @@ async def browser_session(initial):
                             if not line:
                                 break
                             command = json.loads(line)
-                            if command.get("command") not in {"capture", "list", "state"}:
+                            if command.get("command") not in {"capture", "list", "state", "login"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")

@@ -5,7 +5,7 @@ import sys
 def main():
     try:
         from .desktop import run_desktop
-        run_desktop()
+        run_desktop(background="--background" in sys.argv[1:])
     except (Exception, SystemExit):
         if sys.platform == "win32":
             import ctypes

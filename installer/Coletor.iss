@@ -1,5 +1,6 @@
-; Private per-user installation candidate. No services, autostart, admin rights or
-; key creation. Distribution only after synthetic and native Windows CI gates.
+; Private per-user installation candidate. No services, admin rights or key creation.
+; Opening at Windows sign-in is an installer option (checked by default): a Startup
+; shortcut that opens beside the clock. Distribution only after the native CI gates.
 #define AppName "Coletor de Frequência"
 #define AppVersion "0.4.0"
 #define BundleRoot "..\dist\windows-portable\ColetorFrequencia-0.4.0-teste-windows-x64"
@@ -38,7 +39,12 @@ UninstallLogMode=append
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Tasks]
+Name: "autostart"; Description: "Abrir o Coletor ao entrar no Windows (recomendado para a coleta automática)"
 Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; Flags: unchecked
+
+[InstallDelete]
+; Unchecking the option on a later installation removes the previous Startup shortcut.
+Type: files; Name: "{userstartup}\Coletor de Frequência.lnk"; Tasks: not autostart
 
 [Files]
 Source: "{#BundleRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -48,6 +54,7 @@ Source: "LEIA-ME-INSTALADOR.txt"; DestDir: "{app}"; DestName: "INSTALACAO-E-RETI
 Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência Escolar"
 Name: "{autoprograms}\Retirar acesso deste PC"; Filename: "{app}\Remover acesso deste PC.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\Instruções de instalação e retirada"; Filename: "{app}\INSTALACAO-E-RETIRADA.txt"
+Name: "{userstartup}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable --background"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência ao lado do relógio"; Tasks: autostart
 Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Tasks: desktopicon
 
 [Run]

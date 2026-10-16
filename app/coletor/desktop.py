@@ -60,7 +60,7 @@ def finish_native_form(window):
     window.native.Invoke(Action(place_and_brand))
 
 
-def run_desktop(callback=None, settings_directory=None, *, access=None):
+def run_desktop(callback=None, settings_directory=None, *, access=None, background=False):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
     entry = ROOT / "ui/dist/index.html"
@@ -72,8 +72,14 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    from .instance_lock import CollectorInstance
-    instance = CollectorInstance(settings_directory).acquire()
+    from .instance_lock import CollectorInstance, ShowRequests, signal_running_instance
+    try:
+        instance = CollectorInstance(settings_directory).acquire()
+    except RuntimeError:
+        # Already open (perhaps started with Windows, hidden in the tray): show it.
+        if signal_running_instance(): return
+        raise
+    show_requests = ShowRequests()
     api = DesktopApi(settings_directory, access=access)
     geometry = centered_window_geometry(primary_work_area())
     window = webview.create_window("Coletor de Frequência · 0.4.0", str(entry) + "#coletor-desktop", js_api=api,
@@ -88,12 +94,17 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
         tray = WindowsFormsTray(window, api._desktop_state)
         try:
             tray.start()
-            api._tray = tray
+            api._attach_tray(tray)
         except Exception as error:
             tray._startup_error_type = type(error).__name__
             tray.stop()
         window._coletor_tray = tray  # Python QA only; not exposed to JavaScript.
         window.evaluate_js("window.dispatchEvent(new Event('coletortrayready'));true")
+        show_requests.listen(lambda: tray._invoke(tray._open) if api._tray is not None else window.restore())
+        if background:
+            # Opened with Windows: stay beside the clock; the fox opens the window.
+            if api._tray is None or "error" in tray.hide(): window.minimize()
+        api._start_resume()
         if callback: callback(window)
 
     try:
@@ -107,5 +118,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None):
             finally:
                 try:
                     if api._tray is not None: api._tray.stop()
-                finally: instance.close()
+                finally:
+                    show_requests.close()
+                    instance.close()
 

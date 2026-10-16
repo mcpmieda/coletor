@@ -65,12 +65,18 @@ def run(installer, expected_sha, output):
             if help_run.returncode != 0 or b"--safe-removal" not in help_run.stdout:
                 raise RuntimeError("installed-runtime-unavailable")
             report["checks"]["installed_runtime_and_uninstaller"] = True
+            startup = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup/Coletor de Frequência.lnk"
+            if not startup.is_file():
+                raise RuntimeError("startup-shortcut-missing")
+            report["checks"]["opens_at_windows_sign_in_by_default"] = True
             uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                                        capture_output=True, timeout=150)
             if uninstall.returncode != 0:
                 raise RuntimeError("uninstall-failed")
             if (installed / "programa" / "python.exe").exists():
                 raise RuntimeError("uninstall-left-program")
+            if startup.exists():
+                raise RuntimeError("uninstall-left-startup-shortcut")
             if sentinel.read_text(encoding="utf-8") != "synthetic-sentinel":
                 raise RuntimeError("uninstall-affected-other-data")
             report["checks"]["uninstall_preserves_unrelated_data"] = True

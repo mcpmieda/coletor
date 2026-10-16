@@ -7,20 +7,79 @@ from .institutional_access import InstitutionalAccess, AccessDenied
 from .device_provider import DeviceProvider
 from .frequency_runtime import FrequencyRuntime
 from .protected_storage import StorageError
+from .resume_store import ResumeStore
 from functools import wraps
+import threading
+import time
+
+# Balloon beside the clock: the window may be hidden in the tray.
+ALERTS = {
+    'SOURCE_LOGIN_REQUIRED': ('Smecel desconectado', 'Abra o Coletor e entre no Smecel para continuar a coleta.'),
+    'SOURCE_LOGIN_FAILED': ('Smecel recusou o acesso', 'Confira o e-mail e a senha do Smecel salvos no Coletor.'),
+    'CLASS_RECONCILIATION_REQUIRED': ('Turma sem ligação no Centro', 'Há turma do Smecel que o Centro não reconheceu. Confira a Importação.'),
+    'CENTER_CLASSES_REQUIRED': ('Turmas ainda não importadas', 'Importe a Relação e o Relatório no Centro de Administração.'),
+    'NO_SELECTED_CLASSES': ('Nenhuma turma escolhida', 'Abra o Coletor, entre no Smecel e marque as turmas.'),
+    'SOURCE_CLASS_UNAVAILABLE': ('Turma fora da lista do Smecel', 'Uma turma escolhida não apareceu na lista do Smecel.'),
+    'lease-fenced': ('Coleta interrompida', 'Abra o Coletor para descartar o lote pendente e coletar de novo.'),
+    'revision-conflict': ('Coleta interrompida', 'Abra o Coletor para descartar o lote pendente e coletar de novo.'),
+    'not-authorized': ('Acesso do computador negado', 'Entre novamente no Ecossistema pelo Coletor.'),
+    'PROTECTED_STORAGE_UNAVAILABLE': ('Proteção do Windows indisponível', 'O Coletor não conseguiu proteger os dados neste computador.'),
+    'PROTECTED_STORAGE_LIMIT': ('Fila de envio cheia', 'Confira a conexão com a internet.'),
+    'ACCESS_REQUIRED': ('Entre no Ecossistema', 'A coleta automática precisa do acesso deste computador.'),
+}
 
 
 class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
-        self._desktop_state = DesktopState(self._read_settings()["settings"]["fox"])
+        # The fox is part of the program's identity: always shown, animated unless the
+        # system asks for reduced motion.
+        self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True})
         self._tray = None
         self._manual_session = ManualSession(settings_directory=settings_directory)
         self._provider = getattr(access, '_provider', None) if access else DeviceProvider(settings_directory)
         self._access = access or InstitutionalAccess(self._provider, on_locked=self._access_locked)
+        self._pending_alert = None
+        self._resume = ResumeStore(settings_directory)
         self._collector = FrequencyRuntime(self._access, self._provider, self._manual_session, settings_directory,
                                            on_started=self._desktop_state.begin_read,
-                                           on_finished=self._desktop_state.end_read)
+                                           on_finished=self._desktop_state.end_read,
+                                           on_alert=self._alert)
+
+    def _alert(self, code):
+        message = ALERTS.get(code)
+        if message is None: return
+        tray = self._tray
+        if tray is None:
+            self._pending_alert = message
+            return
+        tray.notify(*message)
+
+    def _attach_tray(self, tray):
+        """Python-only: the tray shows the collector state and pending balloons."""
+        self._tray = tray
+        tray.status_provider = self._collector.public_status
+        message, self._pending_alert = self._pending_alert, None
+        if message: tray.notify(*message)
+
+    def _resume_collection(self, attempts=30, interval=60):
+        """Python-only. Reopening the program (or Windows) keeps collecting when the
+        operator left collection active; it stops only by an explicit pause or logout.
+        A boot without network yet is retried for about half an hour."""
+        if not self._resume.active(): return False
+        for attempt in range(attempts):
+            status = self._access.status()
+            if status.get('authenticated') and status.get('authorized'):
+                result = self._operational(self._collector.activate)
+                if 'error' not in result: return True
+            elif status.get('code') not in {'ACCESS_UNAVAILABLE', 'LOGIN_UNAVAILABLE'}:
+                self._alert('ACCESS_REQUIRED')
+                return False
+            if attempt + 1 < attempts: time.sleep(interval)
+        return False
+
+    def _start_resume(self):
+        threading.Thread(target=self._resume_collection, name='collector-resume', daemon=True).start()
 
     def _access_locked(self):
         # Connectivity loss cancels operational work, but is not a revocation
@@ -38,13 +97,33 @@ class DesktopApi(PreviewApi):
         return self._operational(self._collector.refresh)
 
     def activate_collector(self):
-        return self._operational(self._collector.activate)
+        result = self._operational(self._collector.activate)
+        if 'error' not in result: self._resume.set(True)
+        return result
 
     def collect_now(self):
         return self._operational(self._collector.collect)
 
     def pause_collector(self, paused):
-        return self._operational(lambda: self._collector.local_pause(paused))
+        result = self._operational(lambda: self._collector.local_pause(paused))
+        if 'error' not in result: self._resume.set(not paused)
+        return result
+
+    def save_source_credential(self, email, password):
+        # Write-only: the window never receives the saved password back.
+        try: return self._collector.save_credential(email, password)
+        except StorageError as error:
+            if error.code == 'SOURCE_CREDENTIAL_INVALID':
+                return {'error': 'Confira o e-mail e a senha do Smecel.', 'code': error.code}
+            return {'error': 'O Windows não conseguiu proteger o acesso neste computador.', 'code': error.code}
+        except Exception:
+            return {'error': 'Não foi possível salvar o acesso do Smecel.', 'code': 'unavailable'}
+
+    def forget_source_credential(self):
+        return self._operational(self._collector.forget_credential)
+
+    def get_collector_history(self):
+        return {'entries': self._collector.recent_history(50)}
 
     def save_shared_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_settings(revision, schedule))
@@ -68,6 +147,7 @@ class DesktopApi(PreviewApi):
     def logout_institutional_access(self):
         try:
             self._access.logout()
+            self._resume.set(False)
             self._collector.cancel(purge=True)
             self._manual_session.close()
             return {"ok": True}
@@ -87,6 +167,15 @@ class DesktopApi(PreviewApi):
 
     def discover_manual_classes(self, generation, confirmed):
         result = self._manual(lambda: self._manual_session.discover(generation, confirmed))
+        if 'catalog' not in result and confirmed is True:
+            # The list redirects to Smecel's login when the session expired: use the saved login.
+            credential = self._collector.saved_credential()
+            if credential:
+                def signed():
+                    self._manual_session.sign_in(credential)
+                    return self._manual_session.discover(self._manual_session.status()['generation'], True)
+                retry = self._manual(signed)
+                if 'catalog' in retry: result = retry
         if 'catalog' in result: self._collector.source_ready()
         return result
 
@@ -181,10 +270,6 @@ class DesktopApi(PreviewApi):
     def save_theme(self, theme):
         return self._save("theme", theme)
 
-    def save_fox(self, fox):
-        result = self._save("fox", fox)
-        if "settings" in result: self._desktop_state.set_fox(result["settings"]["fox"])
-        return result
 
 
 def _protected(method):
@@ -203,10 +288,11 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_manual_class_selection", "clear_manual_class_selection", "capture_selected_class",
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
-              "save_schedule", "save_theme", "save_fox"):
+              "save_schedule", "save_theme", "get_collector_history"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
 for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',
-              'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection'):
+              'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection',
+              'save_source_credential', 'forget_source_credential'):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 

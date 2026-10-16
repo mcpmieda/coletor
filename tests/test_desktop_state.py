@@ -69,14 +69,10 @@ class DesktopStateTests(unittest.TestCase):
             self.assertIn("error", api.hide_window())
             self.assertIn("error", api.set_tray_context("collected", False))
 
-    def test_saved_fox_controls_tray_and_failed_save_keeps_previous_preference(self):
+    def test_fox_is_always_shown_even_with_an_old_hidden_preference(self):
         with tempfile.TemporaryDirectory() as directory:
             store = LocalSettings(Path(directory))
             store.update("fox", {"version": 1, "show": False, "animate": False})
             api = DesktopApi(Path(directory), access=SyntheticAccess())
-            self.assertFalse(api._desktop_state.snapshot()["fox"]["show"])
-            with patch.object(api._settings, "update", side_effect=OSError("DO_NOT_ECHO")):
-                self.assertIn("error", api.save_fox({"version": 1, "show": True, "animate": True}))
-            self.assertFalse(api._desktop_state.snapshot()["fox"]["show"])
-            self.assertIn("settings", api.save_fox({"version": 1, "show": True, "animate": True}))
-            self.assertTrue(api._desktop_state.snapshot()["fox"]["animate"])
+            self.assertEqual(api._desktop_state.snapshot()["fox"], {"version": 1, "show": True, "animate": True})
+            self.assertFalse(hasattr(api, "save_fox"))
