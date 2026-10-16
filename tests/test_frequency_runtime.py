@@ -323,6 +323,21 @@ class RuntimeTests(unittest.TestCase):
         backup.tick()
         self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
 
+    def test_server_generation_change_cannot_silently_drop_pending_queue(self):
+        self.runtime._storage.enqueue({'requestId': 'unreceipted-synthetic'})
+        self.provider.storage_binding = lambda: (DEVICE, 2)
+        with self.assertRaises(StorageError) as blocked:
+            self.runtime.tick()
+        self.assertEqual(blocked.exception.code, 'PENDING_BATCHES')
+        self.assertEqual(self.runtime._storage._binding, f'{DEVICE}:1')
+        self.assertEqual(self.runtime._storage.queue()[0]['payload']['requestId'],
+                         'unreceipted-synthetic')
+        self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
+        # Once reconciled under the original binding, a safe rotation is allowed.
+        self.runtime._storage.acknowledge('unreceipted-synthetic')
+        self.runtime._fresh()
+        self.assertEqual(self.runtime._storage._binding, f'{DEVICE}:2')
+
     def test_heartbeat_temporary_failure_does_not_cancel_a_valid_capture(self):
         class QuickEvent(threading.Event):
             def wait(self, timeout=None):
