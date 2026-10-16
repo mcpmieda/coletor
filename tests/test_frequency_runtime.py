@@ -124,7 +124,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_real_flow_selected_worker_sparse_sixth_slot_receipt_and_no_uid(self):
         result = self.runtime.collect()
-        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(result['state'], 'ready', repr(result))
         self.assertEqual(result['lastReceipt']['resolvedRecords'], 1)
         payload = next(r for r in self.provider.requests if r['operation'] == 'collect')
         self.assertEqual([m['mark'] for m in payload['marks']], ['X', 'J'])
