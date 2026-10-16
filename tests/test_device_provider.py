@@ -120,6 +120,14 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(captured['payload'], payload)
         self.assertNotIn('requestHash', (self.root/'device.json').read_text())
 
+    def test_new_server_challenge_does_not_depend_on_windows_wall_clock(self):
+        # Server proves nonce lifetime in the database. An unsynchronised PC
+        # must not reject a fresh server-issued challenge before signing it.
+        self.activate()
+        self.provider._clock = lambda: NOW - 90
+        reply = self.provider.verify_online()
+        self.assertEqual(reply.status, 200)
+
     def test_frequency_challenge_cannot_add_unbound_purpose_fields_to_legacy_proof(self):
         self.activate()
         self.transport.change = lambda suffix, body: {**body, 'requestHash': 'x'*43} if suffix == 'challenge' else body
@@ -370,6 +378,15 @@ class TransportTests(unittest.TestCase):
             connection.close.assert_called_once()
             self.assertNotIn('Authorization', connection.request.call_args.kwargs['headers'])
             self.assertNotIn('Cookie', connection.request.call_args.kwargs['headers'])
+
+    def test_http_503_is_transient_and_not_a_revocation_receipt(self):
+        for path in ('config', 'challenge', 'access'):
+            connection = self.connection(status=503)
+            with self.assertRaises(AccessDenied) as caught:
+                OfficialTransport(connection=lambda: connection).request(
+                    'GET' if path == 'config' else 'POST', PREFIX+path,
+                    None if path == 'config' else {'deviceId': DEVICE})
+            self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
 
     def test_bounds_response_and_rejects_compressed_non_json_and_foreign_paths(self):
         for raw, headers in [(b'x'*8193, {}), (b'{}', {'Content-Length': '999999'}),
