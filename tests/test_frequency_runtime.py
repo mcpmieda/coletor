@@ -176,6 +176,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(self.runtime._school_paused)
         self.assertIsNone(self.runtime._lease)  # Idle polling never takes school leadership.
 
+    def test_skewed_windows_clock_blocks_capture_with_actionable_code(self):
+        self.runtime._clock = lambda: self.provider.now + 11
+        with self.assertRaises(FrequencyError) as caught:
+            self.runtime._fresh()
+        self.assertEqual(caught.exception.code, 'CLOCK_OUT_OF_SYNC')
+        self.runtime._clock = lambda: self.provider.now - 11
+        with self.assertRaises(FrequencyError) as caught:
+            self.runtime._fresh()
+        self.assertEqual(caught.exception.code, 'CLOCK_OUT_OF_SYNC')
+        self.runtime._clock = lambda: self.provider.now
+        self.assertEqual(self.runtime._fresh()['state'], 'ready')
+
     def test_eligible_leader_heartbeats_but_known_source_failure_releases_leadership(self):
         current = datetime.fromtimestamp(NOW, timezone.utc).astimezone(
             __import__('zoneinfo').ZoneInfo('America/Bahia'))
