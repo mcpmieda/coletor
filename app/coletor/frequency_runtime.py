@@ -362,6 +362,8 @@ class FrequencyRuntime:
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
             return
+        if self._code == 'CENTER_CLASSES_REQUIRED' and status['classes']:
+            with self._lock: self._code, self._state = None, 'reserve'
         schedule = status['settings']['schedule']
         # A device with no executable agenda or a known source blocker must
         # not monopolise the school lease. Eligible leaders still heartbeat
@@ -371,8 +373,7 @@ class FrequencyRuntime:
         ): return
         blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
-                    'SOURCE_CLASS_AMBIGUOUS', 'CLASS_RECONCILIATION_REQUIRED',
-                    'source-invalid', 'identity-review', 'revision-conflict',
+                    'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review', 'revision-conflict',
                     'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
         if self._source_blocked or self._code in blockers: return
         self._acquire(status)
@@ -609,7 +610,9 @@ class FrequencyRuntime:
     def source_ready(self):
         with self._lock:
             self._source_blocked = False
-            if self._state == 'login-required': self._state, self._code = 'reserve', None
+            if self._code in {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED',
+                              'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE'}:
+                self._state, self._code = 'reserve', None
 
     def school_pause(self, expected_revision, paused):
         if type(expected_revision) is not int or expected_revision < 0 or type(paused) is not bool: raise FrequencyError('invalid-request')
