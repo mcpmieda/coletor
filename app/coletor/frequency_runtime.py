@@ -290,6 +290,10 @@ class FrequencyRuntime:
         return self.public_status()
 
     def _bind_storage(self):
+        # A synthetic/unconfigured access port has no native device provider.
+        # It cannot authorize collection; only a real provider supplies a
+        # generation against which protected storage can be bound.
+        if self._provider is None: return
         try:
             binding = self._provider.storage_binding()
         except AccessDenied:
