@@ -2,60 +2,71 @@
 
 Coletor de frequência escolar para integração com o Ecossistema Escolar.
 
-## Primeiro marco: prévia local, sem envio
+A versão 0.4 é candidata operacional para revisão junto do backend Ecossistema.
+Implementa entrada Microsoft e vínculo revogável do PC, coleta manual/agendada,
+computador ativo e reservas, agenda escolar compartilhada, fila e sessão Smecel
+protegidas pelo Windows mediante consentimento nativo. Pelo instalador, abre com o
+Windows ao lado do relógio, entra sozinho no Smecel com o acesso salvo e guarda
+o histórico de operação deste computador por 30 dias.
 
-Protótipo Windows com Python/pywebview e painel React + HeroUI v3, seguindo o
-padrão de interface do Atualizador de Planilhas 1.3.0: HeroUI, Segoe UI e temas
-claro, escuro e automático. A identidade do coletor usa vermelho/bordô, conforme
-a escolha posterior do usuário.
+O operador entra no Smecel diretamente no Edge, carrega as turmas e marca nomes.
+Cada captura revalida contexto/ano/turma e usa o worker isolado. O envio assinado
+contém apenas observações X/J e referências locais de ficha; a identificação é
+resolvida centralmente no Ecossistema, sem studentUid escolhido pelo PC.
+Pontos, vazios e cobertura incompleta não viram presença ou percentual.
 
-Implementado:
-- Abertura de HTML selecionado pelo operador, processado somente em memória.
-- Parser de diário anual: fichas, FEV–DEZ, dias válidos e seis posições de aula.
-- Prévia por aluno/mês, paginação e alertas de validação.
-- Demonstração gerada com três alunos inteiramente sintéticos.
-- Falha fechada para HTML desconhecido, login, truncamento e escopo divergente.
-- Testes de parser, calendário, ambiguidades, identidade e adaptadores locais.
-- Raposa animada no painel, com preferências de exibição e movimento reduzido.
+A prévia de HTML e os exemplos sintéticos continuam sem envio. A janela Windows
+usa agenda do servidor com CAS, independentemente de rascunhos localStorage.
+Coletar agora processa todas as turmas selecionadas, com uma lease por escola/ano,
+heartbeat, cancelamento, retries limitados e confirmação por recibo servidor.
 
-A marca `•` é “aula prevista/presença” e continua **sem confirmação**. Não existe
-presença presumida. O HTML anual não contém MAT/`studentUid`, `ct` ou total de
-fichas verificável; importação isolada nunca autoriza envio. Nomes não são chaves.
-
-Não implementado: login, coleta no Smecel, credenciais, API de produção, banco,
-execução agendada, coordenação dos computadores autorizados, portal ou instalador.
-A interface mostra essas etapas como futuras. Não há endpoint de sincronização.
-O usuário limitou este marco à base: a visão dos responsáveis e quais dados ela
-exige serão definidos antes de qualquer envio ao PostgreSQL ou à API.
+O pacote exige CI completo e provas nativas no SHA final. Implementação candidata
+e validação real são estados separados: nenhum login, dado de aluno, chave real,
+merge, deploy ou DDL produtivo é executado pelos testes. Consulte o
+[estado operacional V2](docs/FREQUENCY_V2_CANDIDATE.md) e o
+[roteiro de ativação](docs/TESTE_E_ATIVACAO.md).
 
 ## Raposa do coletor
 
 Mascote escolhido pelo usuário, com quadros próprios e ações discretas: piscar,
 orelhas, cauda, curiosidade, pulinho, passeio, descanso e carinho. Reage apenas ao
-processamento local e aos avisos reais. Pode ser ocultado ou ficar estático; respeita
-movimento reduzido e pausa com a aba oculta. A bandeja Windows mostra estados reais locais e controla mostrar/ocultar a mesma
-janela e sair. Fechar pelo X também encerra o programa. Não cria autostart ou agente.
+processamento local e aos avisos reais. Fica sempre visível; com movimento reduzido
+fica estático e pausa com a janela oculta. A bandeja Windows mostra o estado da coleta
+e controla mostrar/ocultar a mesma janela e sair. Com a coleta ativa, o X esconde a
+janela ao lado do relógio; Sair, no menu do ícone, encerra o programa.
 
 ## Agenda pré-configurada e editável
 
-A página Horários de coleta traz os horários sugeridos da planilha HORARIO 2026.xlsb
-versão 75, separados por dia e turno, com fuso America/Bahia editável. Na janela Windows,
-agenda, tema e preferências da raposa ficam no arquivo próprio
-`%LOCALAPPDATA%/ColetorFrequenciaSmecel/settings.json`, mesmo depois de fechar.
-Na prévia no navegador, ficam no armazenamento desse navegador. Nenhuma tarefa é executada. O escopo futuro é a escola:
-a mesma configuração para os usuários e computadores autorizados, após login e sincronização ainda não
-implementados. A quantidade é variável; o desenho prevê um coletor ativo por vez
-e os demais computadores autorizados como reservas. Não guarda credenciais.
-Consulte o [contrato da agenda](docs/SCHEDULE_CONFIG.md).
+No Windows, Horários de coleta carrega e salva a revisão compartilhada da escola no servidor. Alteração concorrente pede recarregar e comparar, sem sobrescrever. Fuso IANA America/Bahia, horários por dia/turno e fins de semana opcionais são editáveis. Sugestões não confirmam dias letivos nem aula ministrada. A prévia de desenvolvimento mantém seu rascunho local, que não ativa o runtime.
 
 ## Executar a prévia no desenvolvimento
+
+### Instalador Windows 0.4 (candidato interno)
+
+O CI também produz um instalador **.exe** para Windows 10/11 x64, por usuário,
+sem exigir administrador. A opção Abrir o Coletor ao entrar no Windows vem
+marcada: cria só um atalho na pasta Inicializar do usuário (sem serviço ou
+tarefa agendada); desmarcada, o atalho é removido. Cria atalho no
+menu Iniciar (e opcionalmente na área de trabalho); conserva a raposa, a
+bandeja, a interface e as operações do portátil. A janela abre centralizada
+no monitor principal. O pacote `windows-installer-candidate` só é publicado
+depois de testes Windows nativos e instalação/desinstalação reais em pasta
+descartável. Ele ainda depende da homologação Microsoft/TPM/Smecel e do
+backend da PR #1293 antes de uso produtivo. O instalador é assinado quando
+os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
+existem; certificado autoassinado identifica a escola, mas não remove o aviso
+do SmartScreen em outros computadores. Não contorne avisos de segurança.
+
+Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
+`installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador
+é uma operação consentida **anterior** à desinstalação do aplicativo.
 
 ### Pacote portátil de teste
 
 O CI privado agora prepara um ZIP para Windows x64 com Python oficial embutido,
 dependências e interface compilada. O ZIP só é gerado se o teste da janela nativa
-passar. Extraia a pasta inteira e use `Abrir Coletor.cmd`; não é um instalador.
-WebView2 continua sendo requisito e não é instalado automaticamente. Validação
+passar, junto dos gates de sessão manual e Edge externo. Extraia a pasta inteira e use `Abrir Coletor.cmd`; não é um instalador.
+Microsoft Edge, WebView2 e .NET 4.8 continuam sendo requisitos e não é instalado automaticamente. Validação
 nos computadores da escola é separada do CI. Veja [conteúdo e verificações](docs/WINDOWS_PORTABLE.md)
 e [instruções simples do pacote](docs/PORTABLE_LEIA_ME.txt).
 
@@ -108,6 +119,7 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 
 ## Arquitetura e revisão
 
+- [Sessão manual isolada, limites e validação pendente](docs/MANUAL_SESSION_MILESTONE.md)
 - [Agenda escolar editável, apenas local](docs/SCHEDULE_CONFIG.md)
 - [Raposa e bandeja da prévia](docs/MASCOT_TRAY_PLAN.md)
 - [Regras e fontes Smecel observadas](docs/SMECEL_SOURCE_RULES.md)
@@ -119,7 +131,7 @@ conteúdo e casos são reprodutíveis a partir de `app/coletor/demo.py`.
 - [Fixture sintética e cobertura](fixtures/README.md)
 - [Verificação desta versão](docs/VERIFICATION.md)
 
-Trabalho em draft PR. Sem merge, deploy, release, instalador ou escrita em produção.
+Trabalho em PR aberta. Sem merge, deploy, publicação produtiva ou escrita em produção. O instalador candidato é artefato privado do CI, condicionado aos testes.
 
 
 ## Revalidação da auditoria #3

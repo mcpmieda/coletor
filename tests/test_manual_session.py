@@ -1,0 +1,287 @@
+"""Synthetic source scope, consent, cancellation and privacy regressions."""
+import json
+from pathlib import Path
+import asyncio
+import re
+import sys
+import threading
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+from coletor.demo import build_fixture
+from coletor.manual_session import ManualSession, SessionError, allowed_request, captured_preview, matches_source, source_url
+from coletor.manual_worker import BrowserWorker, worker_environment
+
+
+def raw_fixture():
+    return re.sub(r' data-(?:report|class-id|year|student-count|student-row|report-end)="[^"]*"', '',
+                  build_fixture(include_edge_cases=False))
+
+
+class Driver:
+    def __init__(self):
+        self.opened = False
+        self.closed = False
+        self.payload = {"url": source_url("13331", 2026), "html": raw_fixture(), "password_form": False}
+
+    def open(self, url):
+        self.opened = True
+
+    def capture(self):
+        return self.payload
+
+    def close(self):
+        self.closed = True
+
+
+class ManualSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.driver = Driver()
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.session = ManualSession(lambda: self.driver, self.directory.name)
+
+    def opened(self):
+        prepared = self.session.prepare("13331", 2026)
+        self.session.open(prepared["generation"], True)
+        return prepared["generation"]
+
+    def test_scope_is_numeric_and_exact_without_guessing_login_endpoint(self):
+        for ct in ("TESTE-A", "01", "1&token=SECRET", "", 1, "1/other"):
+            with self.subTest(ct=ct), self.assertRaises(SessionError):
+                source_url(ct, 2026)
+        for year in (True, "2026", 1999, 2101):
+            with self.assertRaises(SessionError):
+                source_url("13331", year)
+        url = source_url("13331", 2026)
+        self.assertTrue(matches_source(url, "13331", 2026))
+        for bad in (url.replace("https:", "http:"), url.replace("www.smecel.com.br", "www.smecel.com.br.evil.test"),
+                    url + "&ct=13331", url + "&token=SECRET", url + "#SECRET", url.replace("13331", "13332"),
+                    url.replace("2026", "2025"), url.replace("www.", "SECRET@www.")):
+            with self.subTest(url=bad):
+                self.assertFalse(matches_source(bad, "13331", 2026))
+        self.assertFalse(allowed_request("https://www.smecel.com.br:444/x"))
+        self.assertFalse(allowed_request("https://www.smecel.com.br:notaport/x"))
+        self.assertFalse(allowed_request("data:text/html,SECRET"))
+
+    def test_prepare_and_invalid_consent_do_not_open_or_capture(self):
+        prepared = self.session.prepare("13331", 2026)
+        self.assertFalse(self.driver.opened)
+        for confirmation in (False, 1, "true", None):
+            with self.assertRaises(SessionError):
+                self.session.open(prepared["generation"], confirmation)
+        self.assertFalse(self.driver.opened)
+        self.session.open(prepared["generation"], True)
+        with self.assertRaises(SessionError):
+            self.session.capture(prepared["generation"], False)
+
+    def test_manual_preview_never_claims_identity_completeness_or_transmission(self):
+        generation = self.opened()
+        result = self.session.capture(generation, True)
+        output = result["preview"]
+        self.assertEqual(output["mode"], "manual")
+        self.assertEqual(len(output["snapshot"]["students"]), 3)
+        self.assertFalse(output["validation"]["allowed"])
+        self.assertFalse(output["capture"]["identity_verified"])
+        self.assertFalse(output["capture"]["roster_complete_verified"])
+        self.assertEqual(output["capture"]["destination"], "local_memory")
+        self.assertNotIn("html", output)
+        encoded = json.dumps(output)
+        self.assertNotIn("Nascimento", encoded)
+        self.assertNotIn("Filiação", encoded)
+        self.assertNotIn("cookies", encoded)
+
+    def test_login_wrong_scope_incomplete_and_synthetic_source_discard_result(self):
+        generation = self.opened()
+        for payload in ({**self.driver.payload, "password_form": True},
+                        {**self.driver.payload, "url": source_url("13332", 2026)},
+                        {**self.driver.payload, "html": raw_fixture()[:1000]},
+                        {**self.driver.payload, "html": build_fixture()},
+                        {**self.driver.payload, "html": "<html>SECRET</html>"}):
+            self.driver.payload = payload
+            with self.assertRaises(SessionError) as caught:
+                self.session.capture(generation, True)
+            self.assertNotIn("SECRET", str(caught.exception))
+            self.assertEqual(self.session.status()["state"], "awaiting_user")
+
+    def test_replaced_generation_cannot_open_or_read(self):
+        old = self.opened()
+        new = self.session.prepare("13331", 2026)
+        self.assertTrue(self.driver.closed)
+        self.assertGreater(new["generation"], old)
+        with self.assertRaises(SessionError):
+            self.session.open(old, True)
+        with self.assertRaises(SessionError):
+            self.session.capture(old, True)
+
+    def test_cancel_during_capture_rejects_late_result_and_closes_only_owned_driver(self):
+        generation = self.opened()
+        started, finish = threading.Event(), threading.Event()
+        def delayed():
+            started.set()
+            finish.wait(5)
+            return self.driver.payload
+        self.driver.capture = delayed
+        results = []
+        def read():
+            try:
+                results.append(self.session.capture(generation, True))
+            except SessionError:
+                results.append("discarded")
+        thread = threading.Thread(target=read)
+        thread.start()
+        self.assertTrue(started.wait(5))
+        self.session.close()
+        finish.set()
+        thread.join(5)
+        self.assertEqual(results, ["discarded"])
+        self.assertEqual(self.session.status()["state"], "closed")
+        self.assertIsNone(self.session.status()["scope"])
+        self.assertTrue(self.driver.closed)
+
+    def test_cancel_before_browser_launch_prevents_network(self):
+        worker = BrowserWorker()
+        worker.close()
+        with self.assertRaises(RuntimeError):
+            worker.open(source_url("13331", 2026))
+        self.assertIsNone(worker._process)
+        self.assertIsNone(worker._temporary)
+
+    def test_gui_launcher_uses_pipe_capable_sibling_interpreter_without_console(self):
+        with patch('coletor.manual_worker.sys.executable', str(Path('portable') / 'pythonw.exe')):
+            command = BrowserWorker()._command()
+        self.assertEqual(Path(command[0]).name, 'python.exe')
+        self.assertEqual(command[1:], ['-B', '-m', 'coletor.manual_worker'])
+
+    def test_worker_does_not_inherit_cloud_secrets_or_debug_executable_overrides(self):
+        with patch.dict('coletor.manual_worker.os.environ', {'GH_TOKEN': 'SYNTHETIC_ONLY',
+                        'SONAR_TOKEN': 'SYNTHETIC_ONLY', 'NODE_OPTIONS': '--inspect',
+                        'PLAYWRIGHT_NODEJS_PATH': 'untrusted', 'PYTHONPATH': 'untrusted'}, clear=True):
+            environment = worker_environment('owned-temporary')
+        self.assertFalse(any(key in environment for key in ('GH_TOKEN', 'SONAR_TOKEN', 'NODE_OPTIONS', 'PLAYWRIGHT_NODEJS_PATH')))
+        self.assertEqual(environment['TMP'], 'owned-temporary')
+        self.assertNotEqual(environment['PYTHONPATH'], 'untrusted')
+
+    def test_verified_windows_job_retries_transient_access_denied_cleanup(self):
+        """WinError 5 may linger briefly after a verified Edge process shutdown."""
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+                self.cleaned = False
+
+            def cleanup(self):
+                self.calls += 1
+                if self.calls <= 2:
+                    error = PermissionError("synthetic temporary handle still releasing")
+                    error.winerror = 5
+                    raise error
+                self.cleaned = True
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": True, "remaining_processes": 0}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            worker.close()
+        self.assertTrue(temporary.cleaned)
+        self.assertIsNone(worker._temporary)
+        self.assertEqual(worker._cleanup_errors, [5, 5])
+        self.assertEqual(sleeper.call_count, 2)
+
+    def test_unverified_windows_job_never_suppresses_access_denied(self):
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+
+            def cleanup(self):
+                self.calls += 1
+                error = PermissionError("synthetic access denied")
+                error.winerror = 5
+                raise error
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": False, "remaining_processes": 1}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            with self.assertRaises(PermissionError):
+                worker.close()
+        self.assertIs(worker._temporary, temporary)
+        self.assertEqual(temporary.calls, 1)
+        sleeper.assert_not_called()
+
+    def test_persistent_access_denied_keeps_owned_temporary_for_retry(self):
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+
+            def cleanup(self):
+                self.calls += 1
+                error = PermissionError("synthetic persistent access denied")
+                error.winerror = 5
+                raise error
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": True, "remaining_processes": 0}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            with self.assertRaises(PermissionError):
+                worker.close()
+        self.assertIs(worker._temporary, temporary)
+        self.assertEqual(temporary.calls, 9)
+        self.assertEqual(worker._cleanup_errors, [5] * 9)
+        self.assertEqual(sleeper.call_count, 8)
+
+    def test_operational_failure_is_redacted_and_session_closed(self):
+        def failed(_url):
+            raise OSError("SECRET PASSWORD PATH")
+        self.driver.open = failed
+        generation = self.session.prepare("13331", 2026)["generation"]
+        with self.assertRaises(SessionError) as caught:
+            self.session.open(generation, True)
+        self.assertNotIn("SECRET", str(caught.exception))
+        self.assertTrue(self.driver.closed)
+        self.assertEqual(self.session.status()["state"], "closed")
+
+    def test_failed_cleanup_retains_owned_driver_and_cannot_open_a_replacement(self):
+        self.opened()
+        def failure():
+            raise OSError('SYNTHETIC_PRIVATE_PATH_DO_NOT_ECHO')
+        self.driver.close = failure
+        with self.assertRaises(SessionError) as caught:
+            self.session.close()
+        self.assertNotIn('SYNTHETIC_PRIVATE_PATH', str(caught.exception))
+        self.assertTrue(self.session.status()['cleanup_pending'])
+        with self.assertRaises(SessionError):
+            self.session.prepare('13332', 2026)
+        self.driver.close = lambda: None
+        result = self.session.prepare('13332', 2026)
+        self.assertFalse(result['cleanup_pending'])
+        self.assertEqual(result['state'], 'prepared')
+
+
+class PopupShutdownQaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_waits_for_delayed_close_and_fails_if_popup_remains(self):
+        from scripts.check_manual_browser import wait_for_popup_shutdown
+
+        class Context:
+            pages = [object(), object()]
+
+        context = Context()
+
+        async def close_delayed_popup():
+            await asyncio.sleep(0.2)
+            context.pages.pop()
+
+        closing = asyncio.create_task(close_delayed_popup())
+        self.assertTrue(await wait_for_popup_shutdown(context, timeout=1))
+        await closing
+        context.pages.append(object())
+        self.assertFalse(await wait_for_popup_shutdown(context, timeout=0.25))
+
+
+if __name__ == "__main__":
+    unittest.main()

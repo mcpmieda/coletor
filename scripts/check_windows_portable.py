@@ -34,13 +34,74 @@ import time
 from urllib.parse import urlparse
 
 SCHEMA = 1
+
+
+def synthetic_institutional_access(authorized=True, shared_fixture=None):
+    """Python QA fixture, outside the package. No runtime flag/JS bypass exists.
+
+    Exercises the actual strict receipt validation with a synthetic transport;
+    does not prove Microsoft login or production backend authorization.
+    """
+    from coletor.institutional_access import AccessDenied, InstitutionalAccess, OnlineResponse, PROPOSED_ACCESS_URL
+
+    class Provider:
+        active = authorized
+        revision = 0
+
+        def frequency_request(self, payload):
+            # Server-shaped operational settings fixture, never local app
+            # preferences promoted into a shared revision or production request.
+            preset = json.loads((Path(__file__).resolve().parents[1] / 'ui/src/schedule-presets.json').read_text(encoding='utf-8'))
+            state = {'revision': 0, 'paused': False, 'schedule': {'timezone': 'America/Bahia', 'rules': [
+                {'weekday': r['weekday'] % 7, 'shift': r['shift'], 'enabled': r['selected'], 'times': r['times'], 'recheck': r['reconciliation'] or None} for r in preset['rules']]}}
+            if shared_fixture is not None and Path(shared_fixture).is_file():
+                state = json.loads(Path(shared_fixture).read_text(encoding='utf-8'))
+            if payload['operation'] == 'status':
+                return {'contractVersion': 2, 'state': 'ready', 'academicYear': 2026, 'serverTime': datetime.now(timezone.utc).isoformat(),
+                        'settings': state, 'classes': [], 'devices': [], 'collections': [], 'conflicts': [], 'lease': None}
+            if payload['operation'] in {'save-settings', 'set-paused'}:
+                if payload['expectedRevision'] != state['revision']:
+                    from coletor.device_provider import FrequencyError
+                    raise FrequencyError('revision-conflict')
+                if payload['operation'] == 'save-settings': state['schedule'] = payload['schedule']
+                else: state['paused'] = payload['paused']
+                state['revision'] += 1
+                if shared_fixture is not None: Path(shared_fixture).write_text(json.dumps(state), encoding='utf-8')
+                return {'contractVersion': 2, 'state': 'committed', 'operation': payload['operation'], 'requestId': payload['requestId'], 'settingsRevision': state['revision']}
+            raise RuntimeError('fixture-operation-unavailable')
+
+        def storage_binding(self): return '11111111-1111-4111-8111-111111111111', 1
+
+        def verify_online(self):
+            if not self.active:
+                raise AccessDenied("ACCESS_REQUIRED")
+            now = datetime.now(timezone.utc)
+            from datetime import timedelta
+            body = {"contractVersion": 2, "authenticated": True, "authorized": True,
+                    "capability": "frequency.collector.use", "identityKey": "synthetic-native-fixture",
+                    "checkedAt": now.isoformat(), "expiresAt": (now + timedelta(minutes=5)).isoformat(),
+                    "directoryCheckedAt": now.isoformat(), "directoryValidUntil": (now + timedelta(minutes=5)).isoformat(),
+                    "revocationChecked": True}
+            return OnlineResponse(200, PROPOSED_ACCESS_URL, json.dumps(body).encode("utf-8"))
+
+        def open_official_login(self):
+            raise RuntimeError("synthetic-fixture-does-not-login")
+
+        def close(self):
+            return None
+
+    provider = Provider()
+    access = InstitutionalAccess(provider)
+    access._synthetic_enable = lambda: setattr(provider, "active", True)
+    return access
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 EXPECTED_NAMES = [f"Aluno sintético {number:03}" for number in range(1, 4)]
-LABELS = ["Conferir frequência", "Não envia dados", "Prévia da turma",
+LABELS = ["Coleta da frequência", "Prévia da turma",
           "Alunos no diário", "Este exemplo usa alunos fictícios.",
           "Nenhum dado foi enviado", "• não confirma presença", "Envio desativado"]
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",
-                   "native_window_visible", "edgechromium_control", "loopback_ui",
+                   "institutional_entry_visible", "native_denial_before_work", "fixture_authorized_only_python",
+                   "native_window_visible", "native_window_centered", "edgechromium_control", "loopback_ui",
                    "dom_and_bridge_ready", "real_demo_button_clicked", "bridge_demo_verified",
                    "demo_rendered", "three_synthetic_options", "student_filter_works",
                    "clear_preview_works", "repeat_demo_works", "window_closed"]
@@ -241,12 +302,19 @@ def rendered_js(expected_calls: int) -> str:
 def native_info(window) -> tuple[dict, int]:
     """Inspect the public native control on its own WinForms UI thread."""
     from System import Action
-    info = {"visible": False, "edgechromium": False, "runtime_version": None}
+    info = {"visible": False, "centered": False, "edgechromium": False, "runtime_version": None}
     handle = []
 
     def inspect():
         form = window.native
         info["visible"] = bool(form.Visible) and not bool(form.IsDisposed)
+        from System.Windows.Forms import Screen
+        usable = Screen.PrimaryScreen.WorkingArea
+        center_x = float(usable.Left) + float(usable.Width) / 2
+        center_y = float(usable.Top) + float(usable.Height) / 2
+        form_x = float(form.Left) + float(form.Width) / 2
+        form_y = float(form.Top) + float(form.Height) / 2
+        info["centered"] = abs(center_x - form_x) <= 40 and abs(center_y - form_y) <= 40
         handle.append(int(form.Handle.ToInt64()))
         pending = list(form.Controls)
         while pending:
@@ -307,14 +375,17 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
     checks = evidence["checks"]
     try:
         evidence["stage"] = "dom_and_bridge"
-        wait_js(window, "document.readyState === 'complete' && !!document.querySelector('h1') && typeof window.pywebview?.api?.load_demo === 'function'")
+        wait_js(window, "document.readyState === 'complete' && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled) && typeof window.pywebview?.api?.load_demo === 'function'")
         checks["dom_and_bridge_ready"] = True
         info, handle = native_info(window)
         checks["native_window_visible"] = info["visible"]
+        checks["native_window_centered"] = info["centered"]
         checks["edgechromium_control"] = info["edgechromium"]
         evidence["webview2_runtime_version"] = info["runtime_version"]
         if not info["visible"] or not info["edgechromium"]:
             fail("real_edgechromium_window_required")
+        if not info["centered"]:
+            fail("real_native_window_not_centered")
         location = urlparse(window.get_current_url() or "")
         checks["loopback_ui"] = location.scheme == "http" and location.hostname in ("127.0.0.1", "localhost", "::1")
         if not checks["loopback_ui"]:
@@ -352,7 +423,7 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
 
         evidence["stage"] = "clear_and_repeat"
         click_button(window, "Fechar diário")
-        wait_js(window, "!document.querySelector('.preview-panel') && !!document.querySelector('.empty-state')")
+        wait_js(window, "!document.querySelector('.preview-panel') && !document.querySelector('.summary-grid') && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled)")
         checks["clear_preview_works"] = True
         click_button(window, "Usar dados de exemplo")
         wait_js(window, rendered_js(2))
@@ -398,8 +469,30 @@ def run_worker(args) -> int:
             fail("unexpected_pywebview_version")
         evidence["stage"] = "launch_native_window"
         write_json(args.worker_output, {key: value for key, value in evidence.items() if not key.startswith("_")})
-        desktop.run_desktop(callback=lambda window: exercise_window(window, evidence, args.output_dir / "windows-portable.png"),
-                            settings_directory=args.output_dir / "isolated-settings")
+        access = synthetic_institutional_access(authorized=False)
+
+        def institutional_entry(window):
+            try:
+                wait_js(window, "!!window.pywebview?.api?.get_institutional_access_status && [...document.querySelectorAll('h1')].some(n=>n.textContent==='Entrar no Ecossistema')")
+                evidence["checks"]["institutional_entry_visible"] = True
+                window.evaluate_js("window.__deniedNativeDemo=null;window.pywebview.api.load_demo().then(r=>window.__deniedNativeDemo=r);true")
+                wait_js(window, "!!window.__deniedNativeDemo")
+                denied = window.evaluate_js("window.__deniedNativeDemo")
+                if denied.get("code") != "ACCESS_REQUIRED" or "snapshot" in denied:
+                    fail("native_command_not_denied")
+                evidence["checks"]["native_denial_before_work"] = True
+                access._synthetic_enable()
+                evidence["checks"]["fixture_authorized_only_python"] = True
+                window.evaluate_js("window.dispatchEvent(new Event('coletoraccesschanged'));true")
+                exercise_window(window, evidence, args.output_dir / "windows-portable.png")
+            except Exception as error:
+                evidence["failure"] = str(error) if isinstance(error, SmokeFailure) else "institutional_entry_check_failed"
+                evidence["error_type"] = type(error).__name__
+                evidence["status"] = "failed"
+                window.destroy()
+
+        desktop.run_desktop(callback=institutional_entry,
+                            settings_directory=args.output_dir / "isolated-settings", access=access)
         evidence["checks"]["window_closed"] = True
         evidence["stage"] = "window_closed"
         if evidence["status"] != "passed" or not all(evidence["checks"].get(key) is True for key in REQUIRED_CHECKS):

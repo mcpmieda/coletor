@@ -20,9 +20,9 @@ mascote não representa pausa de um coletor: nenhuma coleta está agendada.
 
 - Área própria na barra lateral; não cobre controles ou intercepta cliques externos.
 - Botão de carinho acessível por teclado; legendas curtas sem fala automática ou som.
-- Mostrar raposa e Animar mascote são preferências locais independentes.
+- A raposa fica sempre visível; não há preferências para ocultar ou parar.
 - Movimento reduzido deixa uma pose estática; não apenas uma animação CSS mais rápida.
-- Timers desligados com mascote oculto, animação desmarcada, aba oculta ou sidebar fora
+- Timers desligados com movimento reduzido, aba oculta ou sidebar fora
   do layout móvel. Um único timer de cada vez; não usa laço requestAnimationFrame.
 - Quadros de gesto no máximo a cada 160 ms; leitura a cada 400 ms. Entre gestos há descanso
   de 1,8–3,6 s; cochilo após 2 min sem interação. A simulação unitária limita callbacks;

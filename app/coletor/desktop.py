@@ -8,10 +8,59 @@ import sys
 from .service import ROOT
 from .desktop_api import DesktopApi
 
-APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel.Preview"
+APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel"
 
 
-def run_desktop(callback=None, settings_directory=None):
+def centered_window_geometry(work_area, width=1240, height=820, minimum=(900, 620)):
+    """Fit within the primary monitor's usable desktop and center the form.
+
+    Coordinates use the same Win32 logical desktop units as pywebview. Allow
+    smaller windows on compact screens rather than opening outside the display.
+    """
+    left, top, right, bottom = work_area
+    available_width, available_height = right - left, bottom - top
+    if available_width <= 0 or available_height <= 0:
+        raise ValueError("Invalid primary monitor work area")
+    usable_width = max(1, available_width - min(32, available_width // 10))
+    usable_height = max(1, available_height - min(32, available_height // 10))
+    fitted_width, fitted_height = min(width, usable_width), min(height, usable_height)
+    return {
+        "width": fitted_width, "height": fitted_height,
+        "x": left + (available_width - fitted_width) // 2,
+        "y": top + (available_height - fitted_height) // 2,
+        "min_size": (min(minimum[0], fitted_width), min(minimum[1], fitted_height)),
+    }
+
+
+def primary_work_area():
+    import ctypes
+    from ctypes import wintypes
+    rect = wintypes.RECT()
+    if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+        return rect.left, rect.top, rect.right, rect.bottom
+    return 0, 0, ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+
+
+def finish_native_form(window):
+    """Finish real WinForms placement after DPI awareness and show event."""
+    from System import Action
+    from System.Drawing import Icon
+    from System.Windows.Forms import Screen
+    from .tray_animation import DEFAULT_ASSET_DIRECTORY
+
+    def place_and_brand():
+        form = window.native
+        area = Screen.PrimaryScreen.WorkingArea
+        form.Left = int(area.Left + (area.Width - form.Width) // 2)
+        form.Top = int(area.Top + (area.Height - form.Height) // 2)
+        icon = Icon(str(DEFAULT_ASSET_DIRECTORY / "fox-idle.ico"))
+        form.Icon = icon
+        window._coletor_native_icon = icon
+
+    window.native.Invoke(Action(place_and_brand))
+
+
+def run_desktop(callback=None, settings_directory=None, *, access=None, background=False):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
     entry = ROOT / "ui/dist/index.html"
@@ -23,29 +72,53 @@ def run_desktop(callback=None, settings_directory=None):
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    api = DesktopApi(settings_directory)
-    window = webview.create_window("Coletor de Frequência · Versão de teste", str(entry) + "#coletor-desktop", js_api=api,
-                          width=1240, height=820, min_size=(900, 620),
-                          background_color="#faf7f8", text_select=True)
+    from .instance_lock import CollectorInstance, ShowRequests, signal_running_instance
+    try:
+        instance = CollectorInstance(settings_directory).acquire()
+    except RuntimeError:
+        # Already open (perhaps started with Windows, hidden in the tray): show it.
+        if signal_running_instance(): return
+        raise
+    show_requests = ShowRequests()
+    api = DesktopApi(settings_directory, access=access)
+    geometry = centered_window_geometry(primary_work_area())
+    window = webview.create_window("Coletor de Frequência · 0.4.0", str(entry) + "#coletor-desktop", js_api=api,
+                          **geometry, background_color="#faf7f8", text_select=True)
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):
         # pywebview starts func before creating the native form. Wait for its
         # public shown event; otherwise tray setup races window.native=None.
         if not window.events.shown.wait(20) or window.events.closed.is_set(): return
+        finish_native_form(window)
         from .tray_winforms import WindowsFormsTray
         tray = WindowsFormsTray(window, api._desktop_state)
         try:
             tray.start()
-            api._tray = tray
+            api._attach_tray(tray)
         except Exception as error:
             tray._startup_error_type = type(error).__name__
             tray.stop()
         window._coletor_tray = tray  # Python QA only; not exposed to JavaScript.
         window.evaluate_js("window.dispatchEvent(new Event('coletortrayready'));true")
+        show_requests.listen(lambda: tray._invoke(tray._open) if api._tray is not None else window.restore())
+        if background:
+            # Opened with Windows: stay beside the clock; the fox opens the window.
+            if api._tray is None or "error" in tray.hide(): window.minimize()
+        api._start_resume()
         if callback: callback(window)
 
     try:
         webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)
     finally:
-        if api._tray is not None: api._tray.stop()
+        try:
+            api._collector.shutdown()
+        finally:
+            try:
+                api._access.shutdown()
+            finally:
+                try:
+                    if api._tray is not None: api._tray.stop()
+                finally:
+                    show_requests.close()
+                    instance.close()
 

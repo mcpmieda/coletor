@@ -1,2 +1,4 @@
 # Windows development. The private portable test build uses a separate lock file.
 pywebview==6.1
+playwright==1.63.0
+tzdata==2026.5

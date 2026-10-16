@@ -5,7 +5,7 @@ import sys
 def main():
     try:
         from .desktop import run_desktop
-        run_desktop()
+        run_desktop(background="--background" in sys.argv[1:])
     except (Exception, SystemExit):
         if sys.platform == "win32":
             import ctypes
@@ -14,7 +14,7 @@ def main():
                 "Extraia toda a pasta antes de abrir. O Windows precisa do "
                 "Microsoft Edge WebView2.\n\n"
                 "Leia o arquivo LEIA-ME ou peça ajuda. Nenhum dado foi enviado.",
-                "Coletor de Frequência · Versão de teste", 0x10)
+                "Coletor de Frequência", 0x10)
         raise SystemExit(1) from None
 
 

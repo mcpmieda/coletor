@@ -5,3 +5,20 @@ useDefault = true
 description = "Reviewed false positive: public localStorage namespace, not an API credential (AUD-007)."
 regexTarget = "secret"
 regexes = ['''^coletor-smecel\.fox\.v1$''']
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed public manifest protocol descriptor; not a credential or authorization grant."
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^signed-v2-frequency$''']
+paths = ['''^scripts/build_windows_portable\.py$''']
+
+[[rules.allowlists]]
+description = "Reviewed Windows installer documentation prose, not an API token or key."
+condition = "AND"
+regexTarget = "line"
+regexes = ['''CNG anônimo e proof backend, DPAPI, fila/recibos/fencing e ZIP''']
+paths = ['''^docs/WINDOWS_INSTALLER\.md$''']

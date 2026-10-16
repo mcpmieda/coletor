@@ -18,7 +18,7 @@ import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-teste"
+VERSION = "0.4.0-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -104,15 +104,28 @@ def build(output, source_commit):
     shutil.copyfile(ROOT / "docs/PORTABLE_LEIA_ME.txt", bundle / "LEIA-ME.txt")
     (bundle / "Abrir Coletor.cmd").write_bytes(
         b'@echo off\r\nsetlocal\r\nstart "Coletor de Frequencia" "%~dp0programa\\pythonw.exe" -B -m coletor.portable\r\n')
+    (bundle / "Remover acesso deste PC.cmd").write_bytes(
+        b'@echo off\r\nsetlocal\r\necho Feche o Coletor antes de continuar.\r\n'
+        b'echo Esta acao retira o acesso deste PC; nao apaga a pasta nem configuracoes.\r\n'
+        b'choice /C SN /N /M "Continuar (S/N)? "\r\nif errorlevel 2 exit /b 0\r\n'
+        b'"%~dp0programa\\python.exe" -B -m coletor --safe-removal\r\n'
+        b'set "cleanup_result=%errorlevel%"\r\npause\r\nexit /b %cleanup_result%\r\n')
     ui_license_notices(bundle)
     packages = sorted([{"name": d.metadata["Name"], "version": d.version}
         for d in importlib.metadata.distributions(path=[str(site)])], key=lambda x: x["name"].lower())
+    driver_node = subprocess.run([str(site / "playwright/driver/node.exe"), "--version"],
+                                 check=True, capture_output=True, text=True).stdout.strip()
+    if driver_node != "v24.21.0":
+        raise ValueError("Unexpected browser driver Node runtime")
     manifest = {"application": "Coletor de Frequência", "version": VERSION,
         "kind": "portable-test-not-installer", "source_commit": source_commit,
         "built_at": datetime.now(timezone.utc).isoformat(), "platform": "windows-x64",
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,
         "python_archive_sha256": PYTHON_SHA256, "packages": packages,
-        "production_access": False, "automatic_collection": False,
+        "browser_driver_node_version": driver_node,
+        "production_access": "signed-v2-frequency; requires-approved-backend-and-human-activation", "automatic_collection": False,
+        "transmission_enabled": False, "frequency_v2_supported": True,
+        "real_source_qa": "pending-authorized-operator-validation",
         "credentials_included": False, "tray_enabled": True,
         "native_smoke": "must-pass-before-zip", "files": []}
     for p in sorted(bundle.rglob("*")):
@@ -125,11 +138,11 @@ def build(output, source_commit):
 def validate_tray_evidence(report):
     common = {"native_window_visible", "native_tray_registered", "native_menu_visible",
               "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
-              "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
+              "idle_has_no_timer", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
     extended = {"actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-                "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
-                "discard_blocks_new_reads", "discarded_result_stays_hidden",
-                "error_state_static_and_generic", "hidden_fox_uses_neutral_icon"}
+                "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
+                "error_state_static_and_generic"}
+    close = {"active_collection_close_hides"}
     workers = report.get("workers", [])
     if (report.get("test") != "portable_windows_tray" or report.get("status") != "passed"
             or report.get("cleanup", {}).get("verified") is not True
@@ -139,14 +152,34 @@ def validate_tray_evidence(report):
             or {w.get("scenario") for w in workers if isinstance(w, dict)} != {"quit", "close"}):
         raise ValueError("Native tray test must pass before creating a distributable")
     for worker in workers:
-        required = common | (extended if worker["scenario"] == "quit" else set())
+        required = common | (extended if worker["scenario"] == "quit" else close)
         if (worker.get("status") != "passed" or worker.get("cleanup", {}).get("verified") is not True
                 or worker.get("cleanup", {}).get("remaining_processes") != 0
                 or any(worker.get("checks", {}).get(key) is not True for key in required)):
             raise ValueError("Native tray test must pass before creating a distributable")
 
 
-def package_zip(output, evidence, settings_evidence=None, tray_evidence=None):
+def validate_manual_evidence(report, browser=False):
+    required = ({"external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
+                 "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
+                 "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
+                 "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored'} if browser else
+                {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
+                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                 "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
+    if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
+            or report.get("cleanup", {}).get("remaining_processes") != 0
+            or report.get("real_network") is not False or report.get("real_credentials") is not False
+            or not all(report.get("checks", {}).get(key) is True for key in required)):
+        raise ValueError("Manual session QA must pass before creating a distributable")
+    if browser and (type(report.get("denied_destination_contacts")) is not int
+                    or report["denied_destination_contacts"] != 0
+                    or type(report.get("denied_destination_body_bytes")) is not int
+                    or report["denied_destination_body_bytes"] != 0):
+        raise ValueError("Denied redirect destinations must never be contacted")
+
+
+def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, manual_evidence=None, browser_evidence=None, device_evidence=None, frequency_evidence=None):
     bundle = output / NAME
     report = json.loads(evidence.read_text(encoding="utf-8"))
     if report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True:
@@ -168,13 +201,42 @@ def package_zip(output, evidence, settings_evidence=None, tray_evidence=None):
     if tray_evidence is None:
         raise ValueError("Native tray test must pass before creating a distributable")
     validate_tray_evidence(json.loads(tray_evidence.read_text(encoding="utf-8")))
+    if manual_evidence is None or browser_evidence is None:
+        raise ValueError("Manual session QA must pass before creating a distributable")
+    validate_manual_evidence(json.loads(manual_evidence.read_text(encoding="utf-8")))
+    validate_manual_evidence(json.loads(browser_evidence.read_text(encoding="utf-8")), browser=True)
+    if device_evidence is None:
+        raise ValueError("Anonymous native device proof QA must pass before packaging")
+    device = json.loads(device_evidence.read_text(encoding="utf-8"))
+    required = {"native-cng-pairing-verified-by-backend", "native-cng-access-verified-by-backend", "native-cng-revoke-verified-by-backend",
+                "native-cng-frequency-verified-by-backend", "native-cng-frequency-altered-payload-rejected"}
+    if (device.get("passed") is not True or device.get("synthetic_backend") is not True
+            or device.get("real_network") is not False or device.get("real_accounts") is not False
+            or device.get("named_keys_created") != 0 or device.get("anonymous_keys_created") != 1
+            or device.get("anonymous_keys_released") != 1 or not required.issubset(device.get("checks", []))):
+        raise ValueError("Anonymous native device proof QA must pass before packaging")
+    if frequency_evidence is None: raise ValueError('Native operational frequency proof must pass before packaging')
+    frequency = json.loads(frequency_evidence.read_text(encoding='utf-8'))
+    if (frequency.get('test') != 'portable_windows_frequency_v2' or frequency.get('status') != 'passed'
+            or frequency.get('bundled_runtime') is not True or frequency.get('synthetic_data_only') is not True
+            or frequency.get('real_network') is not False or frequency.get('real_accounts') is not False
+            or frequency.get('failures') != 0 or frequency.get('errors') != 0 or frequency.get('skips') != 0
+            or not isinstance(frequency.get('tests'), int) or frequency['tests'] < 22
+            or any(frequency.get('checks', {}).get(k) is not True for k in
+                   ('native_dpapi', 'runtime_receipts_pause_fencing_cancellation', 'instance_lock', 'no_named_keys'))):
+        raise ValueError('Native operational frequency proof must pass before packaging')
     manifest_path = bundle / "MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["native_smoke"] = "passed-in-private-windows-ci"
     manifest["local_settings_smoke"] = "passed-in-private-windows-ci"
     manifest["tray_smoke"] = "passed-in-private-windows-ci"
-    manifest["tray_scope"] = "same-window-show-hide-exit; local-preview-state; no-autostart-or-collection"
-    manifest["local_settings"] = "agenda-theme-fox-only; private-browser-profile"
+    manifest["manual_session_smoke"] = "passed-synthetic-native-and-external-edge"
+    manifest["device_proof_smoke"] = "anonymous-cng-verified-by-backend-fixture"
+    manifest['frequency_v2_smoke'] = 'bundled-native-dpapi-and-operational-regressions'
+    manifest["institutional_activation"] = "pending-backend-configuration-and-authorized-tenant-validation"
+    manifest["persistent_key_qa"] = "not-proven; requires-explicit-human-activation"
+    manifest["tray_scope"] = "same-window-show-hide-exit; operational-activity; close-hides-while-collecting; portable-no-autostart"
+    manifest["local_settings"] = "nonsecret-preferences; dpapi-session-and-queue-only-with-native-consent; shared-server-agenda"
     for item in manifest["files"]:
         p = bundle / item["path"]
         if p.stat().st_size != item["size"] or sha256(p) != item["sha256"]:
@@ -196,9 +258,13 @@ if __name__ == "__main__":
     parser.add_argument("--package", type=Path, help="Successful native smoke JSON")
     parser.add_argument("--settings-evidence", type=Path, help="Successful native settings close/reopen/recovery JSON")
     parser.add_argument("--tray-evidence", type=Path, help="Successful native notification-area flows JSON")
+    parser.add_argument("--manual-evidence", type=Path, help="Successful native manual-session flow JSON")
+    parser.add_argument("--browser-evidence", type=Path, help="Successful isolated Edge synthetic QA JSON")
+    parser.add_argument("--device-evidence", type=Path, help="Successful anonymous CNG/backend interoperability QA JSON")
+    parser.add_argument('--frequency-evidence', type=Path, help='Successful bundled native frequency/DPAPI evidence')
     args = parser.parse_args()
     if args.package:
-        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence)
+        package_zip(args.output, args.package, args.settings_evidence, args.tray_evidence, args.manual_evidence, args.browser_evidence, args.device_evidence, args.frequency_evidence)
     else:
         build(args.output, args.source_commit or "")
 

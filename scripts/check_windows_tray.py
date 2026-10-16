@@ -21,17 +21,18 @@ SCENARIOS = ("quit", "close")
 REQUIRED_CHECKS = {
     "native_window_visible", "native_tray_registered", "native_menu_visible",
     "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
-    "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed",
+    "idle_has_no_timer", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
     "visible_ui_healthy",
     "unregistered_tray_cannot_hide",
     "hidden_and_minimized_panel_motion_stops",
 }
 EXTENDED_CHECKS = {
     "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-    "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
-    "discard_blocks_new_reads", "discarded_result_stays_hidden",
-    "error_state_static_and_generic", "hidden_fox_uses_neutral_icon",
+    "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
+    "error_state_static_and_generic",
 }
+# The window's X keeps an active collection beside the clock instead of quitting.
+CLOSE_CHECKS = {"active_collection_close_hides"}
 
 def wait(predicate, timeout=15):
     deadline = time.monotonic()+timeout
@@ -102,10 +103,7 @@ def exercise(window,args,result):
         wait(lambda:inspect(tray)["registered"])
         wait(lambda:inspect(tray)["activity"]=="idle" and not inspect(tray)["timer"])
         require("idle_has_no_timer")
-        if args.scenario=="close":
-            require("saved_preferences_respected",data["icon"]=="neutral" and not data["timer"])
-        else:
-            require("saved_preferences_respected",data["icon"]=="fox-idle")
+        require("fox_icon_shown",data["icon"]=="fox-idle")
         for _ in range(6):
             menu(tray._hide_item); require("same_window_after_repeated_show_hide",not inspect(tray)["window_visible"])
             menu(tray._open_item); menu(tray._open_item)
@@ -152,10 +150,6 @@ def exercise(window,args,result):
             before=inspect(tray)["frame_updates"];time.sleep(.8)
             require("reduced_motion_stops_native_timer",inspect(tray)["frame_updates"]==before)
             media(window,tray,False)
-            settings.checkbox(window,"Animar raposa")
-            settings.stored(window,lambda r:r["settings"]["fox"]["animate"] is False)
-            wait(lambda:not inspect(tray)["timer"])
-            require("disabled_animation_stops_native_timer")
             settings.click(window,"Descartar resultado")
             smoke.wait_js(window,"document.body.innerText.includes('Lendo o diário')")
             require("cancel_keeps_actual_native_read_truthful",inspect(tray)["activity"]=="reading")
@@ -175,11 +169,18 @@ def exercise(window,args,result):
             data=inspect(tray)
             require("error_state_static_and_generic",not data["timer"] and data["icon"]=="fox-error" and data["tooltip"].endswith("Arquivo precisa de atenção") and "Coleta desligada" in data["tooltip"])
             result["error_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-local-error.png")
-            settings.checkbox(window,"Mostrar raposa")
-            settings.stored(window,lambda r:r["settings"]["fox"]["show"] is False)
-            wait(lambda:inspect(tray)["icon"]=="neutral")
-            require("hidden_fox_uses_neutral_icon",not inspect(tray)["timer"])
-        require("visible_ui_healthy",window.evaluate_js("document.querySelector('h1')?.textContent==='Conferir frequência' && document.title.includes('Coletor') && !document.querySelector('vite-error-overlay') && window.__trayQaErrors===0"))
+        require("visible_ui_healthy",window.evaluate_js("document.querySelector('h1')?.textContent==='Coleta da frequência' && document.title.includes('Coletor') && !document.querySelector('vite-error-overlay') && window.__trayQaErrors===0"))
+        if args.scenario=="close":
+            real_status=tray.status_provider
+            tray.status_provider=lambda:{"active":True,"state":"ready"}
+            try:
+                tray._invoke(tray._form.Close)
+                wait(lambda:not inspect(tray)["window_visible"])
+                require("active_collection_close_hides",not tray._disposed and not window.native.IsDisposed)
+            finally:
+                tray.status_provider=real_status
+            menu(tray._open_item)
+            wait(lambda:inspect(tray)["window_visible"])
         result["status"]="passed"
     except Exception as error:
         result["status"]="failed"
@@ -211,12 +212,12 @@ def worker(args):
         smoke.write_json(args.worker_output,result)
         with (args.output_dir/("tray-thread-diagnostic-"+args.scenario+".txt")).open("w",encoding="utf-8") as diagnostic:
             faulthandler.dump_traceback_later(25, file=diagnostic)
-            try: desktop.run_desktop(callback=callback,settings_directory=args.settings_directory)
+            try: desktop.run_desktop(callback=callback,settings_directory=args.settings_directory, access=smoke.synthetic_institutional_access())
             finally: faulthandler.cancel_dump_traceback_later()
         tray=holder.get("tray")
         result["checks"]["native_exit_removed_icon_and_timer"]=bool(tray and tray._disposed and tray._cleanup_ok and not tray._icons and not tray._notify.Visible and not tray._timer.Enabled)
         result["checks"]["window_closed"]=True
-        required=REQUIRED_CHECKS | (EXTENDED_CHECKS if args.scenario=="quit" else set())
+        required=REQUIRED_CHECKS | (EXTENDED_CHECKS if args.scenario=="quit" else CLOSE_CHECKS)
         if not all(result["checks"].get(n) is True for n in required): result["status"]="failed"
     except BaseException as error:
         result["status"]="failed";result.setdefault("failure",str(error) if isinstance(error,smoke.SmokeFailure) else "tray_worker_failed")
@@ -260,8 +261,10 @@ def orchestrator(args):
                 finally:
                     job.close()
                     if process is not None and process.poll() is None: process.kill();process.wait(timeout=10)
-            data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
-            if set(data)!={"schemaVersion","schedule","theme","fox"}: smoke.fail("unexpected_persistent_data")
+            # The tray flows change no preference; a settings file appears only if one is saved.
+            settings_file=isolated/"settings.json"
+            if settings_file.is_file() and set(json.loads(settings_file.read_text(encoding="utf-8")))!={"schemaVersion","schedule","theme","fox"}:
+                smoke.fail("unexpected_persistent_data")
             report["only_nonsecret_settings_retained"]=True
             if report["cleanup"]["verified"]:report["status"]="passed"
     except BaseException as error:

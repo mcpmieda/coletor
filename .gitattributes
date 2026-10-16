@@ -1,0 +1,3 @@
+fixtures/collector-peer-fixture.mjs text eol=lf
+fixtures/collector-peer-provenance.json text eol=lf
+instalador/*.exe filter=lfs diff=lfs merge=lfs -text

@@ -1,7 +1,10 @@
 import limits from '../../app/coletor/preview-limits.json';
 import type { Preview } from './types';
 import type { TrayBridge } from './desktop';
-interface NativeApi extends Partial<TrayBridge> { load_demo(): Promise<Preview | { error: string }>; preview_html(html: string, classId: string, year: number): Promise<Preview | { error: string }>; get_local_settings?: import('./localSettings').SettingsBridge['get_local_settings']; save_schedule?: import('./localSettings').SettingsBridge['save_schedule']; save_theme?: import('./localSettings').SettingsBridge['save_theme']; save_fox?: import('./localSettings').SettingsBridge['save_fox'] }
+import type { ManualBridge } from './components/ManualSource';
+import type { CollectorBridge } from './collector';
+import type { InstitutionalBridge } from './components/InstitutionalAccess';
+interface NativeApi extends Partial<ManualBridge>, Partial<TrayBridge>, Partial<InstitutionalBridge>, Partial<CollectorBridge> { load_demo(): Promise<Preview | { error: string }>; preview_html(html: string, classId: string, year: number): Promise<Preview | { error: string }>; get_local_settings?: import('./localSettings').SettingsBridge['get_local_settings']; save_schedule?: import('./localSettings').SettingsBridge['save_schedule']; save_theme?: import('./localSettings').SettingsBridge['save_theme'] }
 declare global { interface Window { pywebview?: { api: NativeApi } } }
 function unwrap(body: Preview | { error: string }): Preview {
   if (!('snapshot' in body)) throw new Error(body.error);
@@ -15,7 +18,7 @@ async function request(path: string, init?: RequestInit): Promise<Preview> {
   if (!response.ok || !body?.snapshot) throw new Error(body?.error ?? 'Não foi possível ler este diário.');
   return body as Preview;
 }
-async function nativeApi(): Promise<NativeApi | undefined> {
+export async function nativeApi(): Promise<NativeApi | undefined> {
   if (window.pywebview?.api) return window.pywebview.api;
   // A native window may load its static UI before injecting its read-only bridge.
   if (window.location.protocol === 'file:') {

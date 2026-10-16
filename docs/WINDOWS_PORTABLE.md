@@ -2,12 +2,14 @@
 
 O usuário pediu o programa na raiz do OneDrive da secretaria. Esta etapa prepara
 um ZIP executável de teste para essa entrega; não cria release pública, instalador,
-serviço, tarefa de inicialização, login, credencial ou integração de produção.
+serviço, tarefa de inicialização, credencial persistente ou integração de envio.
+A entrada assistida e a leitura manual exigem confirmação do operador;
+veja [limites e QA ainda pendente do login real](MANUAL_SESSION_MILESTONE.md).
 O upload ao OneDrive é uma etapa separada. Um ZIP só de fontes não é o programa.
 
 ## Conteúdo e execução
 
-`ColetorFrequencia-0.1.0-teste-windows-x64.zip` contém `Abrir Coletor.cmd`,
+`ColetorFrequencia-0.4.0-teste-windows-x64.zip` contém `Abrir Coletor.cmd`,
 `LEIA-ME.txt`, `MANIFEST.json`, avisos de licença e a pasta `programa` com runtime,
 bibliotecas, código necessário à execução e UI compilada. O usuário extrai toda
 a pasta e abre o comando. O Python não é instalado globalmente; não há elevação.
@@ -16,7 +18,7 @@ processa o diário em memória e salva somente agenda, tema e preferências da r
 no arquivo próprio do usuário, separado do navegador e do Atualizador.
 Não há instalação automática do WebView2.
 
-Alvo: Windows 10/11 x64 com .NET Framework 4.8 e WebView2. A janela de teste de
+Alvo: Windows 10/11 x64 com .NET Framework 4.8, WebView2 e Microsoft Edge. A janela de teste de
 CI roda no Windows Server 2022 hospedado pelo GitHub: isso não certifica os PCs
 da escola. Python 3.13 foi escolhido pela compatibilidade declarada do pythonnet
 3.0.5; o runtime oficial 3.13.16 está fixado por URL e SHA-256. As dependências
@@ -30,8 +32,15 @@ a UI, a ponte nativa e os dados sintéticos; fecha a janela e limita o tempo/pro
 Também abre quatro processos/janelas sucessivos para testar configurações locais:
 salvar, reabrir, restaurar/reabrir e recuperar corrupção controlada. O teste usa
 pasta temporária e confirma que o arquivo-sentinela de outro aplicativo continua
-intacto. Os três relatórios nativos (janela, persistência e bandeja) precisam passar para criar o ZIP final. O empacotamento
-confere novamente os hashes e inclui apenas o inventário anterior ao teste.
+intacto. Os relatórios nativos (janela, persistência, bandeja e sessão manual) e o teste de
+Edge separado precisam passar para criar o ZIP final. Todos usam fixtures sintéticas. O empacotamento
+também exige as provas de pareamento/acesso/revogação CNG anônimas validadas pelo
+backend congelado na provenance. Isso não comprova TPM nem chave persistente real.
+O pacote 0.4.0 inclui entrada institucional protegida; o backend precisa de
+configuração e validação autorizadas antes do uso. Iniciar não cria chave.
+Os metadados do vínculo são públicos e ficam fora da pasta portátil; senha,
+cookie Microsoft e refresh não são salvos no PC. Veja DEVICE_AUTH_DECISION.md.
+O empacotamento confere novamente os hashes e inclui apenas o inventário anterior ao teste.
 Não empacota diretórios de captura, perfil, dados reais, segredo ou logs.
 
 `MANIFEST.json` informa o commit, versões e SHA-256 de cada arquivo.

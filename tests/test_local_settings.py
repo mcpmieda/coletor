@@ -1,3 +1,4 @@
+from synthetic_access import SyntheticAccess
 from copy import deepcopy
 import json
 import os
@@ -105,9 +106,9 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertFalse((self.root / "ColetorFrequenciaSmecel").exists())
 
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
-        api = DesktopApi(self.directory)
+        api = DesktopApi(self.directory, access=SyntheticAccess())
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["get_desktop_status", "get_local_settings", "hide_window", "load_demo", "preview_html", "save_fox", "save_schedule", "save_theme", "set_tray_context"])
+                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "discard_local_pending_collection", "discard_pending_collection", "discover_manual_classes", "forget_source_credential", "get_collector_history", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_recovery_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_school_collection", "prepare_manual_login", "preview_html", "save_manual_class_selection", "save_schedule", "save_shared_schedule", "save_source_credential", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())
@@ -115,7 +116,7 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertIn("error", api.save_theme("DO_NOT_STORE"))
 
     def test_bridge_errors_do_not_echo_paths_or_inputs(self):
-        api = DesktopApi(self.directory)
+        api = DesktopApi(self.directory, access=SyntheticAccess())
         with patch.object(api._settings, "update", side_effect=OSError("secret/path/DO_NOT_ECHO")):
             result = api.save_theme("dark")
         self.assertNotIn("DO_NOT_ECHO", json.dumps(result))

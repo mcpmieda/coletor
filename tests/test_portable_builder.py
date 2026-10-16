@@ -11,22 +11,38 @@ spec.loader.exec_module(builder)
 
 
 class PortableBuildTests(unittest.TestCase):
+    def test_manual_distribution_gate_rejects_missing_consent_isolation_and_cleanup(self):
+        native = {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
+                  "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
+                  "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"}
+        report = {"status": "passed", "cleanup": {"verified": True, "remaining_processes": 0},
+                  "real_network": False, "real_credentials": False, "checks": {key: True for key in native}}
+        builder.validate_manual_evidence(report)
+        for key in native:
+            report["checks"][key] = False
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Manual"):
+                builder.validate_manual_evidence(report)
+            report["checks"][key] = True
+        report["cleanup"]["remaining_processes"] = 1
+        with self.assertRaisesRegex(ValueError, "Manual"):
+            builder.validate_manual_evidence(report)
+
     def test_tray_proof_cannot_omit_exit_or_motion_checks(self):
         checks = {"native_window_visible", "native_tray_registered", "native_menu_visible",
                   "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
-                  "idle_has_no_timer", "saved_preferences_respected", "native_exit_removed_icon_and_timer", "window_closed",
+                  "idle_has_no_timer", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
                   "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-                  "disabled_animation_stops_native_timer", "cancel_keeps_actual_native_read_truthful",
-                  "discard_blocks_new_reads", "discarded_result_stays_hidden",
-                  "error_state_static_and_generic", "hidden_fox_uses_neutral_icon", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
+                  "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
+                  "error_state_static_and_generic", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops",
+                  "active_collection_close_hides"}
         report = {"test":"portable_windows_tray", "status":"passed", "cleanup":{"verified":True,"remaining_processes":0},
                   "only_nonsecret_settings_retained":True, "workers":[{"scenario":s,"status":"passed","cleanup":{"verified":True,"remaining_processes":0},"checks":{k:True for k in checks}} for s in ("quit","close")]}
         builder.validate_tray_evidence(report)
-        for name in ("native_exit_removed_icon_and_timer","reduced_motion_stops_native_timer","native_tray_registered"):
+        for index, name in ((0,"native_exit_removed_icon_and_timer"),(0,"reduced_motion_stops_native_timer"),(0,"native_tray_registered"),(1,"active_collection_close_hides")):
             with self.subTest(name=name):
-                report["workers"][0]["checks"][name]=False
+                report["workers"][index]["checks"][name]=False
                 with self.assertRaisesRegex(ValueError,"tray"): builder.validate_tray_evidence(report)
-                report["workers"][0]["checks"][name]=True
+                report["workers"][index]["checks"][name]=True
         report["cleanup"]["remaining_processes"]=1
         with self.assertRaisesRegex(ValueError,"tray"): builder.validate_tray_evidence(report)
 

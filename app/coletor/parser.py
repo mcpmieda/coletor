@@ -245,7 +245,7 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
             issue("STUDENT_NAME_MISSING", "O nome de exibição da ficha não foi encontrado.", ref)
         # Only display_name is kept. Birth dates, parents and enrollment dates
         # deliberately never enter the result, payload or diagnostics.
-        students.append(Student(ref, name, None))
+        students.append(Student(ref, name, None, class_label))
         if synthetic and class_label != class_id:
             issue("CLASS_MISMATCH", "O rótulo da turma de uma ficha difere da turma solicitada.", ref)
         titles = [node for node in _direct(card, "p") if _has_class(node, "ls-txt-center")]
