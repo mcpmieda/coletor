@@ -16,3 +16,5 @@ Documentação complementar: docs/WINDOWS_INSTALLER.md.
 ## Branch protegida e cinco versões
 
 Após CI Windows aprovado, o publicador guarda o `.exe` e seu `.sha256` em um GitHub Release permanente, mantendo até cinco releases desse tipo. Para atualizar os binários Git LFS desta pasta, ele abre uma PR da branch `automation/instalador-*`, dispara explicitamente `verify` e `windows-portable` com `workflow_dispatch`; um job separado tenta integrá-la **somente após os dois checks aprovarem**. A proteção de `main` permanece válida. Se a proteção não permitir o merge pelo bot, o release já está disponível e a PR aguarda revisão humana. Merges que alteram apenas `instalador/` não criam outro release.
+
+**Permissão do GitHub Actions:** para abrir a PR sem intervenção humana, um administrador deve ativar **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests** (se a política da organização permitir). Sem essa permissão, o publicador grava o release verificável e envia a branch Git LFS, mas relata um aviso e deixa a PR pendente para criação por um mantenedor. Isso não altera a proteção da `main`.
