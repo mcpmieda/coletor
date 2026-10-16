@@ -176,6 +176,29 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(self.runtime._school_paused)
         self.assertIsNone(self.runtime._lease)  # Idle polling never takes school leadership.
 
+    def test_eligible_leader_heartbeats_but_known_source_failure_releases_leadership(self):
+        current = datetime.fromtimestamp(NOW, timezone.utc).astimezone(
+            __import__('zoneinfo').ZoneInfo('America/Bahia'))
+        rules = schedule()
+        rule = next(r for r in rules['rules'] if r['weekday'] == (current.weekday()+1)%7)
+        rule['enabled'] = True
+        rule['times'] = ['00:00' if current.strftime('%H:%M') != '00:00' else '00:01']
+        self.provider.shared_schedule = rules
+        self.runtime.tick()
+        operations = [p['operation'] for p in self.provider.requests]
+        self.assertIn('heartbeat', operations)
+        self.assertEqual(operations.count('lease'), 1)
+        self.runtime._source_blocked = True
+        self.provider.now += 121
+        self.runtime.tick()
+        self.assertEqual(sum(p['operation']=='lease' for p in self.provider.requests), 1)
+
+    def test_newly_selected_source_clears_no_selection_block(self):
+        self.runtime._code, self.runtime._state = 'NO_SELECTED_CLASSES', 'error'
+        self.runtime.source_ready()
+        self.assertIsNone(self.runtime._code)
+        self.assertEqual(self.runtime._state, 'reserve')
+
     def test_idle_scheduler_and_blocked_source_never_take_school_leadership(self):
         self.runtime.tick()
         self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
