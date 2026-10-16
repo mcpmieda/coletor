@@ -16,7 +16,7 @@ from coletor.history import CollectorHistory, RETENTION_SECONDS
 from coletor.manual_session import SOURCE_ORIGIN, ManualSession, SessionError
 from coletor.protected_storage import ProtectedStorage, StorageError
 from coletor.resume_store import ResumeStore
-from coletor.tray_winforms import tray_text
+from coletor.tray_winforms import hides_on_close, tray_text
 from synthetic_access import SyntheticAccess
 import test_frequency_runtime as base
 
@@ -191,6 +191,15 @@ class TrayAndResumeTests(unittest.TestCase):
         self.assertEqual(tray_text(None, 'error'), 'Coletor · Coleta desligada · Arquivo precisa de atenção')
         for state in ('ready', 'reserve', 'collecting', 'paused', 'login-required', 'error'):
             self.assertLessEqual(len(tray_text({'active': True, 'state': state}, 'idle')), 63)
+
+    def test_window_close_keeps_an_active_collection_beside_the_clock(self):
+        active = {'active': True, 'state': 'ready'}
+        self.assertTrue(hides_on_close(True, False, active, True))
+        self.assertFalse(hides_on_close(True, True, active, True))  # Sair in the tray menu.
+        self.assertFalse(hides_on_close(False, False, active, True))  # Windows shutdown or logoff.
+        self.assertFalse(hides_on_close(True, False, {'active': False, 'state': 'connect'}, True))
+        self.assertFalse(hides_on_close(True, False, None, True))
+        self.assertFalse(hides_on_close(True, False, active, False))  # No icon to come back from.
 
     def test_resume_flag_follows_activation_and_pause(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)

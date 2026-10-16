@@ -16,6 +16,14 @@ def tray_text(collector, activity):
     return "Coletor · Coleta desligada · " + TEXT[activity]
 
 
+def hides_on_close(user_closing, quitting, collector, registered):
+    """The window's X keeps an active collection running beside the clock.
+
+    Sair in the tray menu, Windows shutdown/logoff and an inactive collector close normally.
+    """
+    return bool(user_closing and not quitting and registered and collector and collector.get("active"))
+
+
 class WindowsFormsTray:
     def __init__(self, window, state):
         self._window, self._form, self._state = window, window.native, state
@@ -27,6 +35,7 @@ class WindowsFormsTray:
         self._disposed = False
         self._last_icon = None
         self._frame_updates = 0
+        self._quitting = self._told_hidden = False
 
     def _invoke(self, callback):
         from System import Action
@@ -87,6 +96,7 @@ class WindowsFormsTray:
             self._poll.Start()
             self._refresh()
             self._notify.Visible = True
+            self._form.FormClosing += self._closing
             self._form.FormClosed += self._closed
             self._form.VisibleChanged += self._visibility_changed
             self._form.Resize += self._visibility_changed
@@ -123,12 +133,12 @@ class WindowsFormsTray:
     def _poll_tick(self, *_):
         if not self._disposed and self._notify is not None: self._update_text()
 
-    def notify(self, title, text):
+    def notify(self, title, text, icon="Warning"):
         """Balloon beside the clock; clicking it opens the window."""
         def show():
             from System.Windows.Forms import ToolTipIcon
             if self._disposed or self._notify is None: return
-            self._notify.ShowBalloonTip(10000, title, text, ToolTipIcon.Warning)
+            self._notify.ShowBalloonTip(10000, title, text, getattr(ToolTipIcon, icon))
         try: self._invoke(show)
         except Exception: pass
 
@@ -182,8 +192,20 @@ class WindowsFormsTray:
         self._invoke(lambda: result.append(bool(self._registration_field.GetValue(self._notify))))
         return bool(result and result[0])
 
+    def _closing(self, sender, event):
+        from System.Windows.Forms import CloseReason
+        if self._disposed or event.Cancel: return
+        if not hides_on_close(event.CloseReason == CloseReason.UserClosing, self._quitting,
+                              self._collector_status(), self._registration_field.GetValue(self._notify)): return
+        event.Cancel = True
+        self._form.Hide()
+        if not self._told_hidden:
+            self._told_hidden = True
+            self.notify("Coletor de Frequência", "A coleta continua. Para encerrar, use Sair neste ícone.", "Info")
+
     def _quit(self, *_):
         if self._disposed: return
+        self._quitting = True
         self._dispose()
         self._form.Close()
 
@@ -198,6 +220,7 @@ class WindowsFormsTray:
         # pythonnet event delegates retain Python objects after Dispose unless
         # detached explicitly. Release every subscription before CLR shutdown.
         def detach_events():
+            self._form.FormClosing -= self._closing
             self._form.FormClosed -= self._closed
             self._form.VisibleChanged -= self._visibility_changed
             self._form.Resize -= self._visibility_changed

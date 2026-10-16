@@ -235,7 +235,7 @@ def package_zip(output, evidence, settings_evidence=None, tray_evidence=None, ma
     manifest['frequency_v2_smoke'] = 'bundled-native-dpapi-and-operational-regressions'
     manifest["institutional_activation"] = "pending-backend-configuration-and-authorized-tenant-validation"
     manifest["persistent_key_qa"] = "not-proven; requires-explicit-human-activation"
-    manifest["tray_scope"] = "same-window-show-hide-exit; operational-activity; no-autostart"
+    manifest["tray_scope"] = "same-window-show-hide-exit; operational-activity; close-hides-while-collecting; portable-no-autostart"
     manifest["local_settings"] = "nonsecret-preferences; dpapi-session-and-queue-only-with-native-consent; shared-server-agenda"
     for item in manifest["files"]:
         p = bundle / item["path"]

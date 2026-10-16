@@ -23,7 +23,7 @@
 - Falha, diário incompleto ou símbolo desconhecido não gera deleção nem presença.
 - Não há execução automática ao iniciar Windows, serviço ou instalação.
   A bandeja WinForms controla apenas a janela e mostra estados da leitura local.
-  Fechar pelo X ou Sair encerra a sessão; não agenda nem executa coleta.
+  Com a coleta ativa, o X esconde a janela; Sair encerra o programa.
 
 Antes de piloto: revisão de ameaça do perfil autenticado, cofre OS, transporte,
 revogação de dispositivo, lease/fencing, retenção mínima e controles por aluno;
@@ -38,4 +38,5 @@ A seleção de turmas da versão0.3 usa arquivo separado class-selection.json.
 Só contém IDs de turmas,ano/contexto não secreto e revisão. Toda nova sessão e
 captura exige listagem atual; escolhas ausentes não são revogadas nem autorizam
 leitura. Veja CLASS_DISCOVERY_EVIDENCE.md. Senhas/cookies/tokens continuam fora
-das preferências. A origem e o proxy/TLS não foram ampliados.
+das preferências. O acesso Smecel salvo é opcional, cifrado por DPAPI do usuário,
+nunca volta à janela (só a conta mascarada) e é apagado ao sair da conta. A origem e o proxy/TLS não foram ampliados.

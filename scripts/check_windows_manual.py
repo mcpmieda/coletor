@@ -113,7 +113,7 @@ def worker(args):
             smoke.wait_js(window, '!!window.pywebview?.api.prepare_manual_login && '+year_ready)
             checks['prepared_without_browser']=not drivers
             checks['opening_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Entrar no Smecel')?.disabled===true")
-            controls.checkbox(window,'Autorizo abrir o Smecel e ler a lista de turmas deste ano, sem envio.')
+            controls.checkbox(window,'Autorizo abrir o Smecel neste computador.')
             controls.click(window,'Entrar no Smecel')
             smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Carregar turmas'&&!n.disabled)",50)
             checks['separate_edge_started']=len(drivers)==1 and drivers[0]._process is not None
@@ -131,7 +131,7 @@ def worker(args):
             controls.click(window,'Encerrar sessão e descartar prévia')
             smoke.wait_js(window,year_ready)
             progress.unlink(missing_ok=True)
-            controls.checkbox(window,'Autorizo abrir o Smecel e ler a lista de turmas deste ano, sem envio.')
+            controls.checkbox(window,'Autorizo abrir o Smecel neste computador.')
             controls.click(window,'Entrar no Smecel')
             smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Carregar turmas'&&!n.disabled)",50)
             deadline=time.monotonic()+20
@@ -142,7 +142,7 @@ def worker(args):
             stored=json.loads((args.output.parent/'settings/class-selection.json').read_text(encoding='utf-8'))
             checks['selection_persisted_and_revalidated']=stored['profiles'][0]['selected_class_ids']==['11'] and set(stored)=={'schemaVersion','localRevision','profiles'}
             checks['reading_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Ler diário manualmente')?.disabled===true")
-            consent='Autorizo ler o diário desta turma e deste ano para uma prévia local, sem envio.'
+            consent='Autorizo ler este diário só para conferir aqui.'
             controls.checkbox(window,consent)
             controls.click(window,'Ler diário manualmente')
             smoke.wait_js(window,"document.body.textContent.includes('Prévia da turma') && document.body.textContent.includes('Leitura manual do Smecel')")

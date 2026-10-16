@@ -49,7 +49,7 @@ try:
         page.screenshot(path=str(out / 'revocation-pending.png'), full_page=True)
         page.evaluate("window.__fixture.code=undefined")
         page.evaluate("window.__fixture.authorized=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
-        expect(page.get_by_role("button", name="Usar dados de exemplo")).to_be_visible()
+        expect(page.get_by_role("heading", name="Coleta da frequência")).to_be_visible()
         assert page.evaluate("window.__fixture.settingsCalls") > 0
         settings_calls = page.evaluate("window.__fixture.settingsCalls")
         status_calls = page.evaluate("window.__fixture.statusCalls")

@@ -2,10 +2,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test } from 'vitest';
 import FoxCompanion from './FoxCompanion';
 
-test('fox is optional, keyboard reachable, and has explicit animation controls', () => {
+test('fox is always shown, keyboard reachable, and has no on/off controls', () => {
   const html = renderToStaticMarkup(<FoxCompanion activity="idle" />);
   expect(html).toContain('Fazer carinho na raposa');
-  expect(html).toContain('Mostrar raposa');expect(html).toContain('Animar raposa');
+  expect(html).not.toContain('Mostrar raposa');expect(html).not.toContain('Animar raposa');
+  expect(html).not.toContain('type="checkbox"');
   expect(html).toContain('alt="Raposa vermelha, mascote do coletor"');
 });
 test('captions never report a remote collection or synchronization', () => {

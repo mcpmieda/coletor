@@ -21,7 +21,8 @@ ENTRAR E PREPARAR
    A chave fica protegida pelo Windows; TPM é padrão. Software exige outra confirmação.
    A senha e os tokens Microsoft não ficam no Coletor.
 3. Use Entrar no Smecel e faça o login diretamente na janela separada do Edge.
-   Não informe senha no Coletor e não use seu perfil pessoal do Edge.
+   Não use seu perfil pessoal do Edge. Para a coleta entrar sozinha, salve o
+   e-mail e a senha do Smecel em Acesso ao Smecel; ficam protegidos pelo Windows.
 4. Clique Carregar turmas e selecione as turmas pelos nomes observados na lista.
    Escolhas ficam salvas por ano/contexto e são revalidadas a cada captura.
 5. Use Ativar coleta neste computador.
@@ -34,7 +35,8 @@ Um computador autorizado recebe a concessão para coletar; os demais são reserv
 Os horários são compartilhados pela escola e vêm do servidor. Uma edição concorrente
 pede recarregar e comparar. Não há recuperação automática de horários perdidos.
 Pausar neste computador interrompe só este PC. Pausar para a escola vale para todos.
-Sessão Smecel expirada pede reconectar e carregar as turmas; não repete login em loop.
+Sessão Smecel expirada: com acesso salvo, o Coletor entra sozinho uma vez por coleta;
+senha recusada ou sem acesso salvo, um aviso ao lado do relógio pede entrar no Smecel.
 A nova aba Frequência, dentro de Importação do Ecossistema, acompanha computadores,
 coletas, agenda, pausas, pendências de identidade e conflitos.
 Uma coleta só aparece como recebida depois da confirmação do servidor.
@@ -61,9 +63,9 @@ O Atualizador de Planilhas, suas chaves e seus arquivos não são alterados.
 
 Bandeja: Mostrar janela, Ocultar janela e Sair. Clique ou duplo clique mostra a janela.
 O ícone pode ficar entre ícones ocultos. Ocultar mantém o Coletor aberto e sua agenda.
-Fechar pelo X ou Sair encerra o programa e seus processos próprios.
-A raposa informa atividade real; movimento reduzido e preferências são respeitados.
-Não há autostart: após ligar o computador, abra e ative o Coletor conscientemente.
+Com a coleta ativa, o X esconde a janela; Sair encerra o programa e seus processos.
+A raposa informa atividade real e fica parada com movimento reduzido.
+O pacote portátil não abre com o Windows; o instalador oferece essa opção.
 Sair da conta interrompe trabalho, limpa sessão/fila locais e retira o vínculo do PC.
 
 ANTES DE REMOVER A PASTA PORTÁTIL

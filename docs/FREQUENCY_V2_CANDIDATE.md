@@ -11,7 +11,10 @@ Login Ecossistema, autorização nativa da chave Windows, login Smecel diretamen
 no Edge, carregar turmas, seleção por nomes e ativar coleta. A agenda vem do
 servidor e é compartilhada por escola/ano com revisão CAS. O rascunho local de
 desenvolvimento nunca serve como agenda do runtime Windows. Tema, raposa e
-seleções sem alunos continuam locais. Não há autostart, tarefa ou serviço.
+seleções sem alunos continuam locais. Sem tarefa ou serviço: o instalador
+oferece (marcado) um atalho na pasta Inicializar que abre o Coletor ao lado do
+relógio, e a coleta ativa é retomada ao reabrir. Histórico operacional sem
+nomes de alunos fica neste PC por 30 dias.
 
 Um processo por perfil do Windows, com lock liberado pelo SO. Um dispositivo
 ativo por escola/ano, por concessão do banco; os outros ficam de reserva. Lease
@@ -22,7 +25,9 @@ sem consultar seu recibo original. Não há coleta sobreposta ou replay de horá
 perdidos. IANA vem de tzdata fixado no pacote, inclusive fins de semana opcionais.
 
 Pausa local interrompe o trabalho deste PC; pausa escolar é CAS no servidor.
-Sessão Smecel expirada exige reconexão humana, sem reabrir login a cada timer.
+Sessão Smecel expirada: com o acesso salvo (DPAPI, só leitura pelo worker), o
+Coletor entra sozinho uma vez por coleta; senha recusada para a coleta até o
+acesso ser corrigido, com aviso ao lado do relógio, sem tentar em loop.
 Lista/contexto/ano e diário/URL exatos são revalidados antes de cada captura.
 Não se seguem vínculos de alunos para buscar identidade. Contexto observado não
 é prova criptográfica de identidade da conta Smecel.

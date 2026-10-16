@@ -24,18 +24,14 @@ try:
         page.goto(url)
         page.get_by_role('heading', name='Vamos conferir a frequência?').wait_for()
         version = json.loads((root / 'ui/package.json').read_text(encoding='utf-8'))['version']
-        expect(page.get_by_text(f'Versão de teste · {version}', exact=True)).to_be_visible()
+        expect(page.get_by_text(f'Versão {version}', exact=True)).to_be_visible()
         fox = page.get_by_role('img', name='Raposa vermelha, mascote do coletor')
         fox.wait_for()
         expect(fox).to_have_js_property('complete', True)
         assert fox.evaluate('img => img.complete && img.naturalWidth > 0'), 'Missing fox sprite'
         assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
         assert page.locator('.fox-button').evaluate('el => getComputedStyle(el).animationName') == 'none'
-        page.get_by_role('checkbox', name='Mostrar raposa', exact=True).uncheck()
-        assert fox.count() == 0
-        page.reload()
-        assert page.get_by_role('img', name='Raposa vermelha, mascote do coletor').count() == 0
-        page.get_by_role('checkbox', name='Mostrar raposa', exact=True).check()
+        assert page.get_by_role('checkbox', name='Mostrar raposa').count() == 0
         page.emulate_media(reduced_motion='no-preference')
         page.locator('.fox-stage[data-motion=on]').wait_for()
         expect(fox).to_have_js_property('complete', True)
@@ -44,9 +40,6 @@ try:
         assert page.locator('.fox-stage').get_attribute('data-action') == 'pet'
         expect(page.locator('.fox-stage')).to_have_attribute('data-pose', 'happy')
         assert len(atlas_requests) == atlas_count, 'Sprite animation fetched another image'
-        page.get_by_role('checkbox',name='Animar raposa',exact=True).uncheck()
-        assert page.locator('.fox-stage').get_attribute('data-motion') == 'off'
-        page.get_by_role('checkbox',name='Animar raposa',exact=True).check()
         page.emulate_media(reduced_motion='reduce')
         page.locator('.fox-stage[data-motion=off]').wait_for()
         assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()") == '#a32743'
@@ -87,13 +80,8 @@ try:
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'demo-dark.png'), full_page=True, animations='disabled')
-        page.get_by_role('button', name='Próximos passos', exact=True).click()
-        page.get_by_role('heading', name='Antes de começar').wait_for()
-        assert page.get_by_text('Organizar os computadores', exact=True).is_visible()
-        assert page.get_by_text('Um computador coleta por vez. Os demais computadores autorizados ficam de reserva.', exact=False).is_visible()
-        page.mouse.move(0, 0)
-        page.evaluate('window.scrollTo(0, 0)')
-        page.screenshot(path=str(out/'roadmap-dark.png'), full_page=True, animations='disabled')
+        page.get_by_role('button', name='Horários de coleta', exact=True).click()
+        page.get_by_role('heading', name='Dias e horários').wait_for()
         page.get_by_role('button', name='Conferir frequência', exact=True).click()
         page.get_by_role('heading', name='Prévia da turma').wait_for()
         page.get_by_role('button', name='Fechar diário').click()
@@ -135,7 +123,7 @@ try:
         monday = page.get_by_label('Buscar frequência Segunda-feira Manhã', exact=True)
         assert monday.input_value().startswith('08:15')
         monday.fill('08:30')
-        page.get_by_role('button', name='Próximos passos', exact=True).click()
+        page.get_by_role('button', name='Conferir frequência', exact=True).click()
         page.get_by_role('button', name='Horários de coleta', exact=True).click()
         assert monday.input_value() == '08:30', 'Draft lost on navigation'
         page.get_by_role('button', name='Desfazer alterações', exact=True).click()
@@ -157,11 +145,6 @@ try:
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
         page.screenshot(path=str(out/'schedule-light.png'), full_page=True, animations='disabled')
-        page.get_by_role('button', name='Próximos passos', exact=True).click()
-        page.mouse.move(0, 0)
-        page.evaluate('window.scrollTo(0, 0)')
-        page.screenshot(path=str(out/'roadmap-light.png'), full_page=True, animations='disabled')
-        page.get_by_role('button', name='Horários de coleta', exact=True).click()
         page.set_viewport_size({'width':390,'height':844})
         page.mouse.move(0, 0)
         page.evaluate('window.scrollTo(0, 0)')
@@ -255,7 +238,7 @@ try:
         recovery_page.close()
         assert not errors,errors
         print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion; schedule reload preserves recovery notice and blocks editing/saving until completion.')
-        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','roadmap return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox preference persists','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','fox animation toggle','roadmap screenshots in both themes','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
+        print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','view return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox always shown','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:
     server.shutdown(); server.server_close(); thread.join()

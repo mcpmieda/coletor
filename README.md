@@ -5,7 +5,9 @@ Coletor de frequência escolar para integração com o Ecossistema Escolar.
 A versão 0.4 é candidata operacional para revisão junto do backend Ecossistema.
 Implementa entrada Microsoft e vínculo revogável do PC, coleta manual/agendada,
 computador ativo e reservas, agenda escolar compartilhada, fila e sessão Smecel
-protegidas pelo Windows mediante consentimento nativo. Não cria autostart.
+protegidas pelo Windows mediante consentimento nativo. Pelo instalador, abre com o
+Windows ao lado do relógio, entra sozinho no Smecel com o acesso salvo e guarda
+o histórico de operação deste computador por 30 dias.
 
 O operador entra no Smecel diretamente no Edge, carrega as turmas e marca nomes.
 Cada captura revalida contexto/ano/turma e usa o worker isolado. O envio assinado
@@ -28,9 +30,10 @@ merge, deploy ou DDL produtivo é executado pelos testes. Consulte o
 
 Mascote escolhido pelo usuário, com quadros próprios e ações discretas: piscar,
 orelhas, cauda, curiosidade, pulinho, passeio, descanso e carinho. Reage apenas ao
-processamento local e aos avisos reais. Pode ser ocultado ou ficar estático; respeita
-movimento reduzido e pausa com a aba oculta. A bandeja Windows mostra estados reais locais e controla mostrar/ocultar a mesma
-janela e sair. Fechar pelo X também encerra o programa. Não cria autostart ou agente.
+processamento local e aos avisos reais. Fica sempre visível; com movimento reduzido
+fica estático e pausa com a janela oculta. A bandeja Windows mostra o estado da coleta
+e controla mostrar/ocultar a mesma janela e sair. Com a coleta ativa, o X esconde a
+janela ao lado do relógio; Sair, no menu do ícone, encerra o programa.
 
 ## Agenda pré-configurada e editável
 
@@ -41,14 +44,18 @@ No Windows, Horários de coleta carrega e salva a revisão compartilhada da esco
 ### Instalador Windows 0.4 (candidato interno)
 
 O CI também produz um instalador **.exe** para Windows 10/11 x64, por usuário,
-sem exigir administrador ou criar inicialização automática. Cria atalho no
+sem exigir administrador. A opção Abrir o Coletor ao entrar no Windows vem
+marcada: cria só um atalho na pasta Inicializar do usuário (sem serviço ou
+tarefa agendada); desmarcada, o atalho é removido. Cria atalho no
 menu Iniciar (e opcionalmente na área de trabalho); conserva a raposa, a
 bandeja, a interface e as operações do portátil. A janela abre centralizada
 no monitor principal. O pacote `windows-installer-candidate` só é publicado
 depois de testes Windows nativos e instalação/desinstalação reais em pasta
 descartável. Ele ainda depende da homologação Microsoft/TPM/Smecel e do
-backend da PR #1293 antes de uso produtivo. O executável do Coletor ainda
-não tem assinatura digital própria; não contorne avisos de segurança.
+backend da PR #1293 antes de uso produtivo. O instalador é assinado quando
+os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
+existem; certificado autoassinado identifica a escola, mas não remove o aviso
+do SmartScreen em outros computadores. Não contorne avisos de segurança.
 
 Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
 `installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador

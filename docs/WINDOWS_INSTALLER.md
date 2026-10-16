@@ -8,8 +8,13 @@ A PR #7 passa a produzir dois formatos após os mesmos gates de segurança:
 O instalador utiliza Inno Setup **6.7.3** obtido do lançamento oficial, e
 o CI exige a assinatura Authenticode válida do fornecedor **Pyrsys B.V.**
 antes de executar o compilador. Verifique a licença correspondente para uso
-comercial. O executável do Coletor gerado por nós **não está assinado**
-digitalmente; a assinatura do compilador não equivale à do produto.
+comercial. O instalador é assinado por `installer/sign-installer.ps1` quando
+os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
+existem (sem eles, sai sem assinatura e o CI avisa). Um certificado
+autoassinado (`installer/new-signing-certificate.ps1`) identifica a escola e
+prova integridade, mas não remove o SmartScreen; isso exige certificado de
+autoridade reconhecida. O programa roda no `pythonw.exe` oficial, assinado
+pela Python Software Foundation.
 
 ## Conteúdo e instalação
 
@@ -19,7 +24,10 @@ no pacote portátil. Não inclui sessões Smecel, tokens, diários ou contas.
 
 Instala apenas no perfil atual em
 `%LOCALAPPDATA%\Programs\ColetorFrequenciaSmecel`, sem UAC,
-sem autostart, serviço Windows ou tarefa agendada.
+serviço Windows ou tarefa agendada. A opção **Abrir o Coletor ao entrar no
+Windows** vem marcada e cria só um atalho em `{userstartup}` que abre o
+programa ao lado do relógio (`--background`); desmarcada, o atalho é
+removido. Reabrir com a coleta ativa retoma a coleta sozinho.
 Cria entrada no menu Iniciar e pode criar atalho na área de trabalho.
 A janela abre centralizada na área útil do monitor principal e utiliza
 o mesmo ícone de raposa da bandeja.

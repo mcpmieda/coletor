@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { defaultSchedule, readSchedule, saveSchedule, validateSchedule, type SchoolSchedule } from './schedule';
-import { DEFAULT_FOX, FOX_KEY, readFoxPreferences, type FoxPreferences } from './mascot/preferences';
+import { DEFAULT_FOX, type FoxPreferences } from './mascot/preferences';
 import type { ThemeMode } from './theme';
 
 export interface LocalSettings { schemaVersion: 1; schedule: SchoolSchedule | null; theme: ThemeMode; fox: FoxPreferences }
@@ -9,7 +9,6 @@ export interface SettingsBridge {
   get_local_settings(): Promise<Reply>;
   save_schedule(schedule: SchoolSchedule): Promise<Reply>;
   save_theme(theme: ThemeMode): Promise<Reply>;
-  save_fox(fox: FoxPreferences): Promise<Reply>;
 }
 let nativeMode = false;
 let bridge: SettingsBridge | undefined;
@@ -60,10 +59,6 @@ export function readLocalTheme(): ThemeMode {
   try { const value = localStorage.getItem('smecel-collector:theme:v1'); return value === 'light' || value === 'dark' ? value : 'system'; }
   catch { return 'system'; }
 }
-export function readLocalFox(): FoxPreferences {
-  if (nativeMode) return { ...cached.fox };
-  try { return readFoxPreferences(window.localStorage); } catch { return { ...DEFAULT_FOX }; }
-}
 export function readLocalSchedule() {
   if (nativeMode) return { config: cached.schedule ?? defaultSchedule(), notice };
   return readSchedule(window.localStorage);
@@ -88,10 +83,6 @@ export async function saveLocalSchedule(config: SchoolSchedule): Promise<SchoolS
 export async function saveLocalTheme(theme: ThemeMode) {
   if (nativeMode) await persist(api => api.save_theme(theme));
   else localStorage.setItem('smecel-collector:theme:v1', theme);
-}
-export async function saveLocalFox(fox: FoxPreferences) {
-  if (nativeMode) await persist(api => api.save_fox(fox));
-  else localStorage.setItem(FOX_KEY, JSON.stringify(fox));
 }
 
 

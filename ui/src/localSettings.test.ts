@@ -12,7 +12,6 @@ test('native startup reads preferences before UI initial state, without HTTP or 
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   const local = await import('./localSettings'); await local.initializeLocalSettings();
   expect(local.readLocalTheme()).toBe('dark');
-  expect(local.readLocalFox().show).toBe(false);
   expect(local.readLocalSchedule().config.rules[0].times[0]).toBe('08:15');
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -51,16 +50,14 @@ test('invalid saved IANA timezone falls back visibly without overwriting disk', 
   expect(save).not.toHaveBeenCalled();
 });
 
-test('native theme and fox use explicit preference methods, never a generic file API', async () => {
+test('native theme uses its explicit preference method, never a generic file API', async () => {
   const saveTheme = vi.fn().mockResolvedValue({ settings: { ...defaults(), theme: 'dark' } });
-  const saveFox = vi.fn().mockResolvedValue({ settings: { ...defaults(), theme: 'dark', fox: { version:1, show:false, animate:false } } });
   vi.stubGlobal('window', { location: { hash: '#coletor-desktop' }, pywebview: { api: {
-    get_local_settings: async () => ({ settings: defaults() }), save_theme: saveTheme, save_fox: saveFox
+    get_local_settings: async () => ({ settings: defaults() }), save_theme: saveTheme
   } } });
   const local = await import('./localSettings'); await local.initializeLocalSettings();
-  await local.saveLocalTheme('dark'); await local.saveLocalFox({ version:1, show:false, animate:false });
+  await local.saveLocalTheme('dark');
   expect(saveTheme).toHaveBeenCalledWith('dark');
-  expect(saveFox).toHaveBeenCalledWith({ version:1, show:false, animate:false });
 });
 
 test('rapid native preference writes remain ordered and a failed write does not block later saves', async () => {

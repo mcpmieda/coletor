@@ -6,14 +6,19 @@ login no Smecel e aprovação da implantação do backend correspondente.
 
 INSTALAR
 1. Abra ColetorFrequencia-0.4.0-windows-x64-setup-candidato.exe.
-2. Escolha a pasta e, se desejar, marque o atalho na área de trabalho.
+2. Escolha a pasta. "Abrir o Coletor ao entrar no Windows" vem marcado;
+   o atalho na área de trabalho é opcional.
 3. Use Coletor de Frequência no menu Iniciar para abrir o programa.
 4. Não é necessário instalar Python nem possuir permissões de administrador.
 5. O computador precisa de Windows 10/11 x64, Edge, WebView2 e .NET 4.8.
 
 DURANTE O USO
-- O programa não é iniciado automaticamente com o Windows.
-- Conexão, autorização e sessão do Smecel são operações explícitas.
+- Com a opção marcada, o Coletor abre com o Windows ao lado do relógio.
+- Com a coleta ativa, fechar a janela pelo X a esconde ao lado do relógio.
+  Para encerrar, use Sair no menu do ícone.
+- O e-mail e a senha do Smecel podem ser salvos em Acesso ao Smecel,
+  protegidos pelo Windows deste usuário. Sair da conta apaga o acesso salvo.
+- Conexão e autorização do computador são operações explícitas.
 - Sessão e fila podem ser protegidas por DPAPI mediante confirmação nativa.
 - A agenda e as pausas compartilhadas dependem do servidor da escola.
 - A janela abre no centro da área útil do monitor principal.
@@ -34,8 +39,8 @@ arquivos de chave ou perfis para forçar o processo.
 
 Não distribua como versão produtiva sem teste real e autorizado do Microsoft
 Entra, TPM, Smecel, envio assinado, recibos e troca de computador ativo.
-O instalador do aplicativo ainda não possui assinatura digital própria.
-Se o Windows bloquear a execução, não desative proteções: peça orientação.
+Se o Windows avisar sobre o editor do instalador, não desative proteções:
+peça orientação.
 
 O pacote é validado por CI em Windows com dados inteiramente sintéticos.
 Consulte a PR #7 do repositório coletor-frequencia-smecel para as evidências.

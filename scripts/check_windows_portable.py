@@ -96,7 +96,7 @@ def synthetic_institutional_access(authorized=True, shared_fixture=None):
     return access
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 EXPECTED_NAMES = [f"Aluno sintético {number:03}" for number in range(1, 4)]
-LABELS = ["Conferir frequência", "Coleta autorizada", "Prévia da turma",
+LABELS = ["Coleta da frequência", "Prévia da turma",
           "Alunos no diário", "Este exemplo usa alunos fictícios.",
           "Nenhum dado foi enviado", "• não confirma presença", "Envio desativado"]
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",
