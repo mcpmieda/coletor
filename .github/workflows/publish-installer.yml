@@ -1,0 +1,108 @@
+name: Publish tested Windows installer
+
+# The upstream Preview checks on main compiles an Inno Setup installer, then
+# really installs/uninstalls it in Windows. Publish ONLY its successful artifact.
+# workflow_run exists only on the default branch, so this activates upon PR #7 merge.
+on:
+  workflow_run:
+    workflows: ["Preview checks"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-installer-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
+      UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+      UPSTREAM_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout protected main without downloading older installers
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: true # Only this publish workflow can push.
+          lfs: false
+
+      - name: Ensure this was the latest source commit
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "$UPSTREAM_SHA" ]]; then
+            echo 'A newer commit already landed on main; skip obsolete installer.'
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the exact successful upstream installer artifact
+        if: steps.current.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/windows-installer-artifact"
+          gh run download "$UPSTREAM_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name windows-installer-candidate --dir "$RUNNER_TEMP/windows-installer-artifact"
+
+      - name: Validate PE and SHA256, publish and rotate to five builds
+        if: steps.current.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/publish_windows_installer.py \
+            --repository . --artifact-dir "$RUNNER_TEMP/windows-installer-artifact" \
+            --head-sha "$UPSTREAM_SHA" --run-id "$UPSTREAM_RUN_ID" \
+            --run-number "$UPSTREAM_RUN_NUMBER"
+
+      - name: Commit validated installer through Git LFS
+        if: steps.current.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs version
+          git lfs install --local
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- instalador/
+          if git diff --cached --quiet; then
+            echo 'No changes: this build was already published.'
+            exit 0
+          fi
+          # Fail closed if the actual EXE has been committed to Git instead of LFS.
+          for installer in instalador/*.exe; do
+            if [[ "$(git check-attr filter -- "$installer")" != "$installer: filter: lfs" ]]; then
+              echo "Missing Git LFS tracking for $installer" >&2
+              exit 1
+            fi
+            # The staged Git blob must be a small LFS pointer, never the binary.
+            if [[ "$(git show ":$installer" | head -n 1)" != 'version https://git-lfs.github.com/spec/v1' ]]; then
+              echo "Git blob is not an LFS pointer: $installer" >&2
+              exit 1
+            fi
+          done
+          # A newer merge between checkout and push must not be overwritten.
+          git fetch origin main
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            echo 'main moved; refusing to publish a stale artifact.' >&2
+            exit 1
+          fi
+          git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER [skip ci]"
+          git push origin HEAD:main

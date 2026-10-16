@@ -26,6 +26,7 @@ profiles/
 *.p12
 *.key
 *.exe
+!instalador/*.exe
 *.msi
 
 # Deterministic generated fixture; source is app/coletor/demo.py.
