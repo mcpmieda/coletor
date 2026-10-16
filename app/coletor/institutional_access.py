@@ -126,12 +126,15 @@ class InstitutionalAccess:
             raise AccessDenied("ACCESS_UNAVAILABLE") from None
 
     def _invalidate(self, code='ACCESS_REQUIRED'):
+        transient = code == 'ACCESS_UNAVAILABLE'
         with self._lock:
-            self._generation += 1
+            # A concurrent transient heartbeat/status request cannot fence a
+            # valid in-flight capture. Its own request still fails closed; the
+            # capture must independently pass its final online verification.
+            if not transient:
+                self._generation += 1
             self._locked_code = code
-        # Network failure is not evidence of revocation. Fail closed for new
-        # requests without erasing or interrupting an ongoing capture.
-        if code != 'ACCESS_UNAVAILABLE':
+        if not transient:
             try:
                 self._on_locked()
             except Exception:
