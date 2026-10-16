@@ -388,6 +388,19 @@ class TransportTests(unittest.TestCase):
                     None if path == 'config' else {'deviceId': DEVICE})
             self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
 
+    def test_disabled_config_503_is_specific_but_generic_503_stays_transient(self):
+        exact=compact({'error':'Collector access unavailable','code':'ACCESS_NOT_CONFIGURED'})
+        connection=self.connection(status=503,raw=exact)
+        with self.assertRaises(AccessDenied) as caught:
+            OfficialTransport(connection=lambda:connection).request('GET',PREFIX+'config')
+        self.assertEqual(caught.exception.code,'ACCESS_NOT_CONFIGURED')
+        for raw in [b'{}',b'<html>temporary outage</html>',
+                    compact({'error':'anything','code':'ACCESS_NOT_CONFIGURED'})]:
+            connection=self.connection(status=503,raw=raw)
+            with self.assertRaises(AccessDenied) as denied:
+                OfficialTransport(connection=lambda:connection).request('GET',PREFIX+'config')
+            self.assertEqual(denied.exception.code,'ACCESS_UNAVAILABLE')
+
     def test_bounds_response_and_rejects_compressed_non_json_and_foreign_paths(self):
         for raw, headers in [(b'x'*8193, {}), (b'{}', {'Content-Length': '999999'}),
                              (b'{}', {'Content-Encoding': 'gzip'}), (b'{}', {'Content-Type': 'text/html'})]:
