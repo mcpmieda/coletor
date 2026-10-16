@@ -188,7 +188,7 @@ class RuntimeTests(unittest.TestCase):
         self.runtime._clock = lambda: self.provider.now
         self.assertEqual(self.runtime._fresh()['state'], 'ready')
 
-    def test_eligible_leader_heartbeats_but_known_source_failure_releases_leadership(self):
+    def test_idle_scheduler_never_holds_lease_between_collection_windows(self):
         current = datetime.fromtimestamp(NOW, timezone.utc).astimezone(
             __import__('zoneinfo').ZoneInfo('America/Bahia'))
         rules = schedule()
@@ -198,12 +198,11 @@ class RuntimeTests(unittest.TestCase):
         self.provider.shared_schedule = rules
         self.runtime.tick()
         operations = [p['operation'] for p in self.provider.requests]
-        self.assertIn('heartbeat', operations)
-        self.assertEqual(operations.count('lease'), 1)
+        self.assertNotIn('lease', operations)
+        self.assertNotIn('heartbeat', operations)
         self.runtime._source_blocked = True
-        self.provider.now += 121
         self.runtime.tick()
-        self.assertEqual(sum(p['operation']=='lease' for p in self.provider.requests), 1)
+        self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
 
     def test_newly_selected_source_clears_no_selection_block(self):
         self.runtime._code, self.runtime._state = 'NO_SELECTED_CLASSES', 'error'
@@ -292,22 +291,20 @@ class RuntimeTests(unittest.TestCase):
         primary.tick()
         self.assertEqual(primary.public_status()['code'], 'NO_SELECTED_CLASSES')
         self.assertNotIn('lease', [r['operation'] for r in provider_a.requests])
-        backup.tick()
+        backup.collect()
         self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
 
         # A selection added while the reserve is collecting must not steal it.
         selected_a[0] = True
         primary.source_ready()
-        with self.assertRaises(FrequencyError) as busy:
-            primary.tick()
-        self.assertEqual(busy.exception.code, 'lease-busy')
+        self.assertEqual(primary.collect()['code'], 'lease-busy')
 
         # An existing leader that loses its selection yields immediately.
         selected_b[0] = False
         backup.tick()
         self.assertIsNone(school['lease'])
         self.assertIn('release', [r['operation'] for r in provider_b.requests])
-        primary.tick()
+        primary.collect()
         self.assertEqual(school['lease']['deviceId'], provider_a.device_id)
 
         # A saved selection is only a hint: if live discovery finds no
@@ -320,7 +317,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNone(school['lease'])
         selected_b[0] = True
         backup.source_ready()
-        backup.tick()
+        backup.collect()
         self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
 
     def test_server_generation_change_cannot_silently_drop_pending_queue(self):
