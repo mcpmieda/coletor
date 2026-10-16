@@ -1,0 +1,15 @@
+{
+  "formato": 1,
+  "limite": 5,
+  "versoes": [
+    {
+      "arquivo": "ColetorFrequencia-v0.4.0-build000143-d67d586148ef-windows-x64-setup.exe",
+      "sha256": "14fbc0a112f9e25fa00c05d9d3d9c23075511271a41b35d4c3880bdf57d2532c",
+      "versao": "0.4.0",
+      "commit": "d67d586148ef6c8136d01ac7fa655bb28eef17bf",
+      "run_id": 38974539331,
+      "run_number": 143,
+      "publicado_em": "2026-10-16T22:21:28+00:00"
+    }
+  ]
+}
