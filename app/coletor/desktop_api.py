@@ -11,6 +11,9 @@ from .resume_store import ResumeStore
 from functools import wraps
 import threading
 import time
+import os
+import ctypes
+from datetime import datetime
 
 # Balloon beside the clock: the window may be hidden in the tray.
 ALERTS = {
@@ -31,6 +34,27 @@ ALERTS = {
 }
 
 
+def native_local_recovery_confirmation(summary):
+    """A webview click is never authorization to erase academic batches."""
+    if os.name!='nt': return False
+    def when(value):
+        return datetime.fromtimestamp(value).strftime('%d/%m/%Y %H:%M') if type(value) in {int,float} else 'desconhecida'
+    amount=summary['count']
+    quantity='quantidade desconhecida' if amount is None else f'{amount} lote(s)'
+    warning=('O conteudo cifrado nao pode ser aberto com esta autorizacao. '
+             'Quantidade e datas desconhecidas.\\n\\n' if summary['unreadable'] else '')
+    message=(f'ATENCAO: {quantity} aguardando recibo.\\n'
+             f'Primeiro: {when(summary["oldest"])}\\nUltimo: {when(summary["newest"])}\\n\\n'
+             +warning+
+             'O dispositivo nao pode consultar recibos neste momento. O descarte LOCAL '
+             'pode perder marcacoes ainda nao recebidas pelo Ecossistema. '
+             'Apenas a fila deste computador sera excluida.\\n\\n'
+             'Confirma DESCARTAR definitivamente esses lotes locais?')
+    # Default button is No; only an explicit native Windows Yes can erase.
+    return ctypes.windll.user32.MessageBoxW(None,message,
+        'CONFIRMAR descarte local de frequencia — Coletor',0x4 | 0x30 | 0x100)==6
+
+
 class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
@@ -42,6 +66,7 @@ class DesktopApi(PreviewApi):
         self._provider = getattr(access, '_provider', None) if access else DeviceProvider(settings_directory)
         self._access = access or InstitutionalAccess(self._provider, on_locked=self._access_locked)
         self._pending_alert = None
+        self._confirm_local_discard = native_local_recovery_confirmation
         self._resume = ResumeStore(settings_directory)
         self._collector = FrequencyRuntime(self._access, self._provider, self._manual_session, settings_directory,
                                            on_started=self._desktop_state.begin_read,
@@ -137,6 +162,47 @@ class DesktopApi(PreviewApi):
 
     def discard_pending_collection(self):
         return self._operational(self._collector.discard_queue)
+
+    def get_local_recovery_status(self):
+        # Public metadata only: no student, requestId, cookie or login secret.
+        try: return self._collector._storage.recovery_status()
+        except StorageError: return {'pending': False, 'count': None,
+                                      'oldest': None, 'newest': None, 'unreadable': True}
+
+    def discard_local_pending_collection(self):
+        # Deliberately outside _protected: a revoked device has no proof with
+        # which to query receipt. An OS-native confirmation remains mandatory.
+        # Never allow a temporary network outage to masquerade as revocation.
+        if not self._collector._operation.acquire(blocking=False):
+            return {'error':'Há coleta em andamento. Interrompa antes de descartar.',
+                    'code':'CANCELLED'}
+        try:
+            status=self._access.status()
+            if status.get('code') in {'ACCESS_UNAVAILABLE','LOGIN_UNAVAILABLE'}:
+                return {'error':'Sem conexão. Aguarde para conferir os recibos; não descarte por falha temporária.',
+                        'code':'ACCESS_UNAVAILABLE'}
+            if status.get('authenticated') and status.get('authorized'):
+                try: self._collector._bind_storage()
+                except StorageError as error:
+                    if error.code!='PENDING_BATCHES':
+                        return {'error':'Não foi possível conferir a fila cifrada.','code':error.code}
+                else:
+                    return {'error':'O computador está autorizado. Consulte primeiro os recibos pelo descarte normal.',
+                            'code':'ACCESS_REQUIRED'}
+            summary=self._collector._storage.recovery_status()
+            if not summary['pending']:
+                return {'ok':True,'discarded':False}
+            if not self._confirm_local_discard(summary):
+                return {'error':'Descarte cancelado; todos os lotes foram preservados.',
+                        'code':'CANCELLED'}
+            self._collector.cancel(purge=False,pause=True)
+            self._collector._storage.discard_confirmed_local_queue()
+            self._resume.set(False)
+            return {'ok':True,'discarded':True}
+        except StorageError as error:
+            return {'error':'O Windows não conseguiu verificar ou alterar a fila local.',
+                    'code':error.code}
+        finally: self._collector._operation.release()
 
     def get_institutional_access_status(self):
         return self._access.status()
