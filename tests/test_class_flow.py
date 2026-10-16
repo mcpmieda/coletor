@@ -35,6 +35,21 @@ class ClassFlowTests(unittest.TestCase):
         self.assertNotIn('class_id',prepared['scope'])
         self.session.open(prepared['generation'],True)
         return prepared['generation']
+    def test_unselected_school_context_is_not_eligible_for_leadership(self):
+        self.assertFalse(self.session.has_saved_class_selection())
+        self.assertEqual(self.driver.opened, [])
+        gen = self.enter(2025)
+        listed = self.session.discover(gen, True)
+        self.session.save_choices(gen, ['11'], listed['selection_revision'])
+        self.assertFalse(self.session.has_saved_class_selection())  # Not the 2026 context.
+        gen = self.enter(2026)
+        listed = self.session.discover(gen, True)
+        self.assertFalse(self.session.has_saved_class_selection())
+        saved = self.session.save_choices(gen, ['12'], listed['selection_revision'])
+        self.assertTrue(self.session.has_saved_class_selection())
+        self.session.save_choices(gen, [], saved['selection_revision'], clear=True)
+        self.assertFalse(self.session.has_saved_class_selection())
+
     def test_login_first_does_not_open_diary_or_student_links(self):
         gen=self.enter()
         self.assertEqual(self.driver.opened,[list_url(2026)])
