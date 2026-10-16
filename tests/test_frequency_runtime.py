@@ -617,6 +617,23 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), b'corrupt')
         self.assertEqual(self.storage._binding, f'{DEVICE}:1')
 
+    def test_generation_change_ignores_only_expired_queue_without_mutating_it_preflight(self):
+        self.storage.enqueue({'requestId':'expired-synthetic'})
+        self.now += 7*86400+1
+        # Expiry is checked without writing until the binding transaction can
+        # clear the former generation. New device can then be activated.
+        self.storage.bind(DEVICE,2)
+        self.assertEqual(self.storage.queue(),[])
+
+    def test_future_dated_queue_blocks_generation_switch_instead_of_dropping_data(self):
+        self.storage.enqueue({'requestId':'clock-skew-synthetic'})
+        self.now -= 120
+        with self.assertRaises(StorageError):
+            self.storage.bind(DEVICE,2)
+        self.assertEqual(self.storage._binding,f'{DEVICE}:1')
+        self.now += 120
+        self.assertEqual(len(self.storage.queue()),1)
+
     def test_wrong_device_and_corrupt_dpapi_fail_closed(self):
         self.storage.enable(); self.storage.enqueue({'requestId': DEVICE})
         wrong = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto()); wrong.bind('another-device', 1)
