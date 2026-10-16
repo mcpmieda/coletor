@@ -82,6 +82,13 @@ class ProtectedStorage:
         with self._lock:
             binding = f'{device_id}:{generation}'
             if self._binding is not None and self._binding != binding:
+                # A server-side device/generation change is NOT an operator
+                # discard and cannot erase a batch awaiting its receipt.
+                # Inspect using the old DPAPI binding before modifying it.
+                # Do not run queue() here: its expiry GC would mutate storage.
+                pending = self._read('queue')
+                if pending:
+                    raise StorageError('PENDING_BATCHES')
                 self.clear()
             self._binding = binding
 
