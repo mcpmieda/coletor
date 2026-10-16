@@ -25,6 +25,7 @@ ALERTS = {
     'not-authorized': ('Acesso do computador negado', 'Entre novamente no Ecossistema pelo Coletor.'),
     'PROTECTED_STORAGE_UNAVAILABLE': ('Proteção do Windows indisponível', 'O Coletor não conseguiu proteger os dados neste computador.'),
     'PROTECTED_STORAGE_LIMIT': ('Fila de envio cheia', 'Confira a conexão com a internet.'),
+    'PENDING_BATCHES': ('Lotes pendentes de conferência', 'O acesso deste computador mudou. Confira os recibos antes de autorizar uma nova geração.'),
     'ACCESS_REQUIRED': ('Entre no Ecossistema', 'A coleta automática precisa do acesso deste computador.'),
     'CLOCK_OUT_OF_SYNC': ('Horário do Windows incorreto', 'Sincronize data e hora do Windows para retomar a coleta.'),
 }
