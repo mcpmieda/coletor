@@ -155,7 +155,16 @@ jobs:
           git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER"
           branch="automation/instalador-run-$UPSTREAM_RUN_ID"
           git push --set-upstream origin "$branch"
-          pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch"             --title "chore(instalador): archive verified Windows build $UPSTREAM_RUN_NUMBER"             --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Requires the protected verify + windows-portable checks; no branch-protection bypass. Release is already available.")"
+          # Organization/repository settings may forbid GITHUB_TOKEN from
+          # creating PRs. Do not turn an already-published, SHA-verified
+          # downloadable release into a failed publication: the archive branch
+          # remains available for a maintainer to open a protected PR.
+          if ! pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
+            --title "chore(instalador): archive verified Windows build $UPSTREAM_RUN_NUMBER" \
+            --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Requires protected checks; release already available.")"; then
+            echo "::warning::Actions cannot open archive PR. Release is published, and branch $branch retains the LFS archive. An administrator can enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General, or a maintainer can open the PR manually."
+            exit 0
+          fi
           echo "Created archive PR: $pr_url"
           # GITHUB_TOKEN PR creation does not trigger pull_request workflows.
           # Explicit workflow_dispatch is exempt from this restriction.
