@@ -106,6 +106,7 @@ export default function App() {
       <div className="page-stack" hidden={view !== 'preview'}>
         <CollectorControl />
         <ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
+        {view === 'preview' && <>
         <ToolsPanel desktop={desktop} open={toolsOpen || busy || !!error} onToggle={setToolsOpen}>
           <section className="panel source-panel" aria-labelledby="source-title"><div className="section-heading"><div><h2 id="source-title">Arquivo HTML ou exemplo</h2><p>Abra um diário salvo do Smecel ou use os dados de exemplo. Nada é enviado.</p></div><FileUp size={22} className="muted" /></div>
             <div className="source-controls"><TextField value={classId} onChange={setClassId} isDisabled={busy}><Label>Código da turma</Label><Input /></TextField><TextField value={year} onChange={setYear} isDisabled={busy}><Label>Ano</Label><Input inputMode="numeric" maxLength={4} /></TextField><div className="source-actions"><Button variant="secondary" isDisabled={busy} onPress={() => { void run(loadDemo); }}><FlaskConical size={16} />Usar dados de exemplo</Button><Button isDisabled={busy} onPress={() => fileRef.current?.click()}><FileUp size={16} />Abrir diário</Button></div></div>
@@ -116,6 +117,7 @@ export default function App() {
         </ToolsPanel>
         {preview && <><div className="preview-context"><span>{previewOrigin(preview.mode)} · Lido às {new Date(preview.processed_at).toLocaleTimeString('pt-BR')}</span><Button size="sm" variant="ghost" onPress={clear}><X size={14} />Fechar diário</Button></div><div className="summary-grid"><div><span>Alunos no diário</span><strong>{preview.snapshot.students.length}</strong></div><div><span>Faltas</span><strong>{states?.absent ?? 0}</strong></div><div><span>Marcações sem confirmação</span><strong>{states?.planned_unknown ?? 0}</strong></div><div><span>Dados enviados</span><strong>0</strong></div></div><div className="content-grid"><AttendancePreview key={preview.snapshot.snapshot_id} preview={preview} /><ValidationPanel preview={preview} /></div></>}
         {!preview && !busy && !desktop && <section className="empty-state"><span className="empty-icon"><ShieldCheck size={30} /></span><h2>Vamos conferir a frequência?</h2><p>Abra um diário ou use os dados de exemplo.</p><div className="empty-footnote">Seus dados não são enviados.</div></section>}
+        </>}
       </div>
     </main>
   </div>;
