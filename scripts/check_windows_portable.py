@@ -423,7 +423,7 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
 
         evidence["stage"] = "clear_and_repeat"
         click_button(window, "Fechar diário")
-        wait_js(window, "!document.querySelector('.preview-panel') && !!document.querySelector('.empty-state')")
+        wait_js(window, "!document.querySelector('.preview-panel') && !document.querySelector('.summary-grid') && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled)")
         checks["clear_preview_works"] = True
         click_button(window, "Usar dados de exemplo")
         wait_js(window, rendered_js(2))
