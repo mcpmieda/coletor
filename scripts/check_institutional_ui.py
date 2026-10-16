@@ -28,6 +28,8 @@ try:
               return {authenticated:f.authorized,authorized:f.authorized,pairingCode:f.pairingCode,code:f.code};},
             open_institutional_login:async()=>({ok:true}),
             logout_institutional_access:async()=>{window.__fixture.logoutCalls++;window.__fixture.authorized=false;return {ok:true};},
+            get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
+            discard_local_pending_collection:async()=>({ok:true,discarded:false}),
             get_local_settings:async()=>{window.__fixture.settingsCalls++;return {settings:{schemaVersion:1,schedule:null,theme:'system',fox:{version:1,show:true,animate:true}}};},
             get_desktop_status:async()=>({version:1,sourceState:'idle',canHide:true}),
             set_tray_context:async()=>({ok:true}),
