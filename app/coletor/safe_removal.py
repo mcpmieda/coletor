@@ -22,7 +22,15 @@ def run(*, provider=None, output=None):
         if metadata is not None and (before or metadata.directory.exists()):
             instance = CollectorInstance(metadata.directory).acquire()
             before = provider.removal_status()
-        if metadata is not None: ProtectedStorage(metadata.directory).clear()
+        if metadata is not None:
+            # This is a separate process from the collector, so even an
+            # unreadable/old-generation DPAPI queue must be treated as pending.
+            # Never revoke the device key before receipts can be reconciled.
+            queue = ProtectedStorage(metadata.directory).recovery_status()
+            if queue['pending'] or queue['unreadable']:
+                print('Remoção bloqueada: há lotes sem recibo ou uma fila cifrada que não pode ser conferida.', file=output)
+                print('Abra o Coletor para reconciliar os recibos; o descarte definitivo exige confirmação nativa separada.', file=output)
+                return 1
         if not before:
             print('Nenhum vínculo local registrado. Nenhuma chave foi verificada ou apagada.', file=output)
             return 0
@@ -31,6 +39,10 @@ def run(*, provider=None, output=None):
         except Exception:
             pass  # Inspect durable state; never echo input, signatures or exception details.
         after = provider.removal_status()
+        if metadata is not None and (not after or after['state'] == 'revokedLocally'):
+            # Clear credentials/session only after the device removal reached a
+            # durable state, never before checking an unreconciled queue.
+            ProtectedStorage(metadata.directory).clear()
         if not after:
             print('Chave local removida. A retirada remota foi confirmada ou não havia dispositivo vinculado.', file=output)
             print('Você pode remover manualmente a pasta portátil após fechar o Coletor.', file=output)

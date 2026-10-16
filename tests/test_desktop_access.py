@@ -56,6 +56,60 @@ class DesktopAccessTests(unittest.TestCase):
             self.assertEqual(api.logout_institutional_access(), {'ok': True})
             access.logout.assert_called_once()
 
+
+    def test_concurrent_collection_blocks_logout_and_repairing_without_purge(self):
+        import threading
+        import time
+        from test_frequency_runtime import SyntheticCrypto
+        with tempfile.TemporaryDirectory() as directory:
+            access = SyntheticAccess()
+            access.logout = Mock()
+            access.open_login = Mock()
+            api = DesktopApi(directory, access=access)
+            storage = api._collector._storage
+            storage._crypto = SyntheticCrypto()
+            storage.bind('current-device', 1)
+            storage._enabled = True
+            started, continue_collection = threading.Event(), threading.Event()
+
+            def collecting():
+                with api._collector._operation:
+                    started.set()
+                    self.assertTrue(continue_collection.wait(5))
+                    storage.enqueue({'requestId': 'SYNTHETIC_IN_FLIGHT'})
+
+            worker = threading.Thread(target=collecting)
+            worker.start()
+            try:
+                self.assertTrue(started.wait(5))
+                self.assertEqual(api.logout_institutional_access()['code'], 'CANCELLED')
+                self.assertEqual(api.open_institutional_login()['code'], 'CANCELLED')
+                access.logout.assert_not_called()
+                access.open_login.assert_not_called()
+            finally:
+                continue_collection.set()
+                worker.join(5)
+            self.assertFalse(worker.is_alive())
+            path = storage.directory / 'queue.dpapi'
+            encrypted = path.read_bytes()
+            self.assertEqual(api.logout_institutional_access()['code'], 'PENDING_BATCHES')
+            self.assertEqual(api.open_institutional_login()['code'], 'PENDING_BATCHES')
+            self.assertEqual(path.read_bytes(), encrypted)
+            self.assertEqual(len(storage.queue()), 1)
+            access.logout.assert_not_called()
+            access.open_login.assert_not_called()
+
+    def test_failed_identity_change_always_releases_collector_reservation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            access = SyntheticAccess()
+            access.open_login = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+            access.logout = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+            api = DesktopApi(directory, access=access)
+            self.assertEqual(api.open_institutional_login()['code'], 'ACCESS_UNAVAILABLE')
+            self.assertFalse(api._collector._operation.locked())
+            self.assertEqual(api.logout_institutional_access()['code'], 'ACCESS_UNAVAILABLE')
+            self.assertFalse(api._collector._operation.locked())
+
     def test_revoked_device_recovery_requires_native_confirmation_and_keeps_other_secrets(self):
         class Revoked(SyntheticAccess):
             def status(self):

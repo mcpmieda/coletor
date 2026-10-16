@@ -228,32 +228,47 @@ class DesktopApi(PreviewApi):
                     "code": "PROTECTED_STORAGE_UNAVAILABLE"}
         return None
 
+    def _identity_change_busy(self):
+        return {"error": "Há coleta ou outra operação em andamento. Aguarde para alterar o acesso deste PC.",
+                "code": "CANCELLED"}
+
     def open_institutional_login(self):
-        # A new pairing may revoke the original generation and bind storage
-        # to a new device. No unreceipted queue may be destroyed implicitly.
-        blocked = self._pending_batch_blocker()
-        if blocked is not None: return blocked
+        # The same operation mutex protects all enqueue/send operations. Hold
+        # it across both the queue inspection AND the identity mutation so a
+        # concurrent collector cannot insert a batch in the TOCTOU interval.
+        if not self._collector._operation.acquire(blocking=False):
+            return self._identity_change_busy()
         try:
-            self._access.open_login()
-            return {"ok": True}
-        except AccessDenied as error:
-            return {"error": str(error), "code": error.code}
+            blocked = self._pending_batch_blocker()
+            if blocked is not None: return blocked
+            try:
+                self._access.open_login()
+                return {"ok": True}
+            except AccessDenied as error:
+                return {"error": str(error), "code": error.code}
+        finally:
+            self._collector._operation.release()
 
     def logout_institutional_access(self):
-        # Explicitly clicking "Sair" is not consent to discard academic batches.
-        # Revocation must never happen before pending receipts are reconciled.
-        blocked = self._pending_batch_blocker()
-        if blocked is not None: return blocked
+        # Logout is not permission to lose a batch; serialize check+revoke+
+        # purge atomically against live collection, even on network failure.
+        if not self._collector._operation.acquire(blocking=False):
+            return self._identity_change_busy()
         try:
-            self._access.logout()
-            self._resume.set(False)
-            self._collector.cancel(purge=True)
-            self._manual_session.close()
-            return {"ok": True}
-        except AccessDenied as error:
-            return {"error": str(error), "code": error.code}
-        except Exception:
-            return {"error": "Não foi possível concluir a limpeza da sessão.", "code": "ACCESS_CLEANUP_PENDING"}
+            blocked = self._pending_batch_blocker()
+            if blocked is not None: return blocked
+            try:
+                self._access.logout()
+                self._resume.set(False)
+                self._collector.cancel(purge=True)
+                self._manual_session.close()
+                return {"ok": True}
+            except AccessDenied as error:
+                return {"error": str(error), "code": error.code}
+            except Exception:
+                return {"error": "Não foi possível concluir a limpeza da sessão.", "code": "ACCESS_CLEANUP_PENDING"}
+        finally:
+            self._collector._operation.release()
 
     def prepare_manual_login(self, year):
         if self._collector.public_status()['active']: self._collector.local_pause(True)

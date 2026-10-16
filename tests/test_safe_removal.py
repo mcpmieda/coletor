@@ -103,6 +103,36 @@ class SafeRemovalTests(unittest.TestCase):
         self.assertEqual(self.transport.calls, [])
         self.assertNotIn('synthetic-private-input', self.output.getvalue())
 
+
+    def test_safe_removal_blocks_unconfirmed_encrypted_queue_even_offline(self):
+        self.activate_fake()
+        from coletor.protected_storage import ProtectedStorage
+        # This separate process cannot assume it can read a saved DPAPI
+        # generation; the encrypted queue's mere presence must fail closed.
+        storage = ProtectedStorage(self.root)
+        storage.directory.mkdir(parents=True, exist_ok=True)
+        queue = storage.directory / 'queue.dpapi'
+        queue.write_bytes(b'CFV2\\0SYNTHETIC-UNRECEIPTED-DPAPI')
+        original = queue.read_bytes()
+        self.transport.calls.clear()
+        self.transport.request = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+        self.assertEqual(run(provider=self.provider, output=self.output), 1)
+        self.assertEqual(queue.read_bytes(), original)
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(self.transport.calls, [])
+        self.assertIn('Remoção bloqueada', self.output.getvalue())
+
+    def test_safe_removal_blocks_queue_without_device_metadata(self):
+        from coletor.protected_storage import ProtectedStorage
+        storage = ProtectedStorage(self.root)
+        storage.directory.mkdir(parents=True, exist_ok=True)
+        queue = storage.directory / 'queue.dpapi'
+        queue.write_bytes(b'CFV2\\0OLD-ENCRYPTED-QUEUE')
+        self.assertEqual(run(provider=self.provider, output=self.output), 1)
+        self.assertEqual(queue.read_bytes(), b'CFV2\\0OLD-ENCRYPTED-QUEUE')
+        self.factory.assert_not_called()
+        self.assertEqual(self.transport.calls, [])
+
     def test_cli_dispatch_does_not_start_desktop_or_preview(self):
         with patch('coletor.safe_removal.run', return_value=2) as action:
             self.assertEqual(main(['--safe-removal']), 2)
