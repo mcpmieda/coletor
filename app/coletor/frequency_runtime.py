@@ -362,8 +362,8 @@ class FrequencyRuntime:
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
             return
-        self._acquire(status)
-        status = self._heartbeat(epoch)
+        # Polling a reserve machine must not acquire/renew the school-wide
+        # lease. Only a real capture owns it; this enables standby takeover.
         schedule = status['settings']['schedule']
         if schedule is None: return
         now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
@@ -379,12 +379,25 @@ class FrequencyRuntime:
             if self._source_blocked or self._code in {'lease-fenced', 'revision-conflict', 'source-invalid',
                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'SOURCE_CLASS_UNAVAILABLE',
                    'SOURCE_CLASS_AMBIGUOUS', 'identity-review'}: return
-            self._fired.update((civil_day, shift, wall_time) for shift in shifts)
-            # Separate thread keeps 30-second lease renewal alive during capture.
-            threading.Thread(target=self.collect, args=(shifts,), daemon=True, name='collector-capture').start()
+            keys = {(civil_day, shift, wall_time) for shift in shifts}
+            if not self._operation.acquire(blocking=False):
+                self._minute = None  # A concurrent command may finish within this minute.
+                return
+            try:
+                self._fired.update(keys)
+                # Ownership passes to collect(), which releases it in finally.
+                threading.Thread(target=self.collect, args=(shifts,),
+                                 kwargs={'_claimed': True}, daemon=True, name='collector-capture').start()
+            except Exception:
+                self._fired.difference_update(keys)
+                self._minute = None
+                self._operation.release()
+                raise
 
-    def collect(self, shifts=None):
-        if not self._operation.acquire(blocking=False): return self.public_status()
+    def collect(self, shifts=None, *, _claimed=False):
+        # A scheduled invocation already owns the operation lock so its minute
+        # cannot be marked fired before a capture is accepted.
+        if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
         self._on_started()
         heartbeat_stop = threading.Event()
         heartbeat = None
@@ -425,6 +438,11 @@ class FrequencyRuntime:
                             lapsed = (self._lease is None or self._lease['fencingToken'] != fencing
                                       or self._lease['deadline'] <= self._clock())
                         if getattr(error, 'code', None) == 'lease-fenced' and lapsed: continue
+                        # Heartbeat only reports device state and does not extend
+                        # a lease. A transient outage cannot cancel the source
+                        # capture; every transmission still rechecks authority.
+                        if getattr(error, 'code', None) in {'unavailable', 'ACCESS_UNAVAILABLE'}:
+                            continue
                         self._error(error)
                         self.cancel(purge=False, school_pause=getattr(error, 'code', None) == 'paused')
                         return
@@ -620,7 +638,14 @@ class FrequencyRuntime:
         pending = []
         for entry in self._storage.queue():
             payload = entry['payload']
-            if self._receipt(payload) is not None: self._storage.acknowledge(payload['requestId'])
+            try:
+                receipt = self._receipt(payload)
+            except FrequencyError as error:
+                # The server retires request IDs at an annual reset: there is
+                # no old receipt to retrieve, and replay is forbidden.
+                if error.code != 'revision-conflict': raise
+                receipt = None
+            if receipt is not None: self._storage.acknowledge(payload['requestId'])
             else: pending.append(payload['requestId'])
         if pending and not self._confirm_discard(): raise FrequencyError('CANCELLED')
         for request_id in pending: self._storage.acknowledge(request_id)
