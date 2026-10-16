@@ -83,13 +83,27 @@ export default function InstitutionalAccess() {
   }
   async function logout() {
     if (operation.current) return;
-    operation.current = true; previouslyAuthorized.current = false; epoch.current++; setAuthorized(false); setBusy(true);
+    operation.current = true; epoch.current++; setBusy(true);
+    let blockedByPendingBatch = false;
     try {
       const result = await (await bridge()).logout_institutional_access();
-      if ('error' in result) throw new Error(result.error);
+      if ('error' in result) {
+        if (result.code === 'PENDING_BATCHES' || result.code === 'PROTECTED_STORAGE_UNAVAILABLE') {
+          // The native operation did not revoke the device. Keep the authorized
+          // UI visible and preserve this actionable message for the operator.
+          blockedByPendingBatch = true; setNotice(result.error); setCleanupPending(false); return;
+        }
+        throw new Error(result.error);
+      }
+      previouslyAuthorized.current = false; setAuthorized(false);
       setNotice('Este computador foi desconectado.');
-    } catch (error) { setCleanupPending(true); setNotice(error instanceof Error ? error.message : 'Confira a conexão para encerrar o vínculo.'); }
-    finally { operation.current = false; setBusy(false); setPairingCode(''); void recheck(); }
+    } catch (error) {
+      setCleanupPending(true);
+      setNotice(error instanceof Error ? error.message : 'Confira a conexão para encerrar o vínculo.');
+    } finally {
+      operation.current = false; setBusy(false); setPairingCode('');
+      if (!blockedByPendingBatch) void recheck();
+    }
   }
   if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div><App /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
