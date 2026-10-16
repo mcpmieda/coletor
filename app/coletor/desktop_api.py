@@ -140,6 +140,17 @@ class DesktopApi(PreviewApi):
         return self._access.status()
 
     def open_institutional_login(self):
+        # Starting a new pairing can revoke the former device/generation.
+        # Never make an unreceipted queue impossible to reconcile by replacing
+        # its DPAPI device binding without explicit operator action.
+        try:
+            self._collector._bind_storage()
+            if self._collector._storage.queue():
+                return {"error": "Há lotes pendentes. Confira os recibos ou descarte os lotes antes de entrar novamente.",
+                        "code": "PENDING_BATCHES"}
+        except StorageError:
+            return {"error": "Há dados protegidos que precisam ser conferidos antes de trocar o acesso deste PC.",
+                    "code": "PROTECTED_STORAGE_UNAVAILABLE"}
         try:
             self._access.open_login()
             return {"ok": True}
