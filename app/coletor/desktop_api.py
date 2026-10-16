@@ -193,7 +193,10 @@ class DesktopApi(PreviewApi):
         return result
 
     def save_manual_class_selection(self, generation, ids, revision):
-        return self._manual(lambda: self._manual_session.save_choices(generation, ids, revision))
+        result = self._manual(lambda: self._manual_session.save_choices(generation, ids, revision))
+        if 'error' not in result:
+            self._collector.source_ready()
+        return result
 
     def clear_manual_class_selection(self, generation, revision):
         return self._manual(lambda: self._manual_session.save_choices(generation, [], revision, clear=True))
