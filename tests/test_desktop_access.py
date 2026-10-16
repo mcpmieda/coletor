@@ -56,6 +56,74 @@ class DesktopAccessTests(unittest.TestCase):
             self.assertEqual(api.logout_institutional_access(), {'ok': True})
             access.logout.assert_called_once()
 
+    def test_revoked_device_recovery_requires_native_confirmation_and_keeps_other_secrets(self):
+        class Revoked(SyntheticAccess):
+            def status(self):
+                return {'authenticated': False, 'authorized': False, 'code': 'ACCESS_REQUIRED'}
+        with tempfile.TemporaryDirectory() as directory:
+            access=Revoked()
+            access.logout=Mock()
+            api=DesktopApi(directory,access=access)
+            storage=api._collector._storage
+            storage._memory['queue']=[{'createdAt':__import__('time').time(),
+                                      'payload':{'requestId':'PRIVATE_BATCH'}}]
+            storage._memory['credential']={'email':'synthetic@invalid.test','password':'SECRET'}
+            status=api.get_local_recovery_status()
+            self.assertTrue(status['pending'])
+            self.assertEqual(status['count'],1)
+            self.assertNotIn('PRIVATE_BATCH',str(status))
+            self.assertNotIn('SECRET',str(status))
+            api._confirm_local_discard=Mock(return_value=False)
+            self.assertEqual(api.discard_local_pending_collection()['code'],'CANCELLED')
+            self.assertEqual(len(storage.queue()),1)
+            api._confirm_local_discard=Mock(return_value=True)
+            self.assertEqual(api.discard_local_pending_collection(),{'ok':True,'discarded':True})
+            self.assertEqual(storage.queue(),[])
+            self.assertEqual(storage._memory['credential']['password'],'SECRET')
+            access.logout.assert_not_called()
+            self.assertEqual(api.get_local_recovery_status()['pending'],False)
+            self.assertEqual(api.open_institutional_login(),{'ok':True})
+            api._confirm_local_discard.assert_called_once()
+
+    def test_temporary_outage_or_valid_authorization_never_permits_local_discard(self):
+        class Outage(SyntheticAccess):
+            def status(self): return {'authenticated':False,'authorized':False,'code':'ACCESS_UNAVAILABLE'}
+        with tempfile.TemporaryDirectory() as directory:
+            api=DesktopApi(directory,access=Outage())
+            api._collector._storage._memory['queue']=[
+                {'createdAt':__import__('time').time(),'payload':{'requestId':'SYNTHETIC'}}]
+            api._confirm_local_discard=Mock(return_value=True)
+            self.assertEqual(api.discard_local_pending_collection()['code'],'ACCESS_UNAVAILABLE')
+            api._confirm_local_discard.assert_not_called()
+            self.assertEqual(len(api._collector._storage.queue()),1)
+            api._access=SyntheticAccess()
+            self.assertEqual(api.discard_local_pending_collection()['code'],'ACCESS_REQUIRED')
+            api._confirm_local_discard.assert_not_called()
+
+    def test_revoked_unreadable_encrypted_queue_can_be_explicitly_recovered(self):
+        class Revoked(SyntheticAccess):
+            def status(self):return {'authenticated':False,'authorized':False,'code':'ACCESS_REQUIRED'}
+        with tempfile.TemporaryDirectory() as directory:
+            api=DesktopApi(directory,access=Revoked())
+            storage=api._collector._storage
+            storage.bind('device-1',1)
+            storage._enabled=True
+            from test_frequency_runtime import SyntheticCrypto
+            storage._crypto=SyntheticCrypto()
+            storage.enqueue({'requestId':'ENCRYPTED_BATCH'})
+            saved=(storage.directory/'queue.dpapi').read_bytes()
+            storage._binding=None  # Revoked after Windows restart: no old proof.
+            info=api.get_local_recovery_status()
+            self.assertTrue(info['pending'])
+            self.assertTrue(info['unreadable'])
+            self.assertIsNone(info['count'])
+            api._confirm_local_discard=Mock(return_value=False)
+            self.assertEqual(api.discard_local_pending_collection()['code'],'CANCELLED')
+            self.assertEqual((storage.directory/'queue.dpapi').read_bytes(),saved)
+            api._confirm_local_discard=Mock(return_value=True)
+            self.assertEqual(api.discard_local_pending_collection(),{'ok':True,'discarded':True})
+            self.assertFalse((storage.directory/'queue.dpapi').exists())
+
     def test_renewed_login_or_access_failure_cannot_delete_pending_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             api = DesktopApi(directory, access=SyntheticAccess())
