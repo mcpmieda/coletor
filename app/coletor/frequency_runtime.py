@@ -27,11 +27,11 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
-              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED'}
+              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC'}
 # Problems an operator must see even with the window hidden in the tray.
 ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
-               'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
+               'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'CLOCK_OUT_OF_SYNC'}
 # Routine waits are not failures: a reserve computer or a school pause.
 QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
 
@@ -182,7 +182,14 @@ class FrequencyRuntime:
             if (value['contractVersion'] != 2 or value['state'] != 'ready' or value['academicYear'] != 2026
                     or not isinstance(value['classes'], list) or not isinstance(value['settings'], dict)):
                 raise ValueError()
-            stamp(value['serverTime'])
+            server_time = stamp(value['serverTime'])
+            received_at = self._clock()
+            # For a synchronized client the server's timestamp must lie
+            # between local request start and response reception (allow 5s).
+            # This catches both signs of Windows clock drift without treating
+            # ordinary network latency as clock drift.
+            if server_time < requested_at - 5 or server_time > received_at + 5:
+                raise FrequencyError('CLOCK_OUT_OF_SYNC')
             settings = value['settings']
             if type(settings['revision']) is not int or settings['revision'] < 0 or type(settings['paused']) is not bool: raise ValueError()
             if settings['schedule'] is not None: validate_schedule(settings['schedule'])
