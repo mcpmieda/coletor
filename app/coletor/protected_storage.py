@@ -87,8 +87,20 @@ class ProtectedStorage:
                 # Inspect using the old DPAPI binding before modifying it.
                 # Do not run queue() here: its expiry GC would mutate storage.
                 pending = self._read('queue')
-                if pending:
-                    raise StorageError('PENDING_BATCHES')
+                if pending is not None:
+                    if not isinstance(pending,list) or len(pending)>MAX_QUEUE_ITEMS or any(
+                        not isinstance(item,dict) or type(item.get('createdAt')) not in {int,float}
+                        or not isinstance(item.get('payload'),dict) for item in pending
+                    ):
+                        raise StorageError()
+                    now=self._clock()
+                    if any(item['createdAt']>now for item in pending):
+                        raise StorageError()  # Clock rollback: preserve everything.
+                    if any(now-item['createdAt']<=RETENTION_SECONDS for item in pending):
+                        raise StorageError('PENDING_BATCHES')
+                # The normal queue() expiry policy is already seven days.
+                # Evaluate eligibility without writing: only the ordinary
+                # binding cleanup may now retire previously expired entries.
                 self.clear()
             self._binding = binding
 
@@ -203,6 +215,47 @@ class ProtectedStorage:
             fresh = [v for v in values if now - v['createdAt'] <= RETENTION_SECONDS]
             if fresh != values: self._write('queue', fresh)
             return fresh
+
+    def recovery_status(self):
+        """Minimal LOCAL metadata, even if an old DPAPI generation is unreadable.
+
+        Never return marks, student data, credentials, identifiers or source HTML.
+        An unreadable queue is treated as present until native confirmation.
+        """
+        with self._lock:
+            path=self.directory/'queue.dpapi'
+            if self.directory.is_symlink(): raise StorageError()
+            if path.is_symlink(): raise StorageError()
+            on_disk=path.exists()
+            try:
+                rows=self._read('queue')
+                if rows is not None and (not isinstance(rows,list) or len(rows)>MAX_QUEUE_ITEMS
+                    or any(not isinstance(v,dict) or type(v.get('createdAt')) not in {int,float}
+                           or not isinstance(v.get('payload'),dict) for v in rows)):
+                    raise StorageError()
+            except StorageError:
+                if not on_disk and 'queue' not in self._memory: raise
+                return {'pending':True,'count':None,'oldest':None,'newest':None,'unreadable':True}
+            values=rows or []
+            dates=[v['createdAt'] for v in values]
+            return {'pending':bool(values) or on_disk and rows is None,
+                    'count':len(values) if rows is not None else None,
+                    'oldest':min(dates) if dates else None,
+                    'newest':max(dates) if dates else None,'unreadable':False}
+
+    def discard_confirmed_local_queue(self):
+        """Explicit native-confirmed recovery; remove ONLY this collector's queue.
+
+        No network or device key is required after authorization was revoked.
+        Neither session nor credentials nor another app's files are touched.
+        """
+        with self._lock:
+            path=self.directory/'queue.dpapi'
+            if self.directory.is_symlink() or path.is_symlink(): raise StorageError()
+            # Unlink is atomic on Windows; a deletion error must not be reported
+            # as success. Keep other protected purposes intact.
+            path.unlink(missing_ok=True)
+            self._memory.pop('queue',None)
 
     def enqueue(self, payload):
         with self._lock:
