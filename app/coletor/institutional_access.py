@@ -129,10 +129,13 @@ class InstitutionalAccess:
         with self._lock:
             self._generation += 1
             self._locked_code = code
-        try:
-            self._on_locked()
-        except Exception:
-            self._cleanup_pending = True
+        # Network failure is not evidence of revocation. Fail closed for new
+        # requests without erasing or interrupting an ongoing capture.
+        if code != 'ACCESS_UNAVAILABLE':
+            try:
+                self._on_locked()
+            except Exception:
+                self._cleanup_pending = True
 
     def run(self, work: Callable[[], T]) -> T:
         with self._lock:
