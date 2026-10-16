@@ -490,7 +490,7 @@ class FrequencyRuntime:
             # Discover first. A saved ID without a class of the requested
             # shift must never acquire the school lease from an eligible PC.
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
-            self._check(epoch)
+            self._check(epoch, lease=False)  # No lease is owned until eligibility is confirmed.
             selected = set(catalog['selected_class_ids'])
             sources = [c for c in catalog['catalog']['classes'] if c['class_id'] in selected]
             if catalog['unavailable_class_ids']: raise FrequencyError('SOURCE_CLASS_UNAVAILABLE')
