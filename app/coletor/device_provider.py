@@ -88,10 +88,24 @@ class OfficialTransport:
                                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
             reply = connection.getresponse()
             length = reply.getheader('Content-Length')
-            if ((reply.status != 200 and not (frequency and reply.status in {400, 401, 403, 409, 503})) or reply.getheader('Content-Encoding') not in (None, 'identity')
+            if ((reply.status != 200 and not (frequency and reply.status in {400, 401, 403, 409, 503}))
+                    or reply.getheader('Content-Encoding') not in (None, 'identity')
                     or not (reply.getheader('Content-Type') or '').lower().startswith('application/json')
                     or length is not None and (not length.isdigit() or int(length) > limit)):
-                # http.client never follows redirects; no second destination is contacted.
+                # A specific, bounded, official 503 JSON response distinguishes
+                # disabled server configuration from ordinary unavailability.
+                if path == PREFIX+'config' and reply.status == 503:
+                    raw_error=reply.read(8193)
+                    if len(raw_error)<=8192:
+                        try:
+                            problem=json.loads(raw_error,object_pairs_hook=unique)
+                            if (isinstance(problem,dict) and set(problem)=={'error','code'}
+                                    and problem['error']=='Collector access unavailable'
+                                    and problem['code']=='ACCESS_NOT_CONFIGURED'):
+                                raise AccessDenied('ACCESS_NOT_CONFIGURED')
+                        except (ValueError,TypeError,UnicodeError,RecursionError):
+                            pass
+                # http.client never follows redirects; no other origin contacted.
                 raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status == 503 else
                                    'ACCESS_NOT_CONFIGURED' if path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
             raw = reply.read(limit + 1)
