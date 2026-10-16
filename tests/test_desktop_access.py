@@ -25,6 +25,20 @@ class DesktopAccessTests(unittest.TestCase):
             api._manual_session.prepare_login.assert_not_called()
             api._settings.update.assert_not_called()
 
+    def test_renewed_login_or_access_failure_cannot_delete_pending_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api = DesktopApi(directory, access=SyntheticAccess())
+            # Synthetic in-memory queue, no Windows or real student data.
+            queue = [{'createdAt': 1791993600, 'payload': {'requestId': 'synthetic-pending'}}]
+            api._collector._storage._memory['queue'] = queue
+            api._collector._active = True
+            api._access_locked()
+            self.assertEqual(api._collector._storage._memory.get('queue'), queue)
+            self.assertTrue(api._collector.public_status()['active'])
+            # An explicit logout can still purge owned local state.
+            api._collector.cancel(purge=True)
+            self.assertNotIn('queue', api._collector._storage._memory)
+
     def test_active_collection_close_returns_manual_session_shape_not_collector_shape(self):
         with tempfile.TemporaryDirectory() as directory:
             api = DesktopApi(directory, access=SyntheticAccess())
