@@ -362,10 +362,21 @@ class FrequencyRuntime:
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
             return
-        # Polling a reserve machine must not acquire/renew the school-wide
-        # lease. Only a real capture owns it; this enables standby takeover.
         schedule = status['settings']['schedule']
-        if schedule is None: return
+        # A device with no executable agenda or a known source blocker must
+        # not monopolise the school lease. Eligible leaders still heartbeat
+        # every 30 s so that the admin sees connected/standby computers.
+        if schedule is None or not any(
+            r['enabled'] and (r['times'] or r['recheck']) for r in schedule['rules']
+        ): return
+        blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
+                    'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
+                    'SOURCE_CLASS_AMBIGUOUS', 'CLASS_RECONCILIATION_REQUIRED',
+                    'source-invalid', 'identity-review', 'revision-conflict',
+                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
+        if self._source_blocked or self._code in blockers: return
+        self._acquire(status)
+        status = self._heartbeat(epoch)
         now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
         minute = now.strftime('%Y-%m-%dT%H:%M%z')
         if minute == self._minute: return
