@@ -188,7 +188,8 @@ def worker(args):
                                           'temporary_removed': d._temporary is None,
                                           'temporary_error_codes': getattr(d, '_cleanup_errors', [])} for d in drivers]
             report['close_diagnostic'] = window.evaluate_js('window.__closeDiagnosis ?? null')
-            report['temporary_lock_diagnostic'] = lock_module.locks(getattr(drivers[0], '_temp_failed_path', None))
+            report['temporary_lock_diagnostic'] = lock_module.locks(next(
+                (d._temp_failed_path for d in drivers if getattr(d, '_temp_failed_path', None)), None))
         finally:
             window.destroy()
     try:

@@ -242,10 +242,15 @@ class BrowserWorker:
                     except OSError as error:
                         self._cleanup_errors.append(getattr(error, "winerror", None))
                         self._temp_failed_path = getattr(error, "filename", None)
-                        # Windows can retain a handle briefly after the owned
-                        # process tree exits. Retry only this sharing violation,
-                        # on our own TemporaryDirectory, without relaxing QA.
-                        if getattr(error, "winerror", None) != 32 or attempt == 8:
+                        # Windows can briefly return ERROR_ACCESS_DENIED (5)
+                        # as well as ERROR_SHARING_VIOLATION (32) while Edge's
+                        # closed process tree releases file-system handles.
+                        # Retry 5 only AFTER the owned Windows Job confirmed
+                        # zero surviving processes; do not change permissions,
+                        # bypass ACLs, remove outside paths or suppress errors.
+                        code = getattr(error, "winerror", None)
+                        finished = bool(self.cleanup and self.cleanup.get("verified"))
+                        if (code != 32 and not (code == 5 and finished)) or attempt == 8:
                             raise
                         time.sleep(0.05 * 2 ** attempt)
                 self._temporary = None

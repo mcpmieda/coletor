@@ -164,6 +164,77 @@ class ManualSessionTests(unittest.TestCase):
         self.assertEqual(environment['TMP'], 'owned-temporary')
         self.assertNotEqual(environment['PYTHONPATH'], 'untrusted')
 
+    def test_verified_windows_job_retries_transient_access_denied_cleanup(self):
+        """WinError 5 may linger briefly after a verified Edge process shutdown."""
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+                self.cleaned = False
+
+            def cleanup(self):
+                self.calls += 1
+                if self.calls <= 2:
+                    error = PermissionError("synthetic temporary handle still releasing")
+                    error.winerror = 5
+                    raise error
+                self.cleaned = True
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": True, "remaining_processes": 0}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            worker.close()
+        self.assertTrue(temporary.cleaned)
+        self.assertIsNone(worker._temporary)
+        self.assertEqual(worker._cleanup_errors, [5, 5])
+        self.assertEqual(sleeper.call_count, 2)
+
+    def test_unverified_windows_job_never_suppresses_access_denied(self):
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+
+            def cleanup(self):
+                self.calls += 1
+                error = PermissionError("synthetic access denied")
+                error.winerror = 5
+                raise error
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": False, "remaining_processes": 1}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            with self.assertRaises(PermissionError):
+                worker.close()
+        self.assertIs(worker._temporary, temporary)
+        self.assertEqual(temporary.calls, 1)
+        sleeper.assert_not_called()
+
+    def test_persistent_access_denied_keeps_owned_temporary_for_retry(self):
+        class Temporary:
+            def __init__(self):
+                self.calls = 0
+
+            def cleanup(self):
+                self.calls += 1
+                error = PermissionError("synthetic persistent access denied")
+                error.winerror = 5
+                raise error
+
+        worker = BrowserWorker()
+        temporary = Temporary()
+        worker._temporary = temporary
+        worker.cleanup = {"verified": True, "remaining_processes": 0}
+        with patch("coletor.manual_worker.time.sleep") as sleeper:
+            with self.assertRaises(PermissionError):
+                worker.close()
+        self.assertIs(worker._temporary, temporary)
+        self.assertEqual(temporary.calls, 9)
+        self.assertEqual(worker._cleanup_errors, [5] * 9)
+        self.assertEqual(sleeper.call_count, 8)
+
     def test_operational_failure_is_redacted_and_session_closed(self):
         def failed(_url):
             raise OSError("SECRET PASSWORD PATH")
