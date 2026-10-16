@@ -193,6 +193,19 @@ class ManualSession:
             raise SessionError('SOURCE_LOGIN_REQUIRED') from None
         if not accepted: raise SessionError('SOURCE_LOGIN_FAILED')
 
+    def has_saved_class_selection(self):
+        """Local scheduling hint, never proof that a source class is still available.
+
+        Check the exact current Smecel context without opening Edge or reading
+        protected credentials. operational_catalog() still revalidates the live
+        list before any capture or upload.
+        """
+        from .class_catalog import CONTEXT_KEY, LIST_PATH
+        scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
+                 "year": 2026, "context_key": CONTEXT_KEY}
+        saved = self._selections.read(scope)["selection"]
+        return bool(saved and saved["selected_class_ids"])
+
     def operational_catalog(self, storage):
         """Python-only collection adapter; never accepts HTML/catalog from UI."""
         credential = storage.load_credential() if hasattr(storage, 'load_credential') else None
