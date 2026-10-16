@@ -410,11 +410,13 @@ class FrequencyRuntime:
                 if not self._active or self._paused: raise FrequencyError('CANCELLED')
             status = self._fresh()
             self._reconcile_receipts(epoch)
+            # Ineligible devices do not take the school-wide lease from a
+            # healthy standby collector just to discover a known blocker.
+            if not status['classes']: raise FrequencyError('CENTER_CLASSES_REQUIRED')
+            if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
             self._acquire(status)
             self._check(epoch)
             self._drain(epoch)
-            if not status['classes']: raise FrequencyError('CENTER_CLASSES_REQUIRED')
-            if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
             self._check(epoch)
             selected = set(catalog['selected_class_ids'])
