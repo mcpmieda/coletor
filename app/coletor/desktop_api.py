@@ -141,18 +141,26 @@ class DesktopApi(PreviewApi):
     def get_institutional_access_status(self):
         return self._access.status()
 
-    def open_institutional_login(self):
-        # Starting a new pairing can revoke the former device/generation.
-        # Never make an unreceipted queue impossible to reconcile by replacing
-        # its DPAPI device binding without explicit operator action.
+    def _pending_batch_blocker(self):
+        """Never revoke or replace the identity of an unreconciled encrypted queue."""
         try:
             self._collector._bind_storage()
             if self._collector._storage.queue():
-                return {"error": "Há lotes pendentes. Confira os recibos ou descarte os lotes antes de entrar novamente.",
+                return {"error": "Há lotes sem recibo. Confira os recibos ou descarte com confirmação antes de sair ou trocar o acesso.",
                         "code": "PENDING_BATCHES"}
-        except StorageError:
-            return {"error": "Há dados protegidos que precisam ser conferidos antes de trocar o acesso deste PC.",
+        except StorageError as error:
+            if error.code == "PENDING_BATCHES":
+                return {"error": "Há lotes sem recibo vinculados ao acesso anterior. Confira-os antes de sair ou trocar o acesso.",
+                        "code": "PENDING_BATCHES"}
+            return {"error": "Há dados protegidos que precisam ser conferidos antes de alterar o acesso deste PC.",
                     "code": "PROTECTED_STORAGE_UNAVAILABLE"}
+        return None
+
+    def open_institutional_login(self):
+        # A new pairing may revoke the original generation and bind storage
+        # to a new device. No unreceipted queue may be destroyed implicitly.
+        blocked = self._pending_batch_blocker()
+        if blocked is not None: return blocked
         try:
             self._access.open_login()
             return {"ok": True}
@@ -160,6 +168,10 @@ class DesktopApi(PreviewApi):
             return {"error": str(error), "code": error.code}
 
     def logout_institutional_access(self):
+        # Explicitly clicking "Sair" is not consent to discard academic batches.
+        # Revocation must never happen before pending receipts are reconciled.
+        blocked = self._pending_batch_blocker()
+        if blocked is not None: return blocked
         try:
             self._access.logout()
             self._resume.set(False)
