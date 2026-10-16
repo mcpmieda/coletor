@@ -6,7 +6,13 @@ import { initializeLocalSettings } from '../localSettings';
 import { paintTheme, readTheme } from '../theme';
 import App from '../App';
 
+export interface LocalRecovery {
+  pending: boolean; count: number | null; oldest: number | null;
+  newest: number | null; unreadable: boolean;
+}
 export interface InstitutionalBridge {
+  get_local_recovery_status(): Promise<LocalRecovery>;
+  discard_local_pending_collection(): Promise<{ ok: true; discarded: boolean } | { error: string; code?: string }>;
   get_institutional_access_status(): Promise<{ authenticated: boolean; authorized: boolean; code?: string; pairingCode?: string }>;
   open_institutional_login(): Promise<{ ok: true } | { error: string; code?: string }>;
   logout_institutional_access(): Promise<{ ok: true } | { error: string; code?: string }>;
@@ -24,7 +30,7 @@ async function bridge(): Promise<InstitutionalBridge> {
     });
     native = await nativeApi();
   }
-  if (!native?.get_institutional_access_status || !native.open_institutional_login || !native.logout_institutional_access)
+  if (!native?.get_institutional_access_status || !native.open_institutional_login || !native.logout_institutional_access || !native.get_local_recovery_status || !native.discard_local_pending_collection)
     throw new Error('O acesso institucional está disponível no programa Windows.');
   return native as InstitutionalBridge;
 }
@@ -33,6 +39,8 @@ export default function InstitutionalAccess() {
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
   const [pairingCode, setPairingCode] = useState('');
   const [cleanupPending, setCleanupPending] = useState(false);
+  const [recovery, setRecovery] = useState<LocalRecovery | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState('');
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
   const previouslyAuthorized = useRef(false);
   const recheck = useCallback(async () => {
@@ -41,7 +49,9 @@ export default function InstitutionalAccess() {
     checking.current = current;
     try {
       const result = await (await bridge()).get_institutional_access_status();
+      const local = await (await bridge()).get_local_recovery_status();
       if (!mounted.current || current !== epoch.current) return;
+      setRecovery(local);
       setPairingCode(typeof result.pairingCode === 'string' && /^[0-9]{6}$/.test(result.pairingCode) ? result.pairingCode : '');
       setCleanupPending(result.code === 'ACCESS_CLEANUP_PENDING' || result.code === 'SERVER_REVOCATION_PENDING');
       if (result.authenticated === true && result.authorized === true) {
@@ -105,13 +115,43 @@ export default function InstitutionalAccess() {
       if (!blockedByPendingBatch) void recheck();
     }
   }
-  if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div>{notice && <p role="alert">{notice}</p>}<App /></>;
+  async function recoverLocal() {
+    if (operation.current) return;
+    operation.current = true; epoch.current++; setBusy(true); setRecoveryNotice('');
+    try {
+      const result = await (await bridge()).discard_local_pending_collection();
+      if ('error' in result) setRecoveryNotice(result.error);
+      else setRecoveryNotice(result.discarded
+        ? 'Fila local descartada mediante confirmação do Windows. Faça uma nova coleta para recuperar as informações ausentes.'
+        : 'Não havia lotes locais pendentes.');
+      setRecovery(await (await bridge()).get_local_recovery_status());
+    } catch { setRecoveryNotice('Falha ao conferir a fila local. Nenhum descarte foi confirmado.'); }
+    finally { operation.current = false; setBusy(false); void recheck(); }
+  }
+  function recoveryPanel() {
+    if (!recovery?.pending) return null;
+    const date = (value: number | null) => value === null ? 'desconhecida'
+      : new Date(value * 1000).toLocaleString('pt-BR');
+    return <section className="panel" aria-label="Recuperação de lotes locais">
+      <p role="alert">Há {recovery.count === null ? 'lotes cifrados de quantidade desconhecida' : `${recovery.count} lote(s)`} sem recibo.
+        Primeiro: {date(recovery.oldest)}. Último: {date(recovery.newest)}.</p>
+      <p>Quando a autorização for revogada, não é possível consultar recibos.
+        O descarte local pode perder registros que ainda não chegaram ao Centro.
+        Só prossiga após conferir com a administração. Será exigida confirmação do Windows.</p>
+      <Button variant="secondary" isDisabled={busy} onPress={() => { void recoverLocal(); }}>
+        Descartar fila local com confirmação do Windows
+      </Button>
+    </section>;
+  }
+  if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div>{notice && <p role="alert">{notice}</p>}{recovery?.pending && recovery.unreadable && recoveryPanel()}{recoveryNotice && <p role="alert">{recoveryNotice}</p>}<App /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>
     <Button isDisabled={busy} onPress={() => { void login(); }}><LogIn size={18} />Entrar no Ecossistema</Button>
     <Button variant="ghost" isDisabled={busy} onPress={() => { void recheck(); }}>Verificar acesso</Button>
     {(pairingCode || cleanupPending) && <Button variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>{cleanupPending ? 'Concluir saída' : 'Cancelar autorização'}</Button>}
+    {recoveryPanel()}
+    {recoveryNotice && <p role="alert">{recoveryNotice}</p>}
     {notice && <p role="status">{notice}</p>}<p className="muted">O login é feito no navegador. Não informe sua senha neste programa.</p>
     {pairingCode && <p role="status">Digite este código no navegador: <strong>{pairingCode}</strong></p>}
   </section></main>;
