@@ -158,8 +158,40 @@ jobs:
           # GITHUB_TOKEN PR creation does not trigger pull_request workflows.
           # Explicit workflow_dispatch is exempt from this restriction.
           gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          if gh pr merge "$pr_url" --repo "$GITHUB_REPOSITORY" --auto --merge; then
-            echo 'Check-gated archive PR scheduled for auto-merge.'
+          echo 'The separate workflow_run job will merge only after BOTH dispatched checks succeed.'
+
+
+  archive-merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      startsWith(github.event.workflow_run.head_branch, 'automation/instalador-run-') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARCHIVE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      CHECKED_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Merge archive PR only after validated source and both required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$ARCHIVE_BRANCH" \
+            --state open --json number,url,headRefOid,baseRefName,files --limit 5)"
+          if ! jq -e --arg sha "$CHECKED_SHA" \
+            'length == 1 and .[0].headRefOid == $sha and .[0].baseRefName == "main" and (.[0].files | length > 0) and (.[0].files | all(.[]; .path | startswith("instalador/")))' \
+            <<< "$pr" >/dev/null; then
+            echo '::error::Archive PR provenance or changed paths do not match the checked commit.'
+            exit 1
+          fi
+          run_id="$(printf '%s' "$ARCHIVE_BRANCH" | sed -n 's@^automation/instalador-run-\([1-9][0-9]*\)$@\1@p')"
+          test -n "$run_id"
+          gh release view "coletor-installer-run-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null
+          url="$(jq -r '.[0].url' <<< "$pr")"
+          if gh pr merge "$url" --repo "$GITHUB_REPOSITORY" --merge; then
+            echo 'Protected checks passed; archive merged into main.'
           else
-            echo '::warning::Bot auto-merge not permitted; archive PR remains open for normal merge. The release is already available.'
+            echo '::warning::Branch protection requires a human action; archive PR remains open. Release is available.'
           fi
