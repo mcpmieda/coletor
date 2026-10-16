@@ -174,7 +174,47 @@ class RuntimeTests(unittest.TestCase):
         self.provider.paused = False
         self.runtime.tick()
         self.assertFalse(self.runtime._school_paused)
-        self.assertIsNotNone(self.runtime._lease)
+        self.assertIsNone(self.runtime._lease)  # Idle polling never takes school leadership.
+
+    def test_idle_scheduler_and_blocked_source_never_take_school_leadership(self):
+        self.runtime.tick()
+        self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
+        self.runtime._source_blocked = True
+        self.runtime.collect()
+        self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
+        self.assertEqual(self.runtime.public_status()['code'], 'SOURCE_LOGIN_REQUIRED')
+
+    def test_heartbeat_temporary_failure_does_not_cancel_a_valid_capture(self):
+        class QuickEvent(threading.Event):
+            def wait(self, timeout=None):
+                return super().wait(None if timeout is None else min(timeout, 0.02))
+
+        original = self.provider.frequency_request
+        failures = []
+
+        def transient(payload):
+            if payload['operation'] == 'heartbeat':
+                failures.append(True)
+                raise FrequencyError('unavailable')
+            return original(payload)
+
+        self.provider.frequency_request = transient
+        self.source.on_capture = lambda: time.sleep(0.12)
+        with patch.object(frequency_runtime.threading, 'Event', QuickEvent):
+            result = self.runtime.collect()
+        self.assertTrue(failures)
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(result['lastReceipt']['resolvedRecords'], 1)
+        self.assertEqual(self.storage.queue(), [])
+
+    def test_discard_after_annual_reset_requires_confirmation_without_replay(self):
+        self.storage.enqueue({'requestId': DEVICE, 'operation': 'collect', 'academicYear': 2026})
+        self.runtime._receipt = Mock(side_effect=FrequencyError('revision-conflict'))
+        self.runtime._confirm_discard = Mock(return_value=True)
+        self.runtime.discard_queue()
+        self.assertEqual(self.storage.queue(), [])
+        self.runtime._confirm_discard.assert_called_once()
+        self.runtime._receipt.assert_called_once()
 
     def test_activation_declined_persistence_keeps_memory_and_no_source_loop(self):
         self.runtime._active = False
@@ -344,6 +384,7 @@ class RuntimeTests(unittest.TestCase):
         time.sleep(.02)
         self.runtime.tick()
         self.assertEqual(self.runtime.collect.call_count, 1)
+        self.assertFalse(self.runtime._operation.locked())
         self.provider.now += 120
         self.runtime.tick()
         self.assertEqual(self.runtime.collect.call_count, 1)
