@@ -84,7 +84,9 @@ class DesktopApi(PreviewApi):
     def _access_locked(self):
         # Connectivity loss cancels operational work, but is not a revocation
         # receipt. Retain only the consented encrypted reconciliation queue.
-        self._collector.cancel(purge=self._access._locked_code != 'ACCESS_UNAVAILABLE')
+        # Only explicit logout can destroy the protected reconciliation queue.
+        # Reauthentication, revocation and connectivity errors are not receipts.
+        self._collector.cancel(purge=False)
 
     def _operational(self, work):
         try: return work()
