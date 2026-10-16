@@ -182,13 +182,19 @@ class DesktopApi(PreviewApi):
                 return {'error':'Sem conexão. Aguarde para conferir os recibos; não descarte por falha temporária.',
                         'code':'ACCESS_UNAVAILABLE'}
             if status.get('authenticated') and status.get('authorized'):
-                try: self._collector._bind_storage()
+                try:
+                    self._collector._bind_storage()
+                    current=self._collector._storage.recovery_status()
                 except StorageError as error:
-                    if error.code!='PENDING_BATCHES':
+                    current=self._collector._storage.recovery_status()
+                    if error.code!='PENDING_BATCHES' and not (current['pending'] and current['unreadable']):
                         return {'error':'Não foi possível conferir a fila cifrada.','code':error.code}
                 else:
-                    return {'error':'O computador está autorizado. Consulte primeiro os recibos pelo descarte normal.',
-                            'code':'ACCESS_REQUIRED'}
+                    # A still-readable queue must use server receipts; an
+                    # unreadable prior-generation DPAPI blob cannot do so.
+                    if not (current['pending'] and current['unreadable']):
+                        return {'error':'O computador está autorizado. Consulte primeiro os recibos pelo descarte normal.',
+                                'code':'ACCESS_REQUIRED'}
             summary=self._collector._storage.recovery_status()
             if not summary['pending']:
                 return {'ok':True,'discarded':False}
