@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, Input, Label, TextField } from '@heroui/react';
 import { KeyRound } from 'lucide-react';
 import { collectorBridge, checkedCollector, type CollectorStatus } from '../collector';
@@ -10,15 +10,17 @@ export default function SmecelAccess({ status, onStatus }: Readonly<{
   const [email, setEmail] = useState(''), [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const saved = status?.credential?.saved === true;
+  // The form or the remove button disappears on success; keep keyboard focus in this panel.
+  const heading = useRef<HTMLHeadingElement>(null);
   async function run(work: () => Promise<CollectorStatus>, done: string) {
     if (busy) return;
     setBusy(true); setError(''); setNotice('');
-    try { onStatus(await work()); setNotice(done); setPassword(''); }
+    try { onStatus(await work()); setNotice(done); setPassword(''); heading.current?.focus(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { setBusy(false); }
   }
   return <section className="panel source-panel" aria-labelledby="smecel-access-title">
-    <div className="section-heading"><h2 id="smecel-access-title">Acesso ao Smecel</h2><KeyRound size={20} className="muted" aria-hidden="true" /></div>
+    <div className="section-heading"><h2 id="smecel-access-title" ref={heading} tabIndex={-1}>Acesso ao Smecel</h2><KeyRound size={20} className="muted" aria-hidden="true" /></div>
     {saved ? <>
       <p>Acesso salvo: <strong>{status?.credential?.account}</strong>. Quando o Smecel desconectar, o Coletor entra sozinho.</p>
       <div className="source-actions"><Button variant="secondary" isDisabled={busy} onPress={() => { void run(async () => checkedCollector(await (await collectorBridge()).forget_source_credential()), 'Acesso removido deste computador.'); }}>Remover acesso salvo</Button></div>
