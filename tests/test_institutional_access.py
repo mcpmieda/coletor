@@ -88,6 +88,30 @@ class InstitutionalAccessTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             gate.run(lambda: 'preview')
 
+    def test_concurrent_transient_check_does_not_revoke_inflight_valid_work(self):
+        locked = []
+        provider = Provider([response(), AccessDenied('ACCESS_UNAVAILABLE'), response()])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW,
+                                   on_locked=lambda: locked.append('revoked'))
+        def capture_with_heartbeat_outage():
+            # A background heartbeat/status failure must not invalidate the
+            # generation of a capture whose own final gate later passes.
+            status = gate.status()
+            self.assertEqual(status['code'], 'ACCESS_UNAVAILABLE')
+            return 'synthetic-capture'
+        self.assertEqual(gate.run(capture_with_heartbeat_outage), 'synthetic-capture')
+        self.assertEqual(locked, [])
+        self.assertEqual(provider.reads, 3)
+
+    def test_concurrent_confirmed_denial_still_cancels_inflight_work(self):
+        locked = []
+        provider = Provider([response(), AccessDenied('ACCESS_REQUIRED'), response()])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW,
+                                   on_locked=lambda: locked.append('revoked'))
+        with self.assertRaises(AccessDenied):
+            gate.run(lambda: gate.status())
+        self.assertTrue(locked)
+
     def test_logout_during_operation_invalidates_generation(self):
         provider = Provider([response(), response()])
         gate = InstitutionalAccess(provider, clock=lambda: NOW)
