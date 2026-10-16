@@ -7,7 +7,9 @@ on:
   workflow_run:
     workflows: ["Preview checks"]
     types: [completed]
-    branches: [main]
+    branches:
+      - main
+      - 'automation/instalador-*'
 
 permissions:
   contents: write
