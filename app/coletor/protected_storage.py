@@ -269,7 +269,15 @@ class ProtectedStorage:
 
     def acknowledge(self, request_id):
         with self._lock:
-            self._write('queue', [v for v in self.queue() if v['payload'].get('requestId') != request_id])
+            remaining = [v for v in self.queue() if v['payload'].get('requestId') != request_id]
+            if remaining:
+                self._write('queue', remaining)
+            else:
+                # A successfully reconciled last receipt must not leave an
+                # unreadable (without old generation entropy) encrypted empty
+                # queue that blocks a fresh safe-removal process. Unlink is
+                # atomic and failures propagate; never remove nonempty queues.
+                self.discard_confirmed_local_queue()
 
     def save_credential(self, email, password):
         """Explicit operator action: the Smecel login is written cifrado by

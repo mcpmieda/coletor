@@ -103,7 +103,7 @@ export default function App() {
       {tray.notice && <output>{tray.notice}</output>}
       <div hidden={view !== 'schedule'}>{desktop ? <SharedScheduleSettings /> : <ScheduleSettings />}</div>
       {view === 'history' && <CollectorHistory />}
-      {view === 'preview' && <div className="page-stack">
+      <div className="page-stack" hidden={view !== 'preview'}>
         <CollectorControl />
         <ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
         <ToolsPanel desktop={desktop} open={toolsOpen || busy || !!error} onToggle={setToolsOpen}>
@@ -116,7 +116,7 @@ export default function App() {
         </ToolsPanel>
         {preview && <><div className="preview-context"><span>{previewOrigin(preview.mode)} · Lido às {new Date(preview.processed_at).toLocaleTimeString('pt-BR')}</span><Button size="sm" variant="ghost" onPress={clear}><X size={14} />Fechar diário</Button></div><div className="summary-grid"><div><span>Alunos no diário</span><strong>{preview.snapshot.students.length}</strong></div><div><span>Faltas</span><strong>{states?.absent ?? 0}</strong></div><div><span>Marcações sem confirmação</span><strong>{states?.planned_unknown ?? 0}</strong></div><div><span>Dados enviados</span><strong>0</strong></div></div><div className="content-grid"><AttendancePreview key={preview.snapshot.snapshot_id} preview={preview} /><ValidationPanel preview={preview} /></div></>}
         {!preview && !busy && !desktop && <section className="empty-state"><span className="empty-icon"><ShieldCheck size={30} /></span><h2>Vamos conferir a frequência?</h2><p>Abra um diário ou use os dados de exemplo.</p><div className="empty-footnote">Seus dados não são enviados.</div></section>}
-      </div>}
+      </div>
     </main>
   </div>;
 }

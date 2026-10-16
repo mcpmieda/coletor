@@ -133,6 +133,37 @@ class SafeRemovalTests(unittest.TestCase):
         self.factory.assert_not_called()
         self.assertEqual(self.transport.calls, [])
 
+    def test_confirmed_last_receipt_unlinks_empty_encrypted_queue_before_safe_removal(self):
+        self.activate_fake()
+        from coletor.protected_storage import ProtectedStorage
+        from test_frequency_runtime import SyntheticCrypto
+        storage = ProtectedStorage(self.root, crypto=SyntheticCrypto(), clock=lambda: NOW)
+        storage.bind(DEVICE, 1)
+        storage._enabled = True
+        storage.enqueue({'requestId': 'CONFIRMED-SYNTHETIC'})
+        queue = storage.directory / 'queue.dpapi'
+        self.assertTrue(queue.exists())
+        storage.acknowledge('CONFIRMED-SYNTHETIC')
+        self.assertFalse(queue.exists())
+        self.assertEqual(storage.queue(), [])
+        # New safe-removal process has no DPAPI generation in memory: an
+        # acknowledged empty queue must not block device revocation.
+        self.assertEqual(run(provider=self.provider, output=self.output), 0)
+        self.assertFalse(self.crypto.exists)
+
+    def test_pending_encrypted_queue_remains_intact_after_other_receipt(self):
+        from coletor.protected_storage import ProtectedStorage
+        from test_frequency_runtime import SyntheticCrypto
+        storage = ProtectedStorage(self.root, crypto=SyntheticCrypto(), clock=lambda: NOW)
+        storage.bind(DEVICE, 1)
+        storage._enabled = True
+        storage.enqueue({'requestId': 'CONFIRMED'})
+        storage.enqueue({'requestId': 'PENDING'})
+        storage.acknowledge('CONFIRMED')
+        encrypted = (storage.directory / 'queue.dpapi').read_bytes()
+        self.assertEqual([v['payload']['requestId'] for v in storage.queue()], ['PENDING'])
+        self.assertEqual((storage.directory / 'queue.dpapi').read_bytes(), encrypted)
+
     def test_cli_dispatch_does_not_start_desktop_or_preview(self):
         with patch('coletor.safe_removal.run', return_value=2) as action:
             self.assertEqual(main(['--safe-removal']), 2)

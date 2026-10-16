@@ -162,6 +162,7 @@ jobs:
       - name: Build per-user Windows installer only after full native success
         shell: pwsh
         env:
+          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 }}
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |

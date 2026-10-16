@@ -433,8 +433,11 @@ class FrequencyRuntime:
         if self._source_blocked or self._code in blockers:
             self._release_if_ineligible(status)
             return
-        self._acquire(status)
-        status = self._heartbeat(epoch)
+        # A school-wide lease is reserved only by collect(), after verifying
+        # real Smecel selections intersect the currently scheduled shifts.
+        # Keeping one while idle would starve a PC responsible for another
+        # shift, even if this machine has unrelated saved classes.
+        self._release_if_ineligible(status)
         now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
         minute = now.strftime('%Y-%m-%dT%H:%M%z')
         if minute == self._minute: return
@@ -484,9 +487,8 @@ class FrequencyRuntime:
             if not status['classes']: raise FrequencyError('CENTER_CLASSES_REQUIRED')
             if not self._has_saved_selection(): raise FrequencyError('NO_SELECTED_CLASSES')
             if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
-            self._acquire(status)
-            self._check(epoch)
-            self._drain(epoch)
+            # Discover first. A saved ID without a class of the requested
+            # shift must never acquire the school lease from an eligible PC.
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
             self._check(epoch)
             selected = set(catalog['selected_class_ids'])
@@ -494,6 +496,13 @@ class FrequencyRuntime:
             if catalog['unavailable_class_ids']: raise FrequencyError('SOURCE_CLASS_UNAVAILABLE')
             if not sources: raise FrequencyError('NO_SELECTED_CLASSES')
             pairs, unmatched = self._pair_classes(sources, status['classes'], shifts)
+            if not pairs:
+                # Zero coverage cannot be a successful scheduled window and
+                # must not consume another computer's school leadership.
+                raise FrequencyError('NO_SELECTED_CLASSES' if not unmatched else 'SOURCE_CLASS_AMBIGUOUS')
+            self._acquire(status)
+            self._check(epoch)
+            self._drain(epoch)
             with self._lock:
                 self._state, self._code = 'collecting', None
                 self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}

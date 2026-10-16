@@ -1,7 +1,7 @@
 # Signs the Setup with the school's code-signing certificate kept as GitHub secrets.
 # Usage (CI): sign-installer.ps1 -Path dist\windows-installer\Setup.exe
-#   env WINDOWS_SIGNING_PFX_BASE64  base64 of the .pfx (certificate + private key)
-#   env WINDOWS_SIGNING_PFX_PASSWORD password of the .pfx
+#   env WINDOWS_SIGNING_BUNDLE_BASE64  base64 JSON with pfx and password
+#   Legacy: WINDOWS_SIGNING_PFX_BASE64 and WINDOWS_SIGNING_PFX_PASSWORD
 #
 # ASCII only on purpose: Windows PowerShell 5 reads BOM-less .ps1 files as ANSI.
 #
@@ -13,13 +13,23 @@
 # Software Foundation; that executable is never re-signed.
 param([Parameter(Mandatory = $true)][string]$Path)
 $ErrorActionPreference = 'Stop'
-if (-not $env:WINDOWS_SIGNING_PFX_BASE64) {
+if ($env:WINDOWS_SIGNING_BUNDLE_BASE64) {
+    $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:WINDOWS_SIGNING_BUNDLE_BASE64))
+    $bundle = ConvertFrom-Json -InputObject $json
+    if (-not $bundle.pfx -or -not $bundle.password) { throw 'Incomplete signing bundle' }
+    $pfxBase64, $pfxPassword = $bundle.pfx, $bundle.password
+} elseif ($env:WINDOWS_SIGNING_PFX_BASE64 -or $env:WINDOWS_SIGNING_PFX_PASSWORD) {
+    if (-not $env:WINDOWS_SIGNING_PFX_BASE64 -or -not $env:WINDOWS_SIGNING_PFX_PASSWORD) {
+        throw 'Incomplete legacy signing certificate configuration'
+    }
+    $pfxBase64, $pfxPassword = $env:WINDOWS_SIGNING_PFX_BASE64, $env:WINDOWS_SIGNING_PFX_PASSWORD
+} else {
     Write-Warning 'Code-signing certificate not configured: the installer is NOT signed.'
     exit 0
 }
-$bytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64)
+$bytes = [Convert]::FromBase64String($pfxBase64)
 $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
-$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes, $env:WINDOWS_SIGNING_PFX_PASSWORD, $flags)
+$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes, $pfxPassword, $flags)
 if (-not $cert.HasPrivateKey) { throw 'Signing certificate has no private key' }
 $codeSigning = $cert.EnhancedKeyUsageList | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.3' }
 if (-not $codeSigning) { throw 'Certificate is not a code-signing certificate' }

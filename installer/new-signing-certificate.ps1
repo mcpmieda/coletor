@@ -1,5 +1,5 @@
 # Creates the school's self-signed code-signing certificate once and stores it as
-# the two GitHub secrets used by sign-installer.ps1. Run by the owner on their PC:
+# one atomic GitHub secret used by sign-installer.ps1. Run by the owner on their PC:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File installer\new-signing-certificate.ps1
 # Requires the GitHub CLI (gh) logged in with access to the repository.
 #
@@ -25,12 +25,23 @@ $bytes = New-Object byte[] 32
 $password = [Convert]::ToBase64String($bytes)
 $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
 $pfx = Join-Path ([System.IO.Path]::GetTempPath()) ("coletor-signing-" + [guid]::NewGuid() + '.pfx')
+$published = $false
 try {
     Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $secure | Out-Null
-    [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($pfx)) | gh secret set WINDOWS_SIGNING_PFX_BASE64 --repo $Repository
-    $password | gh secret set WINDOWS_SIGNING_PFX_PASSWORD --repo $Repository
+    # A single secret prevents PFX/password version skew on partial uploads.
+    # The base64 envelope contains JSON; nothing is printed to console.
+    $bundle = @{ pfx = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($pfx)); password = $password } | ConvertTo-Json -Compress
+    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($bundle))
+    $encoded | gh secret set WINDOWS_SIGNING_BUNDLE_BASE64 --repo $Repository
+    if ($LASTEXITCODE -ne 0) { throw 'GitHub secret upload failed. Local certificate retained for recovery.' }
+    $published = $true
 } finally {
     Remove-Item $pfx -Force -ErrorAction SilentlyContinue
-    Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+    if ($published) {
+        Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+    } else {
+        Write-Warning "Upload not confirmed. Local certificate retained in CurrentUser/My (thumbprint: $($cert.Thumbprint))."
+    }
 }
-Write-Host "Code-signing certificate stored as GitHub secrets. Thumbprint: $($cert.Thumbprint)"
+if (-not $published) { throw 'Certificate publication not confirmed' }
+Write-Host "Code-signing bundle stored as one GitHub secret. Thumbprint: $($cert.Thumbprint)"
