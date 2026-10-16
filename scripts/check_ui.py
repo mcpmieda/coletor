@@ -206,6 +206,8 @@ try:
           window.syntheticSaves=[];window.holdSharedReload=false;window.syntheticConflict=true;
           window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),
             open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),
+            get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
+            discard_local_pending_collection:async()=>({ok:true,discarded:false}),
             get_local_settings:async()=>({settings:window.syntheticSettings}),
             get_collector_status:()=>window.holdSharedReload?new Promise(resolve=>window.finishReload=resolve):Promise.resolve(window.syntheticCollector),
             activate_collector:async()=>window.syntheticCollector,collect_now:async()=>window.syntheticCollector,
