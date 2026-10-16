@@ -570,8 +570,37 @@ class StorageTests(unittest.TestCase):
         self.assertNotIn(b'PRIVATE SYNTHETIC', raw)
         restored = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto()); restored.bind(DEVICE, 1)
         self.assertEqual(len(restored.queue()), 2)
+        before = (restored.directory / 'queue.dpapi').read_bytes()
+        with self.assertRaises(StorageError) as prevented:
+            restored.bind(DEVICE, 2)
+        self.assertEqual(prevented.exception.code, 'PENDING_BATCHES')
+        self.assertEqual((restored.directory / 'queue.dpapi').read_bytes(), before)
+        self.assertEqual(len(restored.queue()), 2)
+        restored.acknowledge(DEVICE)
+        restored.acknowledge('second')
         restored.bind(DEVICE, 2)
         self.assertEqual(restored.queue(), [])
+
+    def test_binding_switch_preserves_unreceipted_memory_queue(self):
+        self.storage.enqueue({'requestId': 'pending-in-memory', 'marks': ['X']})
+        with self.assertRaises(StorageError) as prevented:
+            self.storage.bind('other-device', 2)
+        self.assertEqual(prevented.exception.code, 'PENDING_BATCHES')
+        self.assertEqual(self.storage._binding, f'{DEVICE}:1')
+        self.assertEqual(self.storage.queue()[0]['payload']['requestId'], 'pending-in-memory')
+        self.storage.acknowledge('pending-in-memory')
+        self.storage.bind('other-device', 2)
+        self.assertEqual(self.storage.queue(), [])
+
+    def test_corrupt_old_queue_blocks_generation_switch_without_deleting_blob(self):
+        self.storage.enable()
+        self.storage.enqueue({'requestId': 'pending-on-disk'})
+        path = self.storage.directory / 'queue.dpapi'
+        path.write_bytes(b'corrupt')
+        with self.assertRaises(StorageError):
+            self.storage.bind(DEVICE, 2)
+        self.assertEqual(path.read_bytes(), b'corrupt')
+        self.assertEqual(self.storage._binding, f'{DEVICE}:1')
 
     def test_wrong_device_and_corrupt_dpapi_fail_closed(self):
         self.storage.enable(); self.storage.enqueue({'requestId': DEVICE})
