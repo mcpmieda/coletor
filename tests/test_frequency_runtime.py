@@ -320,6 +320,72 @@ class RuntimeTests(unittest.TestCase):
         backup.collect()
         self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
 
+    def test_two_pcs_with_different_shifts_only_matching_pc_takes_school_lease(self):
+        # The matutino PC ticks first, but only the vespertino PC has a
+        # class matching today's requested shift. Neither its cached selection
+        # nor any prior schedule poll is authority to reserve the shared lease.
+        school = {'owner': None, 'fence': 0}
+        class SharedProvider(Provider):
+            def __init__(self, identity):
+                super().__init__()
+                self.identity = identity
+
+            def storage_binding(self):
+                return self.identity, 1
+
+            def frequency_request(self, payload):
+                operation = payload['operation']
+                if operation == 'status':
+                    status = super().frequency_request(payload)
+                    status['classes'].append({'classId': 20, 'sourceClassLabel': 'TURMA SINTÉTICA B',
+                                              'shift': 'vespertino', 'revision': self.revision})
+                    return status
+                if operation == 'lease':
+                    self.requests.append(copy.deepcopy(payload))
+                    if school['owner'] is not None and school['owner'] != self.identity:
+                        raise FrequencyError('lease-busy')
+                    school['owner'] = self.identity
+                    school['fence'] += 1
+                    self.fence = school['fence']
+                    return {'contractVersion': 2, 'state': 'committed', 'operation': operation,
+                            'requestId': payload['requestId'], 'fencingToken': school['fence'],
+                            'expiresAt': stamp(self.now + 120)}
+                return super().frequency_request(payload)
+
+        def peer(identity, class_id, name, shift):
+            provider = SharedProvider(identity)
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            storage = ProtectedStorage(directory.name, crypto=SyntheticCrypto(),
+                                       clock=lambda: provider.now)
+            storage.bind(identity, 1)
+            source = Source()
+            source.operational_catalog = lambda st: {
+                'selected_class_ids': [class_id], 'unavailable_class_ids': [],
+                'catalog': {'classes': [{'class_id': class_id, 'name': name, 'shift': shift}]}}
+            view = preview()
+            view['snapshot']['class_id'] = class_id
+            for student in view['snapshot']['students']:
+                student['original_class'] = name
+            source.operational_capture = lambda unused: copy.deepcopy(view)
+            runtime = FrequencyRuntime(Access(), provider, source,
+                                       storage=storage, clock=lambda: provider.now)
+            runtime._active = True
+            self.addCleanup(runtime.shutdown)
+            return runtime, provider
+
+        morning, morning_provider = peer(DEVICE, '13331', 'TURMA SINTÉTICA A', 'matutino')
+        evening, evening_provider = peer('22222222-2222-4222-8222-222222222222',
+                                         '13332', 'TURMA SINTÉTICA B', 'vespertino')
+        morning.tick()  # Idle polling does not claim the school.
+        morning.collect({'vespertino'})
+        self.assertNotIn('lease', [p['operation'] for p in morning_provider.requests])
+        self.assertIsNone(school['owner'])
+        self.assertEqual(evening.collect({'vespertino'})['state'], 'ready')
+        self.assertEqual(school['owner'], evening_provider.identity)
+        self.assertEqual(sum(p['operation'] == 'collect' for p in morning_provider.requests), 0)
+        self.assertEqual(sum(p['operation'] == 'collect' for p in evening_provider.requests), 1)
+
     def test_server_generation_change_cannot_silently_drop_pending_queue(self):
         self.runtime._storage.enqueue({'requestId': 'unreceipted-synthetic'})
         self.provider.storage_binding = lambda: (DEVICE, 2)
