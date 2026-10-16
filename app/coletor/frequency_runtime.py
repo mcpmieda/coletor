@@ -385,9 +385,12 @@ class FrequencyRuntime:
                 return
             try:
                 self._fired.update(keys)
-                # Ownership passes to collect(), which releases it in finally.
-                threading.Thread(target=self.collect, args=(shifts,),
-                                 kwargs={'_claimed': True}, daemon=True, name='collector-capture').start()
+                # The scheduler owns this lock until the worker finishes. This
+                # also releases it for injected test workers and early errors.
+                def run_scheduled():
+                    try: self.collect(shifts, _claimed=True)
+                    finally: self._operation.release()
+                threading.Thread(target=run_scheduled, daemon=True, name='collector-capture').start()
             except Exception:
                 self._fired.difference_update(keys)
                 self._minute = None
@@ -503,7 +506,7 @@ class FrequencyRuntime:
         finally:
             heartbeat_stop.set()
             if heartbeat: heartbeat.join(timeout=1)
-            self._operation.release()
+            if not _claimed: self._operation.release()
             self._on_finished(self.public_status()['state'] == 'error')
 
     @staticmethod
