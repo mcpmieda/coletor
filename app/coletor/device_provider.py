@@ -92,7 +92,8 @@ class OfficialTransport:
                     or not (reply.getheader('Content-Type') or '').lower().startswith('application/json')
                     or length is not None and (not length.isdigit() or int(length) > limit)):
                 # http.client never follows redirects; no second destination is contacted.
-                raise AccessDenied('ACCESS_NOT_CONFIGURED' if reply.status == 503 or path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
+                raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status == 503 else
+                                   'ACCESS_NOT_CONFIGURED' if path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
             raw = reply.read(limit + 1)
             if len(raw) > limit:
                 raise AccessDenied('INVALID_ACCESS_RESPONSE')
@@ -222,9 +223,11 @@ class DeviceProvider:
                 or type(value['generation']) is not int or value['generation'] < 1
                 or any(type(value[n]) is not int for n in ('issuedAt', 'expiresAt'))
                 or value['expiresAt'] - value['issuedAt'] != 60_000
-                or value['issuedAt'] > self._clock()*1000 + 5000 or value['expiresAt'] <= self._clock()*1000
+                or value['issuedAt'] <= 0 or value['expiresAt'] <= value['issuedAt']
                 or any(not isinstance(value[n], str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', value[n]) for n in ('nonce', 'accountKey'))):
             raise AccessDenied('INVALID_DEVICE_CHALLENGE')
+        # The server clock is authoritative for the 60-second nonce; local wall-clock
+        # skew must never reject a newly issued HTTPS challenge. Server verifies TTL.
         fields = ('deviceId', 'generation', 'accountKey', 'keyThumbprint', 'nonce', 'audience', 'method', 'path', 'purpose', 'issuedAt', 'expiresAt')
         if purpose == 'collector-frequency': fields += ('requestHash',)
         content = compact([value[n] for n in fields])
