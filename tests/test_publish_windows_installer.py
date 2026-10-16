@@ -48,6 +48,9 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertIn('workflow_dispatch:', checks)
         self.assertIn("github.event_name != 'pull_request'", checks)
         self.assertIn('Installer archive-only merge', workflow)
+        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", workflow)
+        self.assertIn("startsWith(github.event.workflow_run.head_branch, 'automation/instalador-run-')", workflow)
+        self.assertIn("all(.[]; .path | startswith(\\\"instalador/\\\"))", workflow)
 
     def test_publishes_one_real_pe_and_same_sha256(self):
         self.stage()

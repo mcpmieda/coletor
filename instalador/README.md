@@ -9,10 +9,10 @@ Esta pasta mantém os **cinco instaladores .exe mais recentes aprovados pelos te
 - **Compatibilidade:** instalador Windows x64, instalado por usuário, com Windows 10 ou superior e os pré-requisitos especificados em docs/WINDOWS_INSTALLER.md (WebView2, Edge e .NET Framework 4.8). A validação automatizada não substitui a homologação com a conta Microsoft, o Smecel e PCs físicos da escola.
 - **Assinatura:** o script de compilação assina o .exe apenas se os segredos de assinatura estiverem configurados. Sem eles, o instalador continuará sendo um executável Windows válido, mas pode exibir avisos do SmartScreen; não declarar a assinatura como concluída nesses casos.
 
-O commit automático é feito com o GITHUB_TOKEN e **não dispara um segundo build**. A publicação precisa de contents: write e de autorização da proteção da branch main para esse token. Se a política impedir push direto, o job falhará **sem apagar a última versão publicada**; um administrador terá de autorizar um mecanismo compatível com a proteção da branch.
+O publicador **não executa push direto na `main`**, nem pula checks. A atualização da pasta ocorre por PR de arquivo versionado em Git LFS e depende da proteção de branch. A aprovação automatizada em CI não dispensa as permissões necessárias para integrá-la.
 
 Documentação complementar: docs/WINDOWS_INSTALLER.md.
 
 ## Branch protegida e cinco versões
 
-Após CI Windows aprovado, o publicador guarda o `.exe` e seu `.sha256` em um GitHub Release permanente, mantendo até cinco releases desse tipo. Para atualizar os binários Git LFS desta pasta, ele abre uma PR da branch `automation/instalador-*`, dispara explicitamente `verify` e `windows-portable` com `workflow_dispatch` e solicita auto-merge. A proteção de `main` permanece válida. Se o bot não puder integrar automaticamente, o release já está disponível e a PR aguarda revisão humana. Merges que alteram apenas `instalador/` não criam outro release.
+Após CI Windows aprovado, o publicador guarda o `.exe` e seu `.sha256` em um GitHub Release permanente, mantendo até cinco releases desse tipo. Para atualizar os binários Git LFS desta pasta, ele abre uma PR da branch `automation/instalador-*`, dispara explicitamente `verify` e `windows-portable` com `workflow_dispatch`; um job separado tenta integrá-la **somente após os dois checks aprovarem**. A proteção de `main` permanece válida. Se a proteção não permitir o merge pelo bot, o release já está disponível e a PR aguarda revisão humana. Merges que alteram apenas `instalador/` não criam outro release.
