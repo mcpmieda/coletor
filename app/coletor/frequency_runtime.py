@@ -335,6 +335,30 @@ class FrequencyRuntime:
             elif self._code not in {None, 'lease-busy', 'unavailable', 'CANCELLED', 'paused'}: self._state = 'error'
             else: self._state, self._code = 'ready', None
 
+    def _has_saved_selection(self):
+        # This is only a cheap negative readiness check. A persisted choice is
+        # never authorization to collect: operational_catalog revalidates it
+        # against the live Smecel class list before any source capture.
+        check = getattr(self._source, 'has_saved_class_selection', None)
+        return check() if check is not None else True
+
+    def _release_if_ineligible(self, status=None):
+        """Yield an owned school lease on a known local blocker or empty agenda.
+
+        Use the server's current token rather than a possibly expired cached
+        token. If network access fails, the server TTL remains the safe fallback.
+        A foreign device's lease must never be touched.
+        """
+        try:
+            if status is None: status = self._fresh()
+            lease = status.get('lease')
+            if lease is not None and lease.get('deviceId') == self._provider.storage_binding()[0]:
+                self._mutation('release', fencingToken=lease['fencingToken'], code='NOT_READY')
+        except Exception:
+            pass  # Safe fallback is expiry; never mask the actionable blocker.
+        finally:
+            with self._lock: self._lease = None
+
     def _heartbeat(self, epoch):
         self._check(epoch)
         status = self._fresh()
@@ -377,12 +401,26 @@ class FrequencyRuntime:
         # every 30 s so that the admin sees connected/standby computers.
         if schedule is None or not any(
             r['enabled'] and (r['times'] or r['recheck']) for r in schedule['rules']
-        ): return
+        ):
+            self._release_if_ineligible(status)
+            return
+        if not status['classes']:
+            self._error(FrequencyError('CENTER_CLASSES_REQUIRED'))
+            self._release_if_ineligible(status)
+            return
+        if not self._has_saved_selection():
+            self._error(FrequencyError('NO_SELECTED_CLASSES'))
+            self._release_if_ineligible(status)
+            return
+        if self._code == 'NO_SELECTED_CLASSES':
+            self.source_ready()
         blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
                     'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review', 'revision-conflict',
                     'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
-        if self._source_blocked or self._code in blockers: return
+        if self._source_blocked or self._code in blockers:
+            self._release_if_ineligible(status)
+            return
         self._acquire(status)
         status = self._heartbeat(epoch)
         now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
@@ -432,6 +470,7 @@ class FrequencyRuntime:
             # Ineligible devices do not take the school-wide lease from a
             # healthy standby collector just to discover a known blocker.
             if not status['classes']: raise FrequencyError('CENTER_CLASSES_REQUIRED')
+            if not self._has_saved_selection(): raise FrequencyError('NO_SELECTED_CLASSES')
             if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
             self._acquire(status)
             self._check(epoch)
@@ -517,6 +556,13 @@ class FrequencyRuntime:
             return self.public_status()
         except Exception as error:
             self._error(error)
+            if getattr(error, 'code', None) in {
+                'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
+                'CENTER_CLASSES_REQUIRED', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED',
+                'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'source-invalid',
+                'identity-review', 'revision-conflict',
+            } or isinstance(error, SessionError):
+                self._release_if_ineligible()
             try:
                 self._check(epoch, lease=False)
                 self._source.preserve_and_close(self._storage)
