@@ -27,11 +27,13 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
-              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC'}
+              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
+              'PENDING_BATCHES'}
 # Problems an operator must see even with the window hidden in the tray.
 ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
-               'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'CLOCK_OUT_OF_SYNC'}
+               'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
+               'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
 # Routine waits are not failures: a reserve computer or a school pause.
 QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
 
@@ -199,6 +201,10 @@ class FrequencyRuntime:
         except (KeyError, ValueError, TypeError): raise FrequencyError('unavailable') from None
         # Internal-only metadata; never exposed through the desktop bridge.
         value['_request_started_at'] = requested_at
+        # Status is proof-bound to the current generation. An unreceipted
+        # queue encrypted for the previous generation must not be silently
+        # erased or used as if it belonged to the new one.
+        self._bind_storage()
         with self._lock:
             self._status = value
             self._school_paused = value['settings']['paused']
@@ -281,12 +287,14 @@ class FrequencyRuntime:
 
     def refresh(self):
         self._fresh()
-        self._bind_storage()
         return self.public_status()
 
     def _bind_storage(self):
-        try: self._storage.bind(*self._provider.storage_binding())
-        except Exception: pass  # Unbound storage simply reports no saved login.
+        try:
+            binding = self._provider.storage_binding()
+        except AccessDenied:
+            return  # Not yet paired; no storage authority is available.
+        self._storage.bind(*binding)  # Pending batches and corruption MUST propagate.
 
     def save_credential(self, email, password):
         self._storage.bind(*self._provider.storage_binding())
@@ -417,7 +425,7 @@ class FrequencyRuntime:
         blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
                     'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review', 'revision-conflict',
-                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT'}
+                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES'}
         if self._source_blocked or self._code in blockers:
             self._release_if_ineligible(status)
             return
@@ -559,7 +567,7 @@ class FrequencyRuntime:
             if getattr(error, 'code', None) in {
                 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
                 'CENTER_CLASSES_REQUIRED', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED',
-                'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'source-invalid',
+                'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES', 'source-invalid',
                 'identity-review', 'revision-conflict',
             } or isinstance(error, SessionError):
                 self._release_if_ineligible()
