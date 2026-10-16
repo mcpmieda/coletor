@@ -105,7 +105,7 @@ export default function InstitutionalAccess() {
       if (!blockedByPendingBatch) void recheck();
     }
   }
-  if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div><App /></>;
+  if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div>{notice && <p role="alert">{notice}</p>}<App /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>
