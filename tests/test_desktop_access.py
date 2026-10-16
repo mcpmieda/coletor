@@ -38,6 +38,24 @@ class DesktopAccessTests(unittest.TestCase):
             access.open_login.assert_not_called()
             self.assertEqual(len(api._collector._storage.queue()), 1)
 
+    def test_logout_with_pending_queue_does_not_revoke_or_purge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            access = SyntheticAccess()
+            access.logout = Mock()
+            api = DesktopApi(directory, access=access)
+            api._collector._storage._memory['queue'] = [
+                {'createdAt': __import__('time').time(),
+                 'payload': {'requestId': 'unreceipted-synthetic'}}
+            ]
+            result = api.logout_institutional_access()
+            self.assertEqual(result['code'], 'PENDING_BATCHES')
+            access.logout.assert_not_called()
+            self.assertEqual(len(api._collector._storage.queue()), 1)
+            self.assertEqual(len(api._collector._storage._memory['queue']), 1)
+            api._collector._storage.acknowledge('unreceipted-synthetic')
+            self.assertEqual(api.logout_institutional_access(), {'ok': True})
+            access.logout.assert_called_once()
+
     def test_renewed_login_or_access_failure_cannot_delete_pending_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             api = DesktopApi(directory, access=SyntheticAccess())
