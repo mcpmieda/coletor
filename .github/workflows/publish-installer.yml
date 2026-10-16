@@ -89,7 +89,7 @@ jobs:
           candidate="$(python3 -c 'import json,os; d=json.load(open("instalador/versoes.json")); print("instalador/"+next(x["arquivo"] for x in d["versoes"] if x["run_id"]==int(os.environ["UPSTREAM_RUN_ID"])))')"
           test -f "$candidate"
           test -f "$candidate.sha256"
-          sha256sum --check --status "$candidate.sha256"
+          (cd instalador && sha256sum --check --status "$(basename "$candidate.sha256")")
           tag="coletor-installer-run-$UPSTREAM_RUN_ID"
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$tag" "$candidate" "$candidate.sha256" \
