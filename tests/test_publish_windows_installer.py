@@ -38,6 +38,17 @@ class PublishInstallerTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.root/'instalador'/'versoes.json').read_text(encoding='utf-8'))['versoes']
 
+    def test_protected_main_publishes_release_then_checked_archive_pr(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/publish-installer.yml').read_text('utf8')
+        checks = (Path(__file__).resolve().parents[1] / '.github/workflows/checks.yml').read_text('utf8')
+        for text in ('gh release create', 'gh release delete', 'gh pr create', 'gh workflow run checks.yml', 'gh pr merge'):
+            self.assertIn(text, workflow)
+        self.assertNotIn('git push origin HEAD:main', workflow)
+        self.assertNotIn('[skip ci]', workflow)
+        self.assertIn('workflow_dispatch:', checks)
+        self.assertIn("github.event_name != 'pull_request'", checks)
+        self.assertIn('Installer archive-only merge', workflow)
+
     def test_publishes_one_real_pe_and_same_sha256(self):
         self.stage()
         outcome = self.run_publish(1)

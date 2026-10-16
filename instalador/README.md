@@ -12,3 +12,7 @@ Esta pasta mantém os **cinco instaladores .exe mais recentes aprovados pelos te
 O commit automático é feito com o GITHUB_TOKEN e **não dispara um segundo build**. A publicação precisa de contents: write e de autorização da proteção da branch main para esse token. Se a política impedir push direto, o job falhará **sem apagar a última versão publicada**; um administrador terá de autorizar um mecanismo compatível com a proteção da branch.
 
 Documentação complementar: docs/WINDOWS_INSTALLER.md.
+
+## Branch protegida e cinco versões
+
+Após CI Windows aprovado, o publicador guarda o `.exe` e seu `.sha256` em um GitHub Release permanente, mantendo até cinco releases desse tipo. Para atualizar os binários Git LFS desta pasta, ele abre uma PR da branch `automation/instalador-*`, dispara explicitamente `verify` e `windows-portable` com `workflow_dispatch` e solicita auto-merge. A proteção de `main` permanece válida. Se o bot não puder integrar automaticamente, o release já está disponível e a PR aguarda revisão humana. Merges que alteram apenas `instalador/` não criam outro release.

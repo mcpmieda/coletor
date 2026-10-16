@@ -11,7 +11,8 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
+  pull-requests: write
 
 concurrency:
   group: publish-installer-main
@@ -37,7 +38,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: true # Only this publish workflow can push.
           lfs: false
 
@@ -50,7 +51,14 @@ jobs:
             echo 'A newer commit already landed on main; skip obsolete installer.'
             echo 'publish=false' >> "$GITHUB_OUTPUT"
           else
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
+            # Archive-only merges do not create new application installers.
+            changed="$(git diff --name-only HEAD^ HEAD)"
+            if [[ -n "$changed" ]] && ! grep -qv '^instalador/' <<< "$changed"; then
+              echo 'Installer archive-only merge: skip to prevent release/PR loops.'
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
+            else
+              echo 'publish=true' >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Download the exact successful upstream installer artifact
@@ -72,13 +80,51 @@ jobs:
             --head-sha "$UPSTREAM_SHA" --run-id "$UPSTREAM_RUN_ID" \
             --run-number "$UPSTREAM_RUN_NUMBER"
 
-      - name: Commit validated installer through Git LFS
+
+      - name: Publish permanent verified GitHub release and keep five
+        if: steps.current.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(python3 -c 'import json,os; d=json.load(open("instalador/versoes.json")); print("instalador/"+next(x["arquivo"] for x in d["versoes"] if x["run_id"]==int(os.environ["UPSTREAM_RUN_ID"])))')"
+          test -f "$candidate"
+          test -f "$candidate.sha256"
+          sha256sum --check --status "$candidate.sha256"
+          tag="coletor-installer-run-$UPSTREAM_RUN_ID"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" "$candidate" "$candidate.sha256" \
+              --repo "$GITHUB_REPOSITORY" --target "$UPSTREAM_SHA" \
+              --title "Coletor Frequência Windows build $UPSTREAM_RUN_NUMBER" \
+              --notes "Native-tested installer from successful CI run $UPSTREAM_RUN_ID, commit $UPSTREAM_SHA. SHA-256 attached."
+          else
+            echo 'Release for this exact CI run already exists.'
+          fi
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,publishedAt > "$RUNNER_TEMP/instalador-releases.json"
+          python3 - "$RUNNER_TEMP/instalador-releases.json" "$RUNNER_TEMP/obsolete-installer-releases" <<'PY'
+          import json
+          import re
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              items = json.load(handle)
+          ours = [r for r in items if re.fullmatch(r"coletor-installer-run-[1-9][0-9]*", r["tagName"])]
+          ours.sort(key=lambda r: (r["publishedAt"] or "", int(r["tagName"].rsplit("-", 1)[1])), reverse=True)
+          with open(sys.argv[2], "w", encoding="utf-8") as output:
+              output.writelines(r["tagName"] + "\n" for r in ours[5:])
+          PY
+          while IFS= read -r obsolete; do
+            [[ -n "$obsolete" ]] || continue
+            gh release delete "$obsolete" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done < "$RUNNER_TEMP/obsolete-installer-releases"
+
+      - name: Prepare protected archive PR through Git LFS
         if: steps.current.outputs.publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
           git lfs version
           git lfs install --local
+          git switch -c "automation/instalador-run-$UPSTREAM_RUN_ID"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A -- instalador/
@@ -104,5 +150,16 @@ jobs:
             echo 'main moved; refusing to publish a stale artifact.' >&2
             exit 1
           fi
-          git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER [skip ci]"
-          git push origin HEAD:main
+          git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER"
+          branch="automation/instalador-run-$UPSTREAM_RUN_ID"
+          git push --set-upstream origin "$branch"
+          pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch"             --title "chore(instalador): archive verified Windows build $UPSTREAM_RUN_NUMBER"             --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Requires the protected verify + windows-portable checks; no branch-protection bypass. Release is already available.")"
+          echo "Created archive PR: $pr_url"
+          # GITHUB_TOKEN PR creation does not trigger pull_request workflows.
+          # Explicit workflow_dispatch is exempt from this restriction.
+          gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          if gh pr merge "$pr_url" --repo "$GITHUB_REPOSITORY" --auto --merge; then
+            echo 'Check-gated archive PR scheduled for auto-merge.'
+          else
+            echo '::warning::Bot auto-merge not permitted; archive PR remains open for normal merge. The release is already available.'
+          fi
