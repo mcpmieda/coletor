@@ -261,8 +261,10 @@ def orchestrator(args):
                 finally:
                     job.close()
                     if process is not None and process.poll() is None: process.kill();process.wait(timeout=10)
-            data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
-            if set(data)!={"schemaVersion","schedule","theme","fox"}: smoke.fail("unexpected_persistent_data")
+            # The tray flows change no preference; a settings file appears only if one is saved.
+            settings_file=isolated/"settings.json"
+            if settings_file.is_file() and set(json.loads(settings_file.read_text(encoding="utf-8")))!={"schemaVersion","schedule","theme","fox"}:
+                smoke.fail("unexpected_persistent_data")
             report["only_nonsecret_settings_retained"]=True
             if report["cleanup"]["verified"]:report["status"]="passed"
     except BaseException as error:
