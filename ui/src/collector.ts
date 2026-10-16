@@ -77,6 +77,7 @@ export const COLLECTOR_CODES: Record<string, string> = {
   'source-invalid': 'O Ecossistema recusou o diário. Confira as Falhas na aba Frequência da Importação.',
   'identity-review': 'A turma precisa de ligação no Centro. Confira a aba Frequência da Importação.',
   'not-authorized': 'Acesso negado. Entre novamente no Ecossistema.',
+  CLOCK_OUT_OF_SYNC: 'O relógio do Windows está diferente do horário do Ecossistema. Sincronize data e hora do PC.',
   unavailable: 'Sem conexão com o Ecossistema. A coleta tenta de novo no próximo horário.',
   paused: 'A coleta foi pausada para a escola.',
 };
