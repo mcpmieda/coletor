@@ -155,6 +155,7 @@ main { min-width: 0; }
 
 /* Collection page: separated panels, short status lines, folded test tools. */
 .page-stack { display: flex; flex-direction: column; gap: 18px; }
+.page-stack[hidden] { display: none; }
 .page-stack > .preview-context { margin: 4px 0 0; }
 .source-panel h2 { font-size: 16px; font-weight: 600; }
 .source-panel > p, .source-panel form > p { color: var(--muted); font-size: 13px; line-height: 1.6; margin-top: 10px; }
