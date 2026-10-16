@@ -85,6 +85,22 @@ class DesktopAccessTests(unittest.TestCase):
             self.assertEqual(api.open_institutional_login(),{'ok':True})
             api._confirm_local_discard.assert_called_once()
 
+    def test_new_generation_may_discard_only_unreadable_previous_encrypted_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api=DesktopApi(directory,access=SyntheticAccess())
+            storage=api._collector._storage
+            from test_frequency_runtime import SyntheticCrypto
+            storage._crypto=SyntheticCrypto()
+            storage.bind('old-device',1)
+            storage._enabled=True
+            storage.enqueue({'requestId':'unreceipted-old-generation'})
+            storage._binding=None  # a fresh process cannot decrypt old generation
+            api._confirm_local_discard=Mock(return_value=True)
+            self.assertEqual(api.discard_local_pending_collection(),
+                             {'ok':True,'discarded':True})
+            self.assertEqual(api.get_local_recovery_status()['pending'],False)
+            api._confirm_local_discard.assert_called_once()
+
     def test_temporary_outage_or_valid_authorization_never_permits_local_discard(self):
         class Outage(SyntheticAccess):
             def status(self): return {'authenticated':False,'authorized':False,'code':'ACCESS_UNAVAILABLE'}
