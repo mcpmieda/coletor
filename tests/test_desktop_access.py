@@ -25,6 +25,19 @@ class DesktopAccessTests(unittest.TestCase):
             api._manual_session.prepare_login.assert_not_called()
             api._settings.update.assert_not_called()
 
+    def test_new_pairing_waits_until_all_old_receipts_are_reconciled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            access = SyntheticAccess()
+            access.open_login = Mock()
+            api = DesktopApi(directory, access=access)
+            api._collector._storage._memory['queue'] = [
+                {'createdAt': __import__('time').time(), 'payload': {'requestId': 'pending-synthetic'}}
+            ]
+            result = api.open_institutional_login()
+            self.assertEqual(result['code'], 'PENDING_BATCHES')
+            access.open_login.assert_not_called()
+            self.assertEqual(len(api._collector._storage.queue()), 1)
+
     def test_renewed_login_or_access_failure_cannot_delete_pending_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             api = DesktopApi(directory, access=SyntheticAccess())
