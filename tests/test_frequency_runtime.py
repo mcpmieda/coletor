@@ -219,6 +219,110 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn('lease', [p['operation'] for p in self.provider.requests])
         self.assertEqual(self.runtime.public_status()['code'], 'SOURCE_LOGIN_REQUIRED')
 
+    def test_two_computers_fail_over_when_selection_is_missing_or_cleared(self):
+        # One school lease, two distinct device identities, deterministic clock.
+        # Neither the missing persisted choice nor an empty live Smecel catalog
+        # is allowed to strand the healthy reserve during the scheduled minute.
+        current = datetime.fromtimestamp(NOW, timezone.utc).astimezone(
+            __import__('zoneinfo').ZoneInfo('America/Bahia'))
+        rules = schedule()
+        today = next(r for r in rules['rules']
+                     if r['weekday'] == (current.weekday() + 1) % 7 and r['shift'] == 'matutino')
+        today['enabled'] = True
+        today['times'] = ['00:00' if current.strftime('%H:%M') != '00:00' else '00:01']
+        school = {'lease': None, 'fence': 0}
+
+        class SchoolProvider(Provider):
+            def __init__(self, device_id):
+                super().__init__()
+                self.device_id = device_id
+                self.shared_schedule = rules
+
+            def storage_binding(self):
+                return self.device_id, 1
+
+            def frequency_request(self, payload):
+                op = payload['operation']
+                if op == 'status':
+                    result = super().frequency_request(payload)
+                    result['lease'] = copy.deepcopy(school['lease'])
+                    return result
+                if op in {'lease', 'heartbeat', 'release'}:
+                    self.requests.append(copy.deepcopy(payload))
+                    existing = school['lease']
+                    if op == 'lease':
+                        if existing and existing['deviceId'] != self.device_id:
+                            raise FrequencyError('lease-busy')
+                        school['fence'] += 1
+                        school['lease'] = {'deviceId': self.device_id,
+                                           'fencingToken': school['fence'],
+                                           'expiresAt': stamp(self.now + 120)}
+                        existing = school['lease']
+                    elif (existing is None or existing['deviceId'] != self.device_id
+                          or existing['fencingToken'] != payload['fencingToken']):
+                        raise FrequencyError('lease-fenced')
+                    if op == 'release':
+                        school['lease'] = None
+                    return {'contractVersion': 2, 'state': 'committed', 'operation': op,
+                            'requestId': payload['requestId'], 'fencingToken': existing['fencingToken'],
+                            'expiresAt': None if op == 'release' else existing['expiresAt']}
+                if op == 'collect':
+                    self.fence = school['fence']
+                return super().frequency_request(payload)
+
+        def peer(device_id):
+            provider = SchoolProvider(device_id)
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            storage = ProtectedStorage(directory.name, crypto=SyntheticCrypto(),
+                                       consent=lambda: True, clock=lambda: provider.now)
+            storage.bind(device_id, 1)
+            source = Source()
+            selected = [True]
+            source.has_saved_class_selection = lambda: selected[0]
+            runtime = FrequencyRuntime(Access(), provider, source,
+                                       storage=storage, clock=lambda: provider.now)
+            runtime._active = True
+            self.addCleanup(runtime.shutdown)
+            return runtime, provider, source, selected
+
+        primary, provider_a, source_a, selected_a = peer(DEVICE)
+        backup, provider_b, source_b, selected_b = peer('22222222-2222-4222-8222-222222222222')
+        selected_a[0] = False
+        primary.tick()
+        self.assertEqual(primary.public_status()['code'], 'NO_SELECTED_CLASSES')
+        self.assertNotIn('lease', [r['operation'] for r in provider_a.requests])
+        backup.tick()
+        self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
+
+        # A selection added while the reserve is collecting must not steal it.
+        selected_a[0] = True
+        primary.source_ready()
+        with self.assertRaises(FrequencyError) as busy:
+            primary.tick()
+        self.assertEqual(busy.exception.code, 'lease-busy')
+
+        # An existing leader that loses its selection yields immediately.
+        selected_b[0] = False
+        backup.tick()
+        self.assertIsNone(school['lease'])
+        self.assertIn('release', [r['operation'] for r in provider_b.requests])
+        primary.tick()
+        self.assertEqual(school['lease']['deviceId'], provider_a.device_id)
+
+        # A saved selection is only a hint: if live discovery finds no
+        # selected classes, the error also releases the school's lease.
+        source_a.operational_catalog = lambda storage: {
+            'selected_class_ids': [], 'unavailable_class_ids': [],
+            'catalog': {'classes': []}}
+        primary.collect()
+        self.assertEqual(primary.public_status()['code'], 'NO_SELECTED_CLASSES')
+        self.assertIsNone(school['lease'])
+        selected_b[0] = True
+        backup.source_ready()
+        backup.tick()
+        self.assertEqual(school['lease']['deviceId'], provider_b.device_id)
+
     def test_heartbeat_temporary_failure_does_not_cancel_a_valid_capture(self):
         class QuickEvent(threading.Event):
             def wait(self, timeout=None):
