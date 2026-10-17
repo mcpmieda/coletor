@@ -290,8 +290,14 @@ class DeviceProviderTests(unittest.TestCase):
             self.provider.verify_online()
         self.transport.request = original
         restarted = self.make_provider()
-        with self.assertRaises(AccessDenied):
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as pending:
             restarted.verify_online()
+        self.assertEqual(pending.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.browser.assert_not_called()  # Passive status cannot launch revoke.
+        with self.assertRaises(AccessDenied) as requested:
+            restarted.open_official_login()
+        self.assertEqual(requested.exception.code, 'SERVER_REVOCATION_PENDING')
         self.assertTrue(self.browser.call_args.args[0].startswith(OFFICIAL_ORIGIN+'/frequency-collector/revoke?device='))
         self.transport.revoked = True  # Synthetic owner-only browser confirmation.
         restarted.close()
@@ -371,6 +377,22 @@ class DeviceProviderTests(unittest.TestCase):
         self.provider.open_official_login()
         self.assertIsNotNone(self.provider._pending)
         self.assertTrue(self.crypto.exists)
+
+    def test_checkpointed_removal_status_does_not_delete_key_or_open_browser(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._state = state
+        self.provider._metadata.save(state)
+        original_key = self.provider._key
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as pending:
+            self.provider.verify_online()
+        self.assertEqual(pending.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertIs(self.provider._key, original_key)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.browser.assert_not_called()
 
     def test_unsafe_key_checkpoint_is_never_automatically_replaced(self):
         self.provider.open_official_login()
