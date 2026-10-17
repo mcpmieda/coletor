@@ -186,6 +186,7 @@ def worker(args):
               prepareDisabled: [...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Carregar turmas do Smecel')?.disabled ?? null,
               closeVisible: [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Fechar o Smecel'),
               errorVisible: !!document.querySelector('.error-message'),
+              errorText: (document.querySelector('.error-message')?.textContent ?? '').slice(0, 200),
             }))()""")
             report['driver_diagnostic'] = [{'stopped': d._process is None,
                                           'cleanup_verified': bool(d.cleanup and d.cleanup['verified']),

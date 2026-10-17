@@ -11,11 +11,15 @@ import threading
 import time
 
 AUTHORITY = b"www.smecel.com.br:443"
-OPENING_HTML = ('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Abrindo o Smecel…</title>'
-                '<body style="margin:0;display:grid;place-items:center;height:100vh;font:16px system-ui;'
-                'color:#5b4b52;background:#faf7f8">Abrindo o Smecel…</body></html>')
-PROBE_FRAME_JS = """url => { const frame = document.createElement('iframe'); frame.hidden = true;
-  frame.src = url; document.body.appendChild(frame); }"""
+
+
+def opening_html(probe_url):
+    """'Abrindo o Smecel…' page whose hidden frame is the isolation probe."""
+    from html import escape
+    return ('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Abrindo o Smecel…</title>'
+            '<body style="margin:0;display:grid;place-items:center;height:100vh;font:16px system-ui;'
+            'color:#5b4b52;background:#faf7f8">Abrindo o Smecel…'
+            f'<iframe hidden src="{escape(probe_url, quote=True)}"></iframe></body></html>')
 
 
 async def verify_proxy(page, proxy):
@@ -38,8 +42,8 @@ async def verify_proxy(page, proxy):
     try:
         # Probe from a hidden frame: navigating the visible tab to the denied
         # address flashed Edge's "access denied" page before Smecel opened.
-        await page.set_content(OPENING_HTML)
-        await page.evaluate(PROBE_FRAME_JS, f"http://127.0.0.1:{server.server_address[1]}/source-isolation-probe")
+        await page.set_content(opening_html(f"http://127.0.0.1:{server.server_address[1]}/source-isolation-probe"),
+                               wait_until="commit")
         deadline = time.monotonic() + 3
         while server.contacts == 0 and proxy.denied_connections <= before and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
