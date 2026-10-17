@@ -233,20 +233,29 @@ if __name__ == '__main__':
 
 
 class SignInFormTests(unittest.TestCase):
-    def page(self, accepts):
+    def page(self, accepts, modal=False):
         class Locator:
             def __init__(self, page): self.page = page
             async def count(self): return 0 if self.page.signed else 1
+            async def is_visible(self): return not self.page.hidden
         class Navigation:
             async def __aenter__(self): return self
             async def __aexit__(self, *_): return False
         class Page:
-            def __init__(self): self.signed, self.filled, self.visited = False, {}, []
+            def __init__(self):
+                self.signed, self.filled, self.visited = False, {}, []
+                self.hidden, self.clicks = modal, []
             async def goto(self, url, wait_until): self.visited.append(url)
             def locator(self, selector): return Locator(self)
-            async def fill(self, selector, value): self.filled[selector] = value
+            async def fill(self, selector, value):
+                if self.hidden: raise RuntimeError('login-form-hidden')
+                self.filled[selector] = value
             def expect_navigation(self, **_): return Navigation()
             async def click(self, selector):
+                self.clicks.append(selector)
+                if selector == 'button[onclick="abrirModal()"]:visible':
+                    self.hidden = False
+                    return
                 self.signed = accepts and self.filled.get('#senha') == SYNTHETIC_LOGIN['password']
         return Page()
 
@@ -258,3 +267,10 @@ class SignInFormTests(unittest.TestCase):
         self.assertEqual(page.visited, [LOGIN_URL])
         self.assertEqual(page.filled, {'#usuario': SYNTHETIC_LOGIN['email'], '#senha': SYNTHETIC_LOGIN['password']})
         self.assertEqual(asyncio.run(sign_in(self.page(False), **SYNTHETIC_LOGIN)), {'logged_in': False})
+
+    def test_opens_hidden_administrative_login_before_filling_saved_credentials(self):
+        import asyncio
+        from coletor.manual_worker import LOGIN_FIELDS, LOGIN_OPENER, sign_in
+        page = self.page(True, modal=True)
+        self.assertEqual(asyncio.run(sign_in(page, **SYNTHETIC_LOGIN)), {'logged_in': True})
+        self.assertEqual(page.clicks, [LOGIN_OPENER, LOGIN_FIELDS[2]])
