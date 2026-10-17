@@ -97,10 +97,27 @@ def validate_authorization(response, now):
     return Authorization(identity, expiry)
 
 
+# Reads (status/UI polling) may reuse a grant confirmed online this recently.
+# Commands never do: run() always waits for a request sent after it started.
+STATUS_REUSE_SECONDS = 5.0
+
+
+class _Flight:
+    """One online verification shared by every caller that joins it."""
+    def __init__(self, number):
+        self.number = number
+        self.done = threading.Event()
+        self.proof = None
+        self.code = None
+
+
 class InstitutionalAccess:
-    def __init__(self, provider=None, *, clock=time.time, on_locked=lambda: None):
+    def __init__(self, provider=None, *, clock=time.time, on_locked=lambda: None,
+                 monotonic=time.monotonic, status_reuse_seconds=STATUS_REUSE_SECONDS):
         self._provider = provider
         self._clock = clock
+        self._monotonic = monotonic
+        self._status_reuse_seconds = status_reuse_seconds
         self._on_locked = on_locked
         self._lock = threading.RLock()
         self._generation = 0
@@ -112,27 +129,89 @@ class InstitutionalAccess:
         # capture. Cancel workers only when an actual valid grant was observed.
         self._verified_access = False
         self._locked_code = None
+        self._flight = None
+        self._flights_started = 0
+        # (generation, proof, monotonic time) of the last online confirmation.
+        self._confirmed = None
 
-    def _verify(self, generation):
+    def _fetch(self):
+        if self._provider is None:
+            raise AccessDenied("ACCESS_NOT_CONFIGURED")
         try:
-            if self._cleanup_pending:
-                raise AccessDenied("ACCESS_CLEANUP_PENDING")
-            if self._provider is None:
-                raise AccessDenied("ACCESS_NOT_CONFIGURED")
-            proof = validate_authorization(self._provider.verify_online(), self._clock())
-            with self._lock:
-                if generation != self._generation:
-                    raise AccessDenied()
-                self._verified_access = True
-            return proof
-        except AccessDenied as error:
-            self._invalidate(error.code)
+            return validate_authorization(self._provider.verify_online(), self._clock())
+        except AccessDenied:
             raise
         except Exception:
-            self._invalidate('ACCESS_UNAVAILABLE')
             raise AccessDenied("ACCESS_UNAVAILABLE") from None
 
-    def _invalidate(self, code='ACCESS_REQUIRED'):
+    def _online(self, fresh):
+        """Coalesce concurrent verifications into one provider request.
+
+        A fresh caller only accepts a request started after it arrived, so its
+        answer is never older than a dedicated request would have been.
+        """
+        with self._lock:
+            floor = self._flights_started + 1 if fresh else 0
+        while True:
+            with self._lock:
+                flight, owner = self._flight, False
+                if flight is None:
+                    self._flights_started += 1
+                    flight = self._flight = _Flight(self._flights_started)
+                    owner = True
+            if owner:
+                needs_cleanup = False
+                try:
+                    flight.proof = self._fetch()
+                except AccessDenied as error:
+                    flight.code = error.code
+                    needs_cleanup = self._fence(error.code)
+                finally:
+                    with self._lock:
+                        self._flight = None
+                    # Release joiners before cleanup: on_locked may wait for a
+                    # worker that is itself waiting on this verification.
+                    flight.done.set()
+                if needs_cleanup:
+                    self._cleanup()
+            else:
+                flight.done.wait()
+            if flight.number >= floor:
+                if flight.code is not None:
+                    raise AccessDenied(flight.code)
+                return flight.proof
+
+    def _reusable(self, generation):
+        with self._lock:
+            confirmed = self._confirmed
+            if confirmed is None or confirmed[0] != generation:
+                return None
+            age = self._monotonic() - confirmed[2]
+            proof = confirmed[1]
+        if 0 <= age <= self._status_reuse_seconds and proof.expires_at > self._clock():
+            return proof
+        return None
+
+    def _verify(self, generation, reuse=False):
+        if self._cleanup_pending:
+            self._invalidate("ACCESS_CLEANUP_PENDING")
+            raise AccessDenied("ACCESS_CLEANUP_PENDING")
+        if reuse:
+            proof = self._reusable(generation)
+            if proof is not None:
+                return proof
+        proof = self._online(fresh=not reuse)
+        with self._lock:
+            current = generation == self._generation
+            if current:
+                self._verified_access = True
+                self._confirmed = (generation, proof, self._monotonic())
+        if not current:
+            self._invalidate()
+            raise AccessDenied()
+        return proof
+
+    def _fence(self, code):
         transient = code == 'ACCESS_UNAVAILABLE'
         with self._lock:
             # A concurrent transient heartbeat/status request cannot fence a
@@ -144,15 +223,22 @@ class InstitutionalAccess:
             if needs_cleanup:
                 self._verified_access = False
             self._locked_code = code
-        if needs_cleanup:
-            # An unauthenticated polling failure must not repeatedly close an
-            # idle source, then set ACCESS_CLEANUP_PENDING during first login.
-            # A previously verified grant still fences and cancels its work.
-            with self._cleanup_operation:
-                try:
-                    self._on_locked()
-                except Exception:
-                    self._cleanup_pending = True
+            self._confirmed = None
+        return needs_cleanup
+
+    def _cleanup(self):
+        # An unauthenticated polling failure must not repeatedly close an
+        # idle source, then set ACCESS_CLEANUP_PENDING during first login.
+        # A previously verified grant still fences and cancels its work.
+        with self._cleanup_operation:
+            try:
+                self._on_locked()
+            except Exception:
+                self._cleanup_pending = True
+
+    def _invalidate(self, code='ACCESS_REQUIRED'):
+        if self._fence(code):
+            self._cleanup()
 
     def run(self, work: Callable[[], T]) -> T:
         with self._lock:
@@ -173,7 +259,7 @@ class InstitutionalAccess:
         with self._lock:
             generation = self._generation
         try:
-            self._verify(generation)
+            self._verify(generation, reuse=True)
             return {"authenticated": True, "authorized": True}
         except AccessDenied as error:
             status = {"authenticated": False, "authorized": False, "code": error.code}
