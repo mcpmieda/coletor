@@ -155,15 +155,14 @@ jobs:
           git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER"
           branch="automation/instalador-run-$UPSTREAM_RUN_ID"
           git push --set-upstream origin "$branch"
-          # Organization/repository settings may forbid GITHUB_TOKEN from
-          # creating PRs. Do not turn an already-published, SHA-verified
-          # downloadable release into a failed publication: the archive branch
-          # remains available for a maintainer to open a protected PR.
+          # A GitHub release can succeed while the protected main archive is
+          # stale. Never report the archive stage as successful when Actions
+          # cannot open a PR. The verified release and LFS branch remain intact.
           if ! pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
             --title "chore(instalador): archive verified Windows build $UPSTREAM_RUN_NUMBER" \
             --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Requires protected checks; release already available.")"; then
-            echo "::warning::Actions cannot open archive PR. Release is published, and branch $branch retains the LFS archive. An administrator can enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General, or a maintainer can open the PR manually."
-            exit 0
+            echo "::error::ARCHIVE_PR_NOT_CREATED: verified release is available, but main/instalador is STALE. The installer is preserved in branch $branch. Enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General, or open a PR manually; then validate the two required checks."
+            exit 1
           fi
           echo "Created archive PR: $pr_url"
           # GITHUB_TOKEN PR creation does not trigger pull_request workflows.
@@ -204,5 +203,6 @@ jobs:
           if gh pr merge "$url" --repo "$GITHUB_REPOSITORY" --merge; then
             echo 'Protected checks passed; archive merged into main.'
           else
-            echo '::warning::Branch protection requires a human action; archive PR remains open. Release is available.'
+            echo '::error::ARCHIVE_PR_NOT_MERGED: required checks passed, but branch protection or permissions blocked merging the archive PR. Release is available; main/instalador is STALE and the PR remains open for authorized review.'
+            exit 1
           fi
