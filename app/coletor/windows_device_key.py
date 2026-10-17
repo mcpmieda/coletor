@@ -97,7 +97,9 @@ class NativeCng:
         return output.raw
 
     def delete(self, key):
-        self._check(self.dll.NCryptDeleteKey(key, SILENT))
+        # The Platform KSP rejects NCRYPT_SILENT_FLAG for deletion with
+        # NTE_BAD_FLAGS. Removal is already explicitly authorized by the caller.
+        self._check(self.dll.NCryptDeleteKey(key, 0))
 
     def free(self, handle):
         self._check(self.dll.NCryptFreeObject(handle))

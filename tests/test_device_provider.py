@@ -200,7 +200,7 @@ class DeviceProviderTests(unittest.TestCase):
         self.provider.open_official_login()
         self.assertNotEqual(self.provider._pending['id'], previous_id)
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
-        self.assertEqual(self.consent.call_count, 2)
+        self.assertEqual(self.consent.call_count, 1)
 
     def test_unknown_pending_poll_never_reissues_a_pairing(self):
         self.provider.open_official_login()
@@ -213,6 +213,64 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, 'INVALID_ACCESS_RESPONSE')
         self.assertEqual(self.provider._pending, old)
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 1)
+
+    def test_expired_live_poll_denial_allows_explicit_retry_with_the_existing_key(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        request = self.transport.request
+        def expired(method, path, value=None):
+            if path == PREFIX + 'pairings/poll':
+                raise AccessDenied('PAIRING_RETIRED')
+            return request(method, path, value)
+        self.transport.request = expired
+        # Background polling cannot replace a request or launch the browser.
+        with self.assertRaises(AccessDenied): self.provider.verify_online()
+        self.assertEqual(self.provider._pending, old)
+        self.provider.open_official_login()
+        self.assertNotEqual(self.provider._pending['id'], old['id'])
+        self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertEqual(self.browser.call_count, 2)
+        self.consent.assert_called_once()
+
+    def test_retry_with_missing_unpaired_key_never_creates_a_replacement(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._key.close()
+        self.provider._key = None
+        self.crypto.exists = False
+        self.consent.reset_mock()
+        with self.assertRaises(AccessDenied): self.provider.open_official_login()
+        self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
+        self.consent.assert_not_called()
+        self.assertEqual(self.browser.call_count, 1)
+
+    def test_pending_poll_outage_keeps_the_existing_request_for_retry(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        self.transport.request = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+        with self.assertRaises(AccessDenied) as caught: self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
+        self.assertEqual(self.provider._pending, old)
+        self.assertEqual(self.browser.call_count, 1)
+
+    def test_real_transport_http_failures_never_retire_the_pending_pairing(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        for status, body in [(500, b'{}'), (502, b'{}'), (504, b'{}'), (429, b'{}'),
+                             (403, b'{"error":"Collector access denied"}'),
+                             (403, b'{"error":"Pairing unavailable","extra":true}')]:
+            with self.subTest(status=status, body=body):
+                reply = Mock(status=status)
+                reply.getheader.side_effect = lambda name: {'Content-Type': 'application/json'}.get(name)
+                reply.read.return_value = body
+                connection = Mock()
+                connection.getresponse.return_value = reply
+                self.provider._transport = OfficialTransport(connection=lambda: connection)
+                with self.assertRaises(AccessDenied): self.provider.open_official_login()
+                self.assertEqual(self.provider._pending, old)
+                self.assertEqual(self.browser.call_count, 1)
+                connection.request.assert_called_once()
 
     def test_pairing_signature_is_bound_and_only_nonsecret_metadata_persists(self):
         self.provider.open_official_login()
@@ -499,6 +557,26 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
 
+    def test_native_delete_failure_is_cleanup_pending_and_can_retry_login(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._metadata.save(self.provider._state)
+        original_delete = self.crypto.delete
+        self.crypto.delete = Mock(side_effect=DeviceKeyError())
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.browser.assert_not_called()
+        self.crypto.delete = original_delete
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.browser.assert_called_once()
+
     def test_policy_failure_is_never_treated_as_an_already_deleted_key(self):
         self.activate()
         self.provider._key.close()
@@ -552,6 +630,15 @@ class TransportTests(unittest.TestCase):
                     'GET' if path == 'config' else 'POST', PREFIX+path,
                     None if path == 'config' else {'deviceId': DEVICE})
             self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
+
+    def test_only_the_exact_official_poll_denial_marks_a_pairing_retired(self):
+        for status, raw, headers in [(403, b'{"error":"Pairing unavailable"}', {}),
+                (502, b'{"error":"Pairing unavailable"}', {}),
+                (403, b'{"error":"Pairing unavailable"}', {'Content-Type': 'text/html'})]:
+            connection = self.connection(status=status, raw=raw, headers=headers)
+            with self.subTest(status=status, headers=headers), self.assertRaises(AccessDenied) as caught:
+                OfficialTransport(connection=lambda: connection).request('POST', PREFIX+'pairings/poll', {})
+            self.assertEqual(caught.exception.code == 'PAIRING_RETIRED', status == 403 and not headers)
 
     def test_disabled_config_503_is_specific_but_generic_503_stays_transient(self):
         exact=compact({'error':'Collector access unavailable','code':'ACCESS_NOT_CONFIGURED'})

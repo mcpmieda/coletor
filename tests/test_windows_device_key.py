@@ -1,8 +1,10 @@
 import base64
 import struct
 import unittest
+import ctypes
+from unittest.mock import Mock, patch
 from coletor.windows_device_key import (DeviceKeyError, WindowsDeviceKey,
-    TPM_PROVIDER, SOFTWARE_PROVIDER)
+    NativeCng, TPM_PROVIDER, SOFTWARE_PROVIDER)
 
 
 class FakeCrypto:
@@ -59,6 +61,20 @@ class FakeCrypto:
 
 
 class WindowsDeviceKeyTests(unittest.TestCase):
+    def test_native_delete_uses_zero_flags_required_by_platform_provider(self):
+        dll = Mock()
+        with patch('coletor.windows_device_key.sys.platform', 'win32'), patch.object(
+                ctypes, 'WinDLL', return_value=dll, create=True):
+            native = NativeCng()
+        self.assertEqual(dll.NCryptDeleteKey.argtypes, [ctypes.c_size_t, ctypes.wintypes.DWORD])
+        dll.NCryptDeleteKey.side_effect = lambda key, flags: 0 if flags == 0 else -2146893815
+        native.delete(123)
+        dll.NCryptDeleteKey.assert_called_once_with(123, 0)
+        dll.NCryptDeleteKey.side_effect = None
+        dll.NCryptDeleteKey.return_value = -2146893815
+        with self.assertRaises(DeviceKeyError):
+            native.delete(123)
+
     def test_default_never_creates_persistent_key_without_activation(self):
         crypto = FakeCrypto()
         key = WindowsDeviceKey(crypto=crypto)
