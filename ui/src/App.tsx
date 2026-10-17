@@ -104,8 +104,9 @@ export default function App() {
       <div hidden={view !== 'schedule'}>{desktop ? <SharedScheduleSettings /> : <ScheduleSettings />}</div>
       {view === 'history' && <CollectorHistory />}
       <div className="page-stack" hidden={view !== 'preview'}>
-        <CollectorControl />
-        <ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
+        <CollectorControl>
+          <ManualSource busy={busy} onBusy={value => { running.current = value; setBusy(value); }} onRead={work => run(() => work())} onClear={clear} />
+        </CollectorControl>
         {view === 'preview' && <>
         <ToolsPanel desktop={desktop} open={toolsOpen || busy || !!error} onToggle={setToolsOpen}>
           <section className="panel source-panel" aria-labelledby="source-title"><div className="section-heading"><div><h2 id="source-title">Arquivo HTML ou exemplo</h2><p>Abra um diário salvo do Smecel ou use os dados de exemplo. Nada é enviado.</p></div><FileUp size={22} className="muted" /></div>

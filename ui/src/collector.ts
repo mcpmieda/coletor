@@ -15,9 +15,15 @@ export interface CollectorStatus {
   settings: { revision: number; paused: boolean; schedule: SharedSchedule | null } | null;
   /** The saved Smecel login is write-only: only a masked account comes back. */
   credential?: { saved: boolean; account?: string };
+  /** Classes saved for this computer (display only; collection revalidates the list). */
+  selectedClasses?: number | null;
 }
 export interface HistoryEntry {
   at: number; kind: string; code?: string; label?: string; sent?: number; unresolved?: number; conflicts?: number;
+}
+/** Ready for unattended collection: a saved Smecel access and at least one class. */
+export function isConfigured(status: CollectorStatus | null): boolean {
+  return status?.credential?.saved === true && (status.selectedClasses ?? 0) > 0;
 }
 export type CollectorResult = CollectorStatus | { error: string; code?: string };
 export interface CollectorBridge {
@@ -67,6 +73,7 @@ export const COLLECTOR_CODES: Record<string, string> = {
   'revision-conflict': 'Os dados mudaram no Ecossistema. Descarte o lote pendente para coletar de novo.',
   'SOURCE_LOGIN_REQUIRED': 'Entre no Smecel e carregue as turmas.',
   'SOURCE_LOGIN_FAILED': 'O Smecel recusou o e-mail ou a senha salvos. Confira o acesso salvo.',
+  'SOURCE_READ_FAILED': 'Não foi possível ler o diário de uma turma no Smecel. A coleta tenta de novo no próximo horário.',
   'SOURCE_CLASS_UNAVAILABLE': 'Há turma escolhida fora da lista do Smecel. Carregue as turmas de novo.',
   'SOURCE_CLASS_AMBIGUOUS': 'Há turma sem ligação no Centro. Confira na Importação do Ecossistema.',
   'CLASS_RECONCILIATION_REQUIRED': 'As demais turmas foram enviadas. Há turma do Smecel sem ligação no Centro; confira a Importação.',
@@ -82,6 +89,20 @@ export const COLLECTOR_CODES: Record<string, string> = {
   paused: 'A coleta foi pausada para a escola.',
 };
 /** Operational history in plain words; never student names. */
+export interface RunSummary { at: number; classes: number; total: number; resolved: number; unresolved: number; conflicts: number; finished: boolean }
+/** The latest collection from the local history, so the summary survives a restart. */
+export function lastRun(entries: readonly HistoryEntry[]): RunSummary | null {
+  const sorted = [...entries].sort((a, b) => a.at - b.at);
+  const start = sorted.map(entry => entry.kind).lastIndexOf('collection-started');
+  if (start < 0) return null;
+  const run = { at: sorted[start].at, classes: 0, total: sorted[start].sent ?? 0, resolved: 0, unresolved: 0, conflicts: 0, finished: false };
+  for (const entry of sorted.slice(start + 1)) {
+    if (entry.kind === 'class-sent') {
+      run.classes++; run.resolved += entry.sent ?? 0; run.unresolved += entry.unresolved ?? 0; run.conflicts += entry.conflicts ?? 0; run.at = entry.at;
+    } else if (entry.kind === 'collection-finished') { run.finished = true; run.at = entry.at; break; }
+  }
+  return run.classes ? run : null;
+}
 export function historyText(entry: HistoryEntry): string {
   const counts = entry.sent === undefined ? '' : ` · ${entry.sent} aluno(s) reconhecido(s)`;
   const extra = (entry.unresolved ? ` · ${entry.unresolved} não reconhecido(s)` : '')

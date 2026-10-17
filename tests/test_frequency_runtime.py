@@ -559,6 +559,20 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.collect()
         self.source.operational_catalog.assert_called_once()
 
+    def test_failed_diary_read_is_reported_as_read_failure_and_retried(self):
+        self.storage.save_credential('operador@example.invalid', 'SYNTHETIC_ONLY')
+        self.source.operational_capture = Mock(side_effect=SessionError('A turma não passou pela revalidação'))
+        result = self.runtime.collect()
+        self.assertEqual(result['code'], 'SOURCE_READ_FAILED')
+        self.assertEqual(result['state'], 'error')
+        self.assertFalse(self.runtime._source_blocked)
+
+    def test_status_reports_how_many_classes_are_saved(self):
+        self.source.saved_class_count = Mock(return_value=15)
+        self.assertEqual(self.runtime.public_status()['selectedClasses'], 15)
+        self.source.saved_class_count = Mock(side_effect=OSError())
+        self.assertIsNone(self.runtime.public_status()['selectedClasses'])
+
     def test_pause_arriving_during_capture_blocks_before_enqueue_or_post(self):
         self.source.on_capture = lambda: setattr(self.provider, 'paused', True)
         result = self.runtime.collect()
