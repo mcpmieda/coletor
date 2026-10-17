@@ -499,6 +499,26 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
 
+    def test_native_delete_failure_is_cleanup_pending_and_can_retry_login(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._metadata.save(self.provider._state)
+        original_delete = self.crypto.delete
+        self.crypto.delete = Mock(side_effect=DeviceKeyError())
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.browser.assert_not_called()
+        self.crypto.delete = original_delete
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.browser.assert_called_once()
+
     def test_policy_failure_is_never_treated_as_an_already_deleted_key(self):
         self.activate()
         self.provider._key.close()

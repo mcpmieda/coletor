@@ -463,7 +463,10 @@ class DeviceProvider:
         if key is not None:
             if thumbprint(key.public_jwk()) != self._state['keyThumbprint']:
                 raise AccessDenied('DEVICE_STATE_INVALID')
-            key.forget(removal_authorized=True)
+            try:
+                key.forget(removal_authorized=True)
+            except DeviceKeyError:
+                raise AccessDenied('ACCESS_CLEANUP_PENDING') from None
         self._key = None
         if self._state['serverRevoked'] or self._state['deviceId'] is None:
             self._metadata.remove()
