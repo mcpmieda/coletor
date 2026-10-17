@@ -30,8 +30,10 @@ def synthetic_browser(progress):
     from coletor.class_catalog import LIST_PATH, ORGANIZATION, SCHOOL
     from urllib.parse import urlsplit, parse_qsl
     def listing(year):
-        rows=''.join(f'<tr><td></td><td>{i}</td><td><a href="vinculoAlunoExibirTurma.php?ct={10+i}">{10+i}</a></td><td>Turma sintética {label}</td><td>Etapa sintética</td><td>Matriz sintética</td><td>MATUTINO</td></tr>' for i,label in [(1,'Alpha'),(2,'Beta')])
-        return f'<html><head><meta charset="utf-8"><title>Listar Turmas - Ano Letivo {year}</title></head><body>{ORGANIZATION} / {SCHOOL}<a role="combobox">ANO LETIVO: {year}</a><input placeholder="Digite o nome ou parte do nome de uma turma"><table id="tabelaTurmas"><tbody id="tbodyTurmas">{rows}</tbody></table></body></html>'
+        # Shape observed on 17/10/2026: titled header, 11 cells, ct + ano link.
+        head='<thead><tr><th></th><th>Nº</th><th>CÓD <span>?</span></th><th>TURMA</th><th>ETAPA</th><th>MATRIZ</th><th>TURNO</th><th></th><th>%</th><th>RELATÓRIOS</th><th>OPÇÕES</th></tr></thead>'
+        rows=''.join(f'<tr><td></td><td>{i}</td><td><a href="vinculoAlunoExibirTurma.php?ct={10+i}&ano={year}">{10+i}</a></td><td>Turma sintética {label}</td><td>Etapa sintética</td><td>Matriz sintética</td><td>MATUTINO</td><td>0/30</td><td></td><td></td><td></td></tr>' for i,label in [(1,'Alpha'),(2,'Beta')])
+        return f'<html><head><meta charset="utf-8"><title>Listar Turmas - Ano Letivo {year}</title></head><body>{ORGANIZATION} / {SCHOOL}<a role="combobox">ANO LETIVO: {year}</a><input placeholder="Digite o nome ou parte do nome de uma turma"><table id="tabelaTurmas">{head}<tbody id="tbodyTurmas">{rows}</tbody></table></body></html>'
     original_context, original_page = module.configure_context, module.configure_page
     visits = 0
     captures = 0
