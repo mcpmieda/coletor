@@ -21,7 +21,7 @@ SCENARIOS = ("quit", "close")
 REQUIRED_CHECKS = {
     "native_window_visible", "native_tray_registered", "native_menu_visible",
     "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
-    "idle_has_no_timer", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
+    "idle_motion_gentle", "window_icon_follows_fox", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
     "visible_ui_healthy",
     "unregistered_tray_cannot_hide",
     "hidden_and_minimized_panel_motion_stops",
@@ -44,6 +44,7 @@ def wait(predicate, timeout=15):
 def inspect(tray):
     data={}
     def read():
+        import System
         from System.Reflection import BindingFlags
         flags = BindingFlags.Instance | BindingFlags.NonPublic
         field = tray._notify.GetType().GetField("added", flags) or tray._notify.GetType().GetField("iconAdded", flags)
@@ -52,6 +53,8 @@ def inspect(tray):
                     window_visible=bool(tray._form.Visible), activity=tray._current_activity,
                     timer=bool(tray._timer.Enabled), icon=tray._last_icon,
                     frame_updates=tray._frame_updates, tooltip=str(tray._notify.Text),
+                    window_icon_matches=tray._window_icon in tray._icons and System.Object.ReferenceEquals(tray._form.Icon, tray._icons[tray._window_icon])
+                        and tray._window_icon == (tray._last_icon if tray._last_icon in tray._icons else "fox-idle"),
                     handle=int(tray._form.Handle.ToInt64()))
     tray._invoke(read)
     return data
@@ -101,9 +104,14 @@ def exercise(window,args,result):
         require("unregistered_tray_cannot_hide","error" in tray.hide() and inspect(tray)["window_visible"] and not tray.available())
         tray._invoke(lambda:setattr(tray._notify,"Visible",True))
         wait(lambda:inspect(tray)["registered"])
-        wait(lambda:inspect(tray)["activity"]=="idle" and not inspect(tray)["timer"])
-        require("idle_has_no_timer")
-        require("fox_icon_shown",data["icon"]=="fox-idle")
+        # Resting fox: a slow timer with a rare blink/ear twitch (at most 10
+        # frame changes per 26 s cycle, never more than 6 s without a gesture).
+        wait(lambda:inspect(tray)["activity"]=="idle" and inspect(tray)["timer"])
+        before=inspect(tray)["frame_updates"]; time.sleep(13); after=inspect(tray)
+        result["idle_frame_updates"]=after["frame_updates"]-before
+        require("idle_motion_gentle",2<=after["frame_updates"]-before<=10)
+        require("window_icon_follows_fox",after["window_icon_matches"])
+        require("fox_icon_shown",data["icon"] in {"fox-idle","fox-blink","fox-ear"})
         for _ in range(6):
             menu(tray._hide_item); require("same_window_after_repeated_show_hide",not inspect(tray)["window_visible"])
             menu(tray._open_item); menu(tray._open_item)
@@ -143,6 +151,7 @@ def exercise(window,args,result):
             wait(lambda:inspect(tray)["activity"]=="reading" and inspect(tray)["timer"])
             require("actual_local_reading_state","Lendo arquivo local" in inspect(tray)["tooltip"])
             before=inspect(tray)["frame_updates"]; time.sleep(1.95); after=inspect(tray)["frame_updates"]
+            result["reading_frame_updates"]=after-before
             require("reading_animation_bounded",2<=after-before<=4)
             result["reading_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-local-reading.png")
             media(window,tray,True)
@@ -155,7 +164,7 @@ def exercise(window,args,result):
             require("cancel_keeps_actual_native_read_truthful",inspect(tray)["activity"]=="reading")
             require("discard_blocks_new_reads", window.evaluate_js("[...document.querySelectorAll('button')].filter(n=>['Usar dados de exemplo','Abrir diário'].includes(n.textContent.trim())).every(n=>n.disabled) && document.querySelector('input[inputmode=numeric]')?.disabled===true"))
             gate.set()
-            wait(lambda:inspect(tray)["activity"]=="idle" and not inspect(tray)["timer"])
+            wait(lambda:inspect(tray)["activity"]=="idle")
             # Native end_read occurs before the bridge promise reaches React.
             # Wait for both layers; do not race the legitimately disabled input.
             smoke.wait_js(window, "document.querySelector('input[inputmode=numeric]')?.disabled===false && !document.body.innerText.includes('Lendo o diário')")

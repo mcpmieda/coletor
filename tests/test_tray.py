@@ -67,10 +67,13 @@ class AnimationTests(unittest.TestCase):
             frames.append(self.controller.snapshot().frame_key)
             self.clock.advance(.6)
         self.assertEqual(tuple(frames), IDLE_SEQUENCE)
-        self.assertEqual(frames.count("fox-blink"), 1)
-        self.assertIn("fox-ear", frames)
-        self.assertIn("fox-tail-left", frames)
-        self.assertIn("fox-tail-right", frames)
+        self.assertEqual(frames.count("fox-blink"), 3)  # one blink, then a double blink
+        ear = frames.index("fox-ear")
+        self.assertEqual(frames[ear:ear + 3], ["fox-ear", "fox-idle", "fox-ear"])  # ear twitch
+        # Only head frames exist at icon size; every frame has a real asset.
+        self.assertTrue(set(frames) <= {"fox-idle", "fox-blink", "fox-ear"})
+        # Gestures stay rare: the fox rests in at least four of every five frames.
+        self.assertGreaterEqual(frames.count("fox-idle") / len(frames), .8)
         self.assertEqual(self.controller.snapshot().frame_key, "fox-idle")
 
     def test_no_rapid_boundary_updates(self):
@@ -164,7 +167,7 @@ class AnimationTests(unittest.TestCase):
     def test_manifest_contains_only_bounded_local_ico_paths(self):
         paths = icon_paths(Path("/synthetic/fox-icons"))
         self.assertEqual(set(paths), set(FRAME_KEYS))
-        self.assertEqual(len(paths), 11)
+        self.assertEqual(len(paths), len(FRAME_KEYS))
         for key, path in paths.items():
             self.assertEqual(path.parent, Path("/synthetic/fox-icons"))
             self.assertEqual(path.name, f"{key}.ico")
@@ -354,7 +357,7 @@ class WindowsAdapterContractTests(unittest.TestCase):
         loaded = {e[1] for e in gui.events if e[0] == "load"}
         destroyed = {e[1] for e in gui.events if e[0] == "destroy_icon"}
         self.assertEqual(loaded, destroyed)
-        self.assertEqual(len(loaded), 11)
+        self.assertEqual(len(loaded), len(FRAME_KEYS))
         shell_events = [e for e in gui.events if e[0] == "shell"]
         self.assertEqual([e[1] for e in shell_events], [gui.NIM_ADD, gui.NIM_SETVERSION, gui.NIM_DELETE])
         self.assertEqual(len({e[3] for e in shell_events}), 1)
@@ -408,7 +411,7 @@ class WindowsAdapterContractTests(unittest.TestCase):
         loaded = [e[1] for e in gui.events if e[0] == "load"]
         destroyed = [e[1] for e in gui.events if e[0] == "destroy_icon"]
         self.assertEqual(sorted(loaded), sorted(destroyed))
-        self.assertEqual(len(loaded), 22)
+        self.assertEqual(len(loaded), 2 * len(FRAME_KEYS))
 
     def test_start_timeout_requests_stop_and_leaves_no_running_thread(self):
         gui = FakeGui()
@@ -454,7 +457,7 @@ class WindowsAdapterContractTests(unittest.TestCase):
                 tray.start()
                 with self.assertLogs("coletor.tray", level="WARNING"): tray.stop()
                 self.assertFalse(tray.running)
-        self.assertEqual(len([e for e in gui.events if e[0] == "destroy_icon"]), 11)
+        self.assertEqual(len([e for e in gui.events if e[0] == "destroy_icon"]), len(FRAME_KEYS))
         self.assertTrue(any(e[0] == "unregister" for e in gui.events))
 
     def test_open_and_quit_callbacks_are_dispatched_without_launching_processes(self):

@@ -41,11 +41,13 @@ class AnimationPolicy:
         return self.enabled and not self.reduced_motion
 
 
-# A long resting beat between gestures keeps the tiny notification icon unobtrusive.
+# A long resting beat between gestures keeps the tiny notification icon unobtrusive:
+# a blink, an ear twitch (up, down, up) and a double blink over about 25 seconds.
+# Only head frames exist at icon size; the tail lives on the full-body sprite.
 IDLE_SEQUENCE = (
-    *("fox-idle",) * 8, "fox-blink", *("fox-idle",) * 7,
-    "fox-ear", *("fox-idle",) * 7, "fox-tail-left", "fox-tail-right",
-    *("fox-idle",) * 10,
+    *("fox-idle",) * 10, "fox-blink", *("fox-idle",) * 9,
+    "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 10,
+    "fox-blink", "fox-idle", "fox-blink", *("fox-idle",) * 8,
 )
 WORKING_SEQUENCE = tuple(f"fox-working-{index}" for index in range(1, 5))
 STATIC_FRAMES = {
