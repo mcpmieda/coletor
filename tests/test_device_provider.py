@@ -214,6 +214,33 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(self.provider._pending, old)
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 1)
 
+    def test_expired_live_poll_denial_allows_explicit_retry_with_the_existing_key(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        request = self.transport.request
+        def expired(method, path, value=None):
+            if path == PREFIX + 'pairings/poll':
+                raise AccessDenied('ACCESS_REQUIRED')
+            return request(method, path, value)
+        self.transport.request = expired
+        # Background polling cannot replace a request or launch the browser.
+        with self.assertRaises(AccessDenied): self.provider.verify_online()
+        self.assertEqual(self.provider._pending, old)
+        self.provider.open_official_login()
+        self.assertNotEqual(self.provider._pending['id'], old['id'])
+        self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertEqual(self.browser.call_count, 2)
+
+    def test_pending_poll_outage_keeps_the_existing_request_for_retry(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        self.transport.request = Mock(side_effect=AccessDenied('ACCESS_UNAVAILABLE'))
+        with self.assertRaises(AccessDenied) as caught: self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
+        self.assertEqual(self.provider._pending, old)
+        self.assertEqual(self.browser.call_count, 1)
+
     def test_pairing_signature_is_bound_and_only_nonsecret_metadata_persists(self):
         self.provider.open_official_login()
         self.assertEqual(self.provider.public_status(), {'pairingCode': '123456'})

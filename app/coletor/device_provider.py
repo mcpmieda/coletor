@@ -355,9 +355,18 @@ class DeviceProvider:
                 # validated official URL, with no new consent or private data
                 # exposed to JavaScript. Discard expired/rejected requests only
                 # after the server's own poll says they are no longer pending.
-                status = decode(self._request('pairings/poll', {
-                    n: self._pending[n] for n in ('id', 'pollToken')}))
-                if (set(status) == {'contractVersion', 'state'}
+                try:
+                    status = decode(self._request('pairings/poll', {
+                        n: self._pending[n] for n in ('id', 'pollToken')}))
+                except AccessDenied as error:
+                    # The live service returns 403 for an expired/retired
+                    # pairing instead of an explicit expired state. Only this
+                    # explicit login action may start afresh; outages retain
+                    # the request, and the new pairing still needs browser auth.
+                    if error.code != 'ACCESS_REQUIRED':
+                        raise
+                    status = None
+                if (status is not None and set(status) == {'contractVersion', 'state'}
                         and status['contractVersion'] == 1
                         and status['state'] in {'pending', 'confirmed', 'exchanging'}):
                     url = (OFFICIAL_ORIGIN + '/frequency-collector/connect?pairing='
@@ -365,12 +374,12 @@ class DeviceProvider:
                     if not self._browser(url, new=2):
                         raise AccessDenied('LOGIN_UNAVAILABLE')
                     return
-                if (set(status) == {'contractVersion', 'state', 'deviceId'}
+                if (status is not None and set(status) == {'contractVersion', 'state', 'deviceId'}
                         and status['contractVersion'] == 1
                         and status['state'] == 'completed'):
                     self.verify_online()  # Claim once, without issuing a new key.
                     return
-                if (set(status) != {'contractVersion', 'state'}
+                if status is not None and (set(status) != {'contractVersion', 'state'}
                         or status['contractVersion'] != 1
                         or status['state'] not in {'expired', 'cancelled', 'denied'}):
                     raise AccessDenied('INVALID_ACCESS_RESPONSE')
