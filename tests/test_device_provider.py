@@ -200,7 +200,7 @@ class DeviceProviderTests(unittest.TestCase):
         self.provider.open_official_login()
         self.assertNotEqual(self.provider._pending['id'], previous_id)
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
-        self.assertEqual(self.consent.call_count, 2)
+        self.assertEqual(self.consent.call_count, 1)
 
     def test_unknown_pending_poll_never_reissues_a_pairing(self):
         self.provider.open_official_login()
@@ -231,6 +231,19 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
         self.assertEqual(self.provider._state['state'], 'unpaired')
         self.assertEqual(self.browser.call_count, 2)
+        self.consent.assert_called_once()
+
+    def test_retry_with_missing_unpaired_key_never_creates_a_replacement(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._key.close()
+        self.provider._key = None
+        self.crypto.exists = False
+        self.consent.reset_mock()
+        with self.assertRaises(AccessDenied): self.provider.open_official_login()
+        self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
+        self.consent.assert_not_called()
+        self.assertEqual(self.browser.call_count, 1)
 
     def test_pending_poll_outage_keeps_the_existing_request_for_retry(self):
         self.provider.open_official_login()

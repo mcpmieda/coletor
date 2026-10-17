@@ -387,7 +387,11 @@ class DeviceProvider:
             ready = decode(self._request('config'))
             if set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['contractVersion'] != 1 or ready['ready'] is not True:
                 raise AccessDenied('ACCESS_NOT_CONFIGURED')
-            if not self._consent():
+            saved_state = self._metadata.read()
+            # Retrying an unpaired key does not create persistent access in
+            # Windows again. Its policy is still validated by _load, and the
+            # browser still requires a fresh account/device confirmation.
+            if (not saved_state or saved_state['state'] != 'unpaired') and not self._consent():
                 raise AccessDenied('DEVICE_ACTIVATION_CANCELLED')
             # Fetch current server time after a potentially long human decision.
             ready = decode(self._request('config'))
