@@ -294,8 +294,11 @@ class DeviceProvider:
             if self._state is None:
                 self._state = self._metadata.read()
             if self._state and self._state['state'] in {'deletePending', 'revokedLocally'}:
-                self.close()
-                raise AccessDenied('ACCESS_REQUIRED')
+                # Status polling must be read-only for a checkpointed device.
+                # Only explicit login/logout, protected by DesktopApi's queue
+                # preflight, may resume the previously authorized removal.
+                raise AccessDenied('ACCESS_CLEANUP_PENDING' if self._state['state'] == 'deletePending'
+                                   else 'SERVER_REVOCATION_PENDING')
             if self._pending:
                 result = decode(self._request('pairings/poll', {n: self._pending[n] for n in ('id', 'pollToken')}))
                 if set(result) == {'contractVersion', 'state', 'deviceId'} and result['contractVersion'] == 1 and result['state'] == 'completed':
@@ -334,11 +337,31 @@ class DeviceProvider:
             self._state = self._metadata.read()
             if self._state:
                 if self._state['state'] in {'deletePending', 'revokedLocally'}:
-                    raise AccessDenied('ACCESS_CLEANUP_PENDING')
+                    # A previous *explicit* removal already checkpointed this
+                    # device's deletion. Resume it instead of trapping login
+                    # forever. DesktopApi has checked the protected queue before
+                    # allowing this path. An unconfirmed server revocation or
+                    # a Windows key failure must still fail closed.
+                    self.close()
+                    self._state = self._metadata.read()
+                    if self._state is not None:
+                        raise AccessDenied('ACCESS_CLEANUP_PENDING')
+            if self._state:
                 public = self._load().public_jwk()
                 if self._state['state'] == 'active':
-                    if decode(self._request('revoke', self._proof('collector-revoke'))) != {'revoked': True}:
-                        raise AccessDenied('ACCESS_CLEANUP_PENDING')
+                    # An earlier revocation can have reached the server even
+                    # when its acknowledgement was lost. Never assume success:
+                    # confirm the exact old device/key on the official server.
+                    try:
+                        revoked = decode(self._request('revoke', self._proof('collector-revoke'))) == {'revoked': True}
+                    except AccessDenied:
+                        revoked = False
+                    if not revoked:
+                        status = decode(self._request('device-status', {
+                            'deviceId': self._state['deviceId'],
+                            'keyThumbprint': self._state['keyThumbprint']}))
+                        if status != {'revoked': True}:
+                            raise AccessDenied('SERVER_REVOCATION_PENDING')
             else:
                 provider = TPM_PROVIDER
                 key = self._key_factory(provider=provider)

@@ -290,8 +290,14 @@ class DeviceProviderTests(unittest.TestCase):
             self.provider.verify_online()
         self.transport.request = original
         restarted = self.make_provider()
-        with self.assertRaises(AccessDenied):
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as pending:
             restarted.verify_online()
+        self.assertEqual(pending.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.browser.assert_not_called()  # Passive status cannot launch revoke.
+        with self.assertRaises(AccessDenied) as requested:
+            restarted.open_official_login()
+        self.assertEqual(requested.exception.code, 'SERVER_REVOCATION_PENDING')
         self.assertTrue(self.browser.call_args.args[0].startswith(OFFICIAL_ORIGIN+'/frequency-collector/revoke?device='))
         self.transport.revoked = True  # Synthetic owner-only browser confirmation.
         restarted.close()
@@ -320,6 +326,37 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertIsNotNone(restarted._pending)
         restarted.release()
 
+    def test_repairing_accepts_only_confirmed_revocation_after_lost_receipt(self):
+        self.activate()
+        self.transport.revoked = True  # Server had already revoked the old ID.
+        original = self.transport.request
+        def missing_revocation_receipt(method, path, value=None):
+            if path == PREFIX + 'revoke':
+                raise AccessDenied('ACCESS_REQUIRED')
+            return original(method, path, value)
+        self.transport.request = missing_revocation_receipt
+        self.provider.open_official_login()
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertIsNotNone(self.provider._pending)
+        self.assertTrue(any(suffix == 'device-status' for _, suffix, _ in self.transport.calls))
+        self.assertEqual(sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls), 2)
+
+    def test_repairing_never_bypasses_revocation_without_server_proof(self):
+        self.activate()
+        original = self.transport.request
+        def rejected_revocation(method, path, value=None):
+            if path == PREFIX + 'revoke':
+                raise AccessDenied('ACCESS_REQUIRED')
+            return original(method, path, value)
+        self.transport.request = rejected_revocation
+        pairing_before = sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as denied:
+            self.provider.open_official_login()
+        self.assertEqual(denied.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.assertEqual(self.provider._state['state'], 'active')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls), pairing_before)
+
     def test_metadata_unlink_failure_after_key_delete_is_recoverable_on_retry_and_restart(self):
         self.activate()
         original = self.provider._metadata.remove
@@ -333,6 +370,77 @@ class DeviceProviderTests(unittest.TestCase):
         restarted.close()
         self.assertFalse((self.root/'device.json').exists())
         restarted.release()
+
+    def test_next_login_resumes_previously_authorized_delete_checkpoint(self):
+        # A prior explicit logout saved deletePending but could not unlink the
+        # metadata. Reopening must not require deleting the profile manually.
+        self.activate()
+        original_remove = self.provider._metadata.remove
+        self.provider._metadata.remove = Mock(side_effect=PermissionError('synthetic-locked-metadata'))
+        with self.assertRaises(PermissionError):
+            self.provider.close()
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.assertFalse(self.crypto.exists)
+        self.provider._metadata.remove = original_remove
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
+
+    def test_pending_remote_revocation_never_starts_new_pairing(self):
+        self.activate()
+        original_request = self.transport.request
+        self.transport.request = lambda method, path, value=None: (
+            (_ for _ in ()).throw(AccessDenied('ACCESS_UNAVAILABLE'))
+            if path.endswith('/revoke') else original_request(method, path, value))
+        with self.assertRaises(AccessDenied):
+            self.provider.close()
+        self.assertEqual(self.provider.removal_status()['state'], 'revokedLocally')
+        self.transport.request = original_request
+        paired_before = sum(path == 'pairings' for _, path, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
+        self.assertFalse(self.crypto.exists)
+        self.transport.revoked = True  # Explicit remote action, not inferred from a timeout.
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertTrue(self.crypto.exists)
+
+    def test_checkpointed_removal_status_does_not_delete_key_or_open_browser(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._state = state
+        self.provider._metadata.save(state)
+        original_key = self.provider._key
+        self.browser.reset_mock()
+        with self.assertRaises(AccessDenied) as pending:
+            self.provider.verify_online()
+        self.assertEqual(pending.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertIs(self.provider._key, original_key)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.browser.assert_not_called()
+
+    def test_unsafe_key_checkpoint_is_never_automatically_replaced(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._key.close()
+        self.provider._key = None
+        state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._state = state
+        self.provider._metadata.save(state)
+        self.crypto.properties['Export Policy'] = b'\x01\x00\x00\x00'
+        paired_before = sum(path == 'pairings' for _, path, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
 
     def test_policy_failure_is_never_treated_as_an_already_deleted_key(self):
         self.activate()

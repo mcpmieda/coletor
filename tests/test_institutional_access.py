@@ -156,6 +156,46 @@ class InstitutionalAccessTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             gate.open_login()
 
+    def test_transient_worker_cleanup_is_retried_before_opening_browser(self):
+        from unittest.mock import Mock
+        cleanup = Mock(side_effect=[RuntimeError('synthetic-worker-close'), None])
+        provider = Provider([])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        gate.open_login()
+        self.assertTrue(provider.opened)
+        self.assertFalse(gate._cleanup_pending)
+        self.assertEqual(cleanup.call_count, 2)
+
+    def test_repeated_worker_cleanup_failure_still_denies_login(self):
+        from unittest.mock import Mock
+        cleanup = Mock(side_effect=RuntimeError('synthetic-unclosed-worker'))
+        provider = Provider([])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        with self.assertRaises(AccessDenied) as caught:
+            gate.open_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertFalse(provider.opened)
+        self.assertTrue(gate._cleanup_pending)
+
+    def test_failed_device_logout_cannot_be_cleared_by_worker_cleanup(self):
+        from unittest.mock import Mock
+        provider = Provider([])
+        provider.close = Mock(side_effect=[RuntimeError('synthetic-device-failure'), None])
+        cleanup = Mock()
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        with self.assertRaises(AccessDenied):
+            gate.logout()
+        self.assertTrue(gate._cleanup_pending)
+        with self.assertRaises(AccessDenied) as caught:
+            gate.open_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertFalse(provider.opened)
+        provider.close.assert_called_once()
+        gate.logout()
+        gate.open_login()
+        self.assertTrue(provider.opened)
+        self.assertFalse(gate._cleanup_pending)
+
     def test_successful_explicit_cleanup_retry_clears_pending_but_does_not_authorize(self):
         from unittest.mock import Mock
         provider = Provider([])
