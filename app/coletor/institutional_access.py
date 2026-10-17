@@ -105,6 +105,9 @@ class InstitutionalAccess:
         self._lock = threading.RLock()
         self._generation = 0
         self._cleanup_pending = False
+        # A failed server/device logout is not cured by closing a browser worker.
+        self._logout_cleanup_pending = False
+        self._cleanup_operation = threading.RLock()
         self._locked_code = None
 
     def _verify(self, generation):
@@ -135,10 +138,11 @@ class InstitutionalAccess:
                 self._generation += 1
             self._locked_code = code
         if not transient:
-            try:
-                self._on_locked()
-            except Exception:
-                self._cleanup_pending = True
+            with self._cleanup_operation:
+                try:
+                    self._on_locked()
+                except Exception:
+                    self._cleanup_pending = True
 
     def run(self, work: Callable[[], T]) -> T:
         with self._lock:
@@ -169,9 +173,19 @@ class InstitutionalAccess:
             return status
 
     def open_login(self):
-        self._invalidate('ACCOUNT_CHANGED')
-        if self._cleanup_pending:
-            raise AccessDenied("ACCESS_CLEANUP_PENDING")
+        # Native status checks or the initial account change may fail while
+        # closing a transient source worker. Retry only this non-destructive
+        # cleanup; never treat it as proof of device/server revocation.
+        with self._cleanup_operation:
+            self._invalidate('ACCOUNT_CHANGED')
+            if self._cleanup_pending:
+                if self._logout_cleanup_pending:
+                    raise AccessDenied('ACCESS_CLEANUP_PENDING')
+                try:
+                    self._on_locked()
+                except Exception:
+                    raise AccessDenied('ACCESS_CLEANUP_PENDING') from None
+                self._cleanup_pending = False
         if self._provider is None:
             raise AccessDenied("ACCESS_NOT_CONFIGURED")
         try:
@@ -182,20 +196,23 @@ class InstitutionalAccess:
             raise AccessDenied("LOGIN_UNAVAILABLE") from None
 
     def logout(self):
-        self._invalidate('LOGOUT')
-        failed = False
-        try:
-            self._on_locked()
-        except Exception:
-            failed = True
-        if self._provider is not None:
+        with self._cleanup_operation:
+            self._invalidate('LOGOUT')
+            failed = False
+            provider_failed = False
             try:
-                self._provider.close()
+                self._on_locked()
             except Exception:
                 failed = True
-        self._cleanup_pending = failed
-        if failed:
-            raise AccessDenied("ACCESS_CLEANUP_PENDING") from None
+            if self._provider is not None:
+                try:
+                    self._provider.close()
+                except Exception:
+                    failed = provider_failed = True
+            self._logout_cleanup_pending = provider_failed
+            self._cleanup_pending = failed
+            if failed:
+                raise AccessDenied("ACCESS_CLEANUP_PENDING") from None
 
     def shutdown(self):
         release = getattr(self._provider, "release", None)
