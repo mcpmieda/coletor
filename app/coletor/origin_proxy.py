@@ -3,12 +3,19 @@
 No TLS interception, certificate installation, request/body logging or cookies.
 Redirects retain normal browser semantics but cannot tunnel to another origin.
 """
+import asyncio
 import select
 import socket
 import socketserver
 import threading
+import time
 
 AUTHORITY = b"www.smecel.com.br:443"
+OPENING_HTML = ('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Abrindo o Smecel…</title>'
+                '<body style="margin:0;display:grid;place-items:center;height:100vh;font:16px system-ui;'
+                'color:#5b4b52;background:#faf7f8">Abrindo o Smecel…</body></html>')
+PROBE_FRAME_JS = """url => { const frame = document.createElement('iframe'); frame.hidden = true;
+  frame.src = url; document.body.appendChild(frame); }"""
 
 
 async def verify_proxy(page, proxy):
@@ -29,10 +36,13 @@ async def verify_proxy(page, proxy):
     thread.start()
     before = proxy.denied_connections
     try:
-        try:
-            await page.goto(f"http://127.0.0.1:{server.server_address[1]}/source-isolation-probe", timeout=3000)
-        except Exception:
-            pass
+        # Probe from a hidden frame: navigating the visible tab to the denied
+        # address flashed Edge's "access denied" page before Smecel opened.
+        await page.set_content(OPENING_HTML)
+        await page.evaluate(PROBE_FRAME_JS, f"http://127.0.0.1:{server.server_address[1]}/source-isolation-probe")
+        deadline = time.monotonic() + 3
+        while server.contacts == 0 and proxy.denied_connections <= before and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
         if server.contacts != 0 or proxy.denied_connections <= before:
             raise RuntimeError("browser_proxy_not_enforced")
     finally:
