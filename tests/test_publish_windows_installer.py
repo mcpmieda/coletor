@@ -53,7 +53,7 @@ class PublishInstallerTests(unittest.TestCase):
         # Denied PR creation/merge must fail visibly instead of reporting green.
         self.assertIn('ARCHIVE_PR_NOT_CREATED', workflow)
         self.assertIn('ARCHIVE_PR_NOT_MERGED', workflow)
-        self.assertIn('exit 1\\n          fi\\n          echo "Created archive PR', workflow)
+        self.assertIn('exit 1\n          fi\n          echo "Created archive PR', workflow)
         self.assertIn('The installer is preserved in branch $branch', workflow)
         self.assertNotIn('Actions cannot open archive PR.', workflow)
         self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", workflow)
