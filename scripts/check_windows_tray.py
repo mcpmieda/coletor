@@ -106,6 +106,9 @@ def exercise(window,args,result):
         wait(lambda:inspect(tray)["registered"])
         # Resting fox: a slow timer with a rare blink/ear twitch (at most 10
         # frame changes per 26 s cycle, never more than 6 s without a gesture).
+        # CI images often disable Windows animations (prefers-reduced-motion),
+        # which correctly keeps the fox still; measure motion with it allowed.
+        media(window,tray,False)
         wait(lambda:inspect(tray)["activity"]=="idle" and inspect(tray)["timer"])
         before=inspect(tray)["frame_updates"]; time.sleep(13); after=inspect(tray)
         result["idle_frame_updates"]=after["frame_updates"]-before
