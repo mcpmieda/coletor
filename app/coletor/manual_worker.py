@@ -40,8 +40,31 @@ def vendored_script(url):
 NO_PRINT_JS = """Object.defineProperty(globalThis, 'print', {configurable: false, writable: false, value: () => undefined});"""
 
 # The list is rendered once a row carries a class link; the placeholder rows
-# shown while it loads have none. Independent of column count or order.
-ROWS_RENDERED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vinculoAlunoExibirTurma.php"]')"""
+# shown while it loads have none. Independent of column count or order. Stop
+# waiting as soon as the outcome is known: rows, or a login form that will never
+# render them (an expired session used to wait the full 20 s timeout).
+LIST_SETTLED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vinculoAlunoExibirTurma.php"], input[type="password"]')"""
+
+# Reading pages need no pictures, fonts or media. Aborting them keeps the six
+# HTTP/1.1 connections free for the list request and the diary itself. This
+# only refuses more: the allowed origin and every other block stay unchanged.
+READ_PATHS = ("/sistema/escola/turmaListar.php", "/sistema/escola/diario_frequencia.php")
+READ_SKIPPED_TYPES = {"image", "font", "media"}
+# A list validated in this session is reused for the following diaries while
+# the worker alone navigated the window, and for at most this many seconds.
+CATALOG_REUSE_SECONDS = 300
+LIST_PAGE_REUSE_SECONDS = 60
+
+
+def reading_page_asset(request):
+    if request.resource_type not in READ_SKIPPED_TYPES:
+        return False
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(request.frame.url)
+    except Exception:
+        return False
+    return parts.scheme == "https" and parts.hostname == "www.smecel.com.br" and parts.path in READ_PATHS
 
 # Clone only the documented report container; never serialize login inputs.
 CAPTURE_JS = """() => {
@@ -75,10 +98,15 @@ LOGIN_FIELDS = ("#usuario", "#senha", 'button[type="submit"][name="logar"]')
 LOGIN_OPENER = 'button[onclick="abrirModal()"]:visible'
 
 
-async def sign_in(page, email, password):
+async def sign_in(page, email, password, *, reload=True):
     """Fill the Smecel form inside the isolated Edge only. The credential stays
-    in this private worker; it is never logged, echoed or written to disk."""
-    await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    in this private worker; it is never logged, echoed or written to disk.
+
+    reload=False is passed only when an expired session redirected the list
+    to this exact login page seconds ago: loading it again repeats the same
+    document. An older form is always reloaded before a password is typed."""
+    if reload or getattr(page, "url", None) != LOGIN_URL:
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded")
     if await page.locator('input[type="password"]').count() == 0:
         return {"logged_in": True}
     user, secret, submit = LOGIN_FIELDS
@@ -118,7 +146,7 @@ async def configure_context(context, request_delegate=None):
         script = vendored_script(route.request.url) if route.request.method == "GET" else None
         if script is not None:
             await route.fulfill(status=200, content_type="application/javascript; charset=utf-8", body=script)
-        elif not allowed_request(route.request.url):
+        elif not allowed_request(route.request.url) or reading_page_asset(route.request):
             await route.abort()
         elif request_delegate is not None:
             await request_delegate(route)  # Python-only synthetic QA injection.
@@ -315,22 +343,64 @@ async def browser_session(initial):
                 configure_page(page)
                 await verify_proxy(page, proxy)
                 await configure_context(context)
+                # Navigation ownership. Only a page this worker loaded itself,
+                # with no navigation since (user click, script redirect, login,
+                # history change), may be reused; anything else forgets both
+                # the loaded page and the validated list.
+                owned = {"url": None, "at": 0.0, "expected": None, "redirected_at": None}
+                catalogs = {}
+
+                def forget():
+                    owned["url"] = None
+                    catalogs.clear()
+
+                def navigated(frame):
+                    if frame is page.main_frame and frame.url != owned["expected"]:
+                        forget()
+                        owned["redirected_at"] = time.monotonic()
+                page.on("framenavigated", navigated)
+
+                async def load(target):
+                    owned["url"] = None
+                    owned["expected"] = target
+                    try:
+                        await page.goto(target, wait_until="domcontentloaded")
+                    finally:
+                        owned["expected"] = None
+                    if page.url == target:
+                        owned["url"], owned["at"] = target, time.monotonic()
+
                 try:
-                    await page.goto(url, wait_until="domcontentloaded")
+                    await load(url)
                 except Exception:
                     pass
                 print(json.dumps({"opened": True}), flush=True)
                 async def read_catalog(year):
-                    await page.goto(list_url(year), wait_until="domcontentloaded")
+                    target = list_url(year)
+                    if not (owned["url"] == target == page.url
+                            and time.monotonic() - owned["at"] <= LIST_PAGE_REUSE_SECONDS):
+                        await load(target)
                     before = page.url
+                    if not matches_list(before, year):
+                        raise ValueError("listing_changed")  # Login redirect: no rows will come.
                     try:
-                        await page.wait_for_function(ROWS_RENDERED_JS, timeout=20000)
+                        await page.wait_for_function(LIST_SETTLED_JS, timeout=20000)
                     except Exception:
-                        pass  # Login redirect or empty list: the observation below rejects it.
+                        pass  # Empty list: the observation below rejects it.
                     observation = await page.evaluate(CATALOG_JS)
                     if page.url != before or observation.get("url") != before:
                         raise ValueError("listing_changed")
-                    return catalog_from_observation(observation, year)
+                    catalog = catalog_from_observation(observation, year)
+                    # The rendered page is consumed: a later read loads it again.
+                    owned["url"] = None
+                    catalogs[year] = (catalog, time.monotonic())
+                    return catalog
+
+                async def validated_catalog(year):
+                    cached = catalogs.get(year)
+                    if cached is not None and time.monotonic() - cached[1] <= CATALOG_REUSE_SECONDS:
+                        return cached[0]
+                    return await read_catalog(year)
 
                 async def capture_reply(command):
                     try:
@@ -343,7 +413,12 @@ async def browser_session(initial):
                             print(encoded, flush=True)
                             return
                         if command["command"] == "login":
-                            payload = await sign_in(page, str(command.get("email", "")), str(command.get("password", "")))
+                            redirected = owned["redirected_at"]
+                            fresh_form = (page.url == LOGIN_URL and redirected is not None
+                                          and time.monotonic() - redirected <= 30)
+                            forget()
+                            payload = await sign_in(page, str(command.get("email", "")), str(command.get("password", "")),
+                                                    reload=not fresh_form)
                             print(json.dumps(payload), flush=True)
                             return
                         if command["command"] == "list":
@@ -353,11 +428,13 @@ async def browser_session(initial):
                         class_id, year = params.get("ct"), params.get("ano")
                         if listing_mode:
                             class_id, year = command.get("class_id"), command.get("year")
-                            catalog = await read_catalog(year)
+                            catalog = await validated_catalog(year)
                             if (catalog["scope"]["context_key"] != command.get("context_key")
                                     or class_id not in {c["class_id"] for c in catalog["classes"]}):
                                 raise ValueError("selected_class_unavailable")
-                            await page.goto(source_url(class_id, year), wait_until="domcontentloaded")
+                            # Our own diary navigation keeps the list valid; a
+                            # redirect (expired login) forgets it on the spot.
+                            await load(source_url(class_id, year))
                         before = page.url
                         if not matches_source(before, class_id, year):
                             payload = {"url": "", "password_form": False, "html": ""}
@@ -372,6 +449,7 @@ async def browser_session(initial):
                             encoded = '{"error":"transport_limit"}'
                         print(encoded, flush=True)
                     except Exception:
+                        forget()
                         print('{"error":"source_unavailable"}', flush=True)
                 reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
                 capture = None

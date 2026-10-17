@@ -85,6 +85,36 @@ class VendoredScriptTests(unittest.TestCase):
             self.assertIsNone(worker.vendored_script('https://code.jquery.com/jquery-2.1.4.min.js'))
 
 
+class ReadingAssetTests(unittest.TestCase):
+    def test_reading_pages_refuse_pictures_fonts_and_media_only(self):
+        from types import SimpleNamespace
+        from coletor.manual_worker import reading_page_asset
+        origin = 'https://www.smecel.com.br'
+        def request(kind, page):
+            return SimpleNamespace(resource_type=kind, frame=SimpleNamespace(url=origin + page))
+        diary = '/sistema/escola/diario_frequencia.php?ct=13331&ano=2026'
+        listing = '/sistema/escola/turmaListar.php?ano=2026'
+        for kind in ('image', 'font', 'media'):
+            self.assertTrue(reading_page_asset(request(kind, diary)))
+            self.assertTrue(reading_page_asset(request(kind, listing)))
+            # The login page keeps its pictures for the person who signs in.
+            self.assertFalse(reading_page_asset(request(kind, '/index.php')))
+        for kind in ('document', 'script', 'stylesheet', 'xhr', 'fetch'):
+            self.assertFalse(reading_page_asset(request(kind, listing)))
+        lookalike = SimpleNamespace(resource_type='image', frame=SimpleNamespace(url='https://smecel.example' + diary))
+        self.assertFalse(reading_page_asset(lookalike))
+        class Detached:
+            resource_type = 'image'
+            @property
+            def frame(self): raise RuntimeError('service worker')
+        self.assertFalse(reading_page_asset(Detached()))
+
+    def test_list_wait_ends_on_rows_or_a_login_form(self):
+        from coletor.manual_worker import LIST_SETTLED_JS
+        self.assertIn('input[type="password"]', LIST_SETTLED_JS)
+        self.assertIn('vinculoAlunoExibirTurma.php', LIST_SETTLED_JS)
+
+
 class NoPrintTests(unittest.TestCase):
     def test_isolated_edge_disables_the_diary_print_dialog(self):
         import asyncio
