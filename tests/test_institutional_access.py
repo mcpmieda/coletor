@@ -1,10 +1,18 @@
+import itertools
 import json
+import threading
+import time
 import unittest
 from datetime import datetime, timezone
 from coletor.institutional_access import (AccessDenied, InstitutionalAccess, OnlineResponse,
     PROPOSED_ACCESS_URL, PROPOSED_CAPABILITY, validate_authorization)
 
 NOW = 1791930000
+
+
+def polls_apart():
+    """Monotonic clock where every reading is past the status reuse window."""
+    return itertools.count(0, 60).__next__
 
 
 def stamp(seconds):
@@ -91,7 +99,7 @@ class InstitutionalAccessTests(unittest.TestCase):
     def test_concurrent_transient_check_does_not_revoke_inflight_valid_work(self):
         locked = []
         provider = Provider([response(), AccessDenied('ACCESS_UNAVAILABLE'), response()])
-        gate = InstitutionalAccess(provider, clock=lambda: NOW,
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart(),
                                    on_locked=lambda: locked.append('revoked'))
         def capture_with_heartbeat_outage():
             # A background heartbeat/status failure must not invalidate the
@@ -106,11 +114,164 @@ class InstitutionalAccessTests(unittest.TestCase):
     def test_concurrent_confirmed_denial_still_cancels_inflight_work(self):
         locked = []
         provider = Provider([response(), AccessDenied('ACCESS_REQUIRED'), response()])
-        gate = InstitutionalAccess(provider, clock=lambda: NOW,
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart(),
                                    on_locked=lambda: locked.append('revoked'))
         with self.assertRaises(AccessDenied):
             gate.run(lambda: gate.status())
         self.assertTrue(locked)
+
+    def test_simultaneous_status_reads_share_one_online_verification(self):
+        started, release = threading.Event(), threading.Event()
+        provider = Provider([response()])
+        original = provider.verify_online
+        def slow_verify():
+            started.set()
+            release.wait(5)
+            return original()
+        provider.verify_online = slow_verify
+        gate = InstitutionalAccess(provider, clock=lambda: NOW)
+        results = []
+        def read():
+            results.append(gate.status())
+        readers = [threading.Thread(target=read) for _ in range(8)]
+        readers[0].start()
+        self.assertTrue(started.wait(5))
+        for reader in readers[1:]:
+            reader.start()
+        time.sleep(0.05)
+        release.set()
+        for reader in readers:
+            reader.join(5)
+        self.assertEqual(len(results), 8)
+        self.assertTrue(all(item['authorized'] for item in results))
+        self.assertEqual(provider.reads, 1)
+
+    def test_status_reuses_recent_grant_only_inside_window(self):
+        now = [0.0]
+        provider = Provider([response(), response(), AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: now[0])
+        self.assertEqual(gate.run(lambda: 'preview'), 'preview')
+        now[0] = 4.9
+        self.assertTrue(gate.status()['authorized'])
+        self.assertEqual(provider.reads, 2)
+        now[0] = 10.0
+        self.assertEqual(gate.status()['code'], 'ACCESS_REQUIRED')
+        self.assertEqual(provider.reads, 3)
+
+    def test_status_never_reuses_an_expired_grant(self):
+        clock = [NOW]
+        provider = Provider([response(expiresAt=stamp(NOW+2)), AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: clock[0], monotonic=lambda: 0.0)
+        self.assertTrue(gate.status()['authorized'])
+        clock[0] = NOW + 2
+        self.assertFalse(gate.status()['authorized'])
+        self.assertEqual(provider.reads, 2)
+
+    def test_commands_ignore_reusable_grant_and_still_see_revocation(self):
+        locked = []
+        provider = Provider([response(), response(), response(authorized=False)])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: 0.0,
+                                   on_locked=lambda: locked.append('revoked'))
+        self.assertTrue(gate.status()['authorized'])
+        with self.assertRaises(AccessDenied):
+            gate.run(lambda: 'synthetic-capture')
+        self.assertEqual(provider.reads, 3)
+        self.assertEqual(locked, ['revoked'])
+        # The denial drops the reusable grant as well.
+        self.assertFalse(gate.status()['authorized'])
+
+    def test_transient_failure_drops_reusable_grant(self):
+        provider = Provider([response(), AccessDenied('ACCESS_UNAVAILABLE'), AccessDenied('ACCESS_UNAVAILABLE')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: 0.0)
+        self.assertTrue(gate.status()['authorized'])
+        with self.assertRaises(AccessDenied):
+            gate.run(lambda: 'synthetic-capture')
+        self.assertEqual(gate.status()['code'], 'ACCESS_UNAVAILABLE')
+
+    def test_logout_drops_reusable_grant(self):
+        provider = Provider([response(), AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: 0.0)
+        self.assertTrue(gate.status()['authorized'])
+        gate.logout()
+        self.assertFalse(gate.status()['authorized'])
+        self.assertEqual(provider.reads, 2)
+
+    def test_command_never_joins_verification_started_before_it(self):
+        started, release = threading.Event(), threading.Event()
+        provider = Provider([response(), response(), response()])
+        original = provider.verify_online
+        def verify():
+            if provider.reads == 0:
+                started.set()
+                release.wait(5)
+            return original()
+        provider.verify_online = verify
+        gate = InstitutionalAccess(provider, clock=lambda: NOW)
+        poll = threading.Thread(target=gate.status)
+        poll.start()
+        self.assertTrue(started.wait(5))
+        done = []
+        command = threading.Thread(target=lambda: done.append(gate.run(lambda: 'capture')))
+        command.start()
+        time.sleep(0.05)
+        release.set()
+        poll.join(5)
+        command.join(5)
+        self.assertEqual(done, ['capture'])
+        # The poll's request predates the command: it needs two of its own.
+        self.assertEqual(provider.reads, 3)
+
+    def test_concurrent_commands_coalesce_but_each_gets_a_later_request(self):
+        provider = Provider([response()] * 32)
+        lock = threading.Lock()
+        original = provider.verify_online
+        def slow_verify():
+            time.sleep(0.02)
+            with lock:
+                return original()
+        provider.verify_online = slow_verify
+        gate = InstitutionalAccess(provider, clock=lambda: NOW)
+        barrier = threading.Barrier(8)
+        results = []
+        def command():
+            barrier.wait(5)
+            results.append(gate.run(lambda: 'read'))
+        workers = [threading.Thread(target=command) for _ in range(8)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(5)
+        self.assertEqual(results, ['read'] * 8)
+        self.assertLess(provider.reads, 16)
+
+    def test_denied_shared_verification_cleans_up_once_and_denies_everyone(self):
+        started, release = threading.Event(), threading.Event()
+        locked = []
+        provider = Provider([response(), response(authorized=False)])
+        original = provider.verify_online
+        def verify():
+            if provider.reads == 1:
+                started.set()
+                release.wait(5)
+            return original()
+        provider.verify_online = verify
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart(),
+                                   on_locked=lambda: locked.append('revoked'))
+        self.assertTrue(gate.status()['authorized'])
+        results = []
+        readers = [threading.Thread(target=lambda: results.append(gate.status())) for _ in range(5)]
+        readers[0].start()
+        self.assertTrue(started.wait(5))
+        for reader in readers[1:]:
+            reader.start()
+        time.sleep(0.05)
+        release.set()
+        for reader in readers:
+            reader.join(5)
+        self.assertEqual(len(results), 5)
+        self.assertFalse(any(item['authorized'] for item in results))
+        self.assertEqual(provider.reads, 2)
+        self.assertEqual(locked, ['revoked'])
 
     def test_logout_during_operation_invalidates_generation(self):
         provider = Provider([response(), response()])
@@ -166,7 +327,7 @@ class InstitutionalAccessTests(unittest.TestCase):
         cleanup = Mock()
         provider = Provider([response(), AccessDenied('ACCESS_REQUIRED'),
                              AccessDenied('ACCESS_REQUIRED')])
-        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart(), on_locked=cleanup)
         self.assertTrue(gate.status()['authorized'])
         self.assertFalse(gate.status()['authorized'])
         self.assertFalse(gate.status()['authorized'])
@@ -177,7 +338,7 @@ class InstitutionalAccessTests(unittest.TestCase):
         def failed_cleanup():
             raise RuntimeError('private browser cleanup failed')
         provider = Provider([response(), response(authorized=False)])
-        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=failed_cleanup)
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart(), on_locked=failed_cleanup)
         self.assertTrue(gate.status()['authorized'])
         self.assertFalse(gate.status()['authorized'])
         self.assertEqual(gate.status()['code'], 'ACCESS_CLEANUP_PENDING')
