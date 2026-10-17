@@ -131,6 +131,17 @@ class OfficialTransport:
                                 raise AccessDenied('ACCESS_NOT_CONFIGURED')
                         except (ValueError,TypeError,UnicodeError,RecursionError):
                             pass
+                if (path == PREFIX+'pairings/poll' and reply.status == 403
+                        and reply.getheader('Content-Encoding') in (None, 'identity')
+                        and (reply.getheader('Content-Type') or '').lower().startswith('application/json')
+                        and (length is None or length.isdigit() and int(length) <= 8192)):
+                    raw_error = reply.read(8193)
+                    if len(raw_error) <= 8192:
+                        try:
+                            if json.loads(raw_error, object_pairs_hook=unique) == {'error': 'Pairing unavailable'}:
+                                raise AccessDenied('PAIRING_RETIRED')
+                        except (ValueError, TypeError, UnicodeError, RecursionError):
+                            pass
                 # http.client never follows redirects; no other origin contacted.
                 raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status == 503 else
                                    'ACCESS_NOT_CONFIGURED' if path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
@@ -355,9 +366,18 @@ class DeviceProvider:
                 # validated official URL, with no new consent or private data
                 # exposed to JavaScript. Discard expired/rejected requests only
                 # after the server's own poll says they are no longer pending.
-                status = decode(self._request('pairings/poll', {
-                    n: self._pending[n] for n in ('id', 'pollToken')}))
-                if (set(status) == {'contractVersion', 'state'}
+                try:
+                    status = decode(self._request('pairings/poll', {
+                        n: self._pending[n] for n in ('id', 'pollToken')}))
+                except AccessDenied as error:
+                    # The live service returns 403 for an expired/retired
+                    # pairing instead of an explicit expired state. Only this
+                    # explicit login action may start afresh; outages retain
+                    # the request, and the new pairing still needs browser auth.
+                    if error.code != 'PAIRING_RETIRED':
+                        raise
+                    status = None
+                if (status is not None and set(status) == {'contractVersion', 'state'}
                         and status['contractVersion'] == 1
                         and status['state'] in {'pending', 'confirmed', 'exchanging'}):
                     url = (OFFICIAL_ORIGIN + '/frequency-collector/connect?pairing='
@@ -365,12 +385,12 @@ class DeviceProvider:
                     if not self._browser(url, new=2):
                         raise AccessDenied('LOGIN_UNAVAILABLE')
                     return
-                if (set(status) == {'contractVersion', 'state', 'deviceId'}
+                if (status is not None and set(status) == {'contractVersion', 'state', 'deviceId'}
                         and status['contractVersion'] == 1
                         and status['state'] == 'completed'):
                     self.verify_online()  # Claim once, without issuing a new key.
                     return
-                if (set(status) != {'contractVersion', 'state'}
+                if status is not None and (set(status) != {'contractVersion', 'state'}
                         or status['contractVersion'] != 1
                         or status['state'] not in {'expired', 'cancelled', 'denied'}):
                     raise AccessDenied('INVALID_ACCESS_RESPONSE')
@@ -378,7 +398,11 @@ class DeviceProvider:
             ready = decode(self._request('config'))
             if set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['contractVersion'] != 1 or ready['ready'] is not True:
                 raise AccessDenied('ACCESS_NOT_CONFIGURED')
-            if not self._consent():
+            saved_state = self._metadata.read()
+            # Retrying an unpaired key does not create persistent access in
+            # Windows again. Its policy is still validated by _load, and the
+            # browser still requires a fresh account/device confirmation.
+            if (not saved_state or saved_state['state'] != 'unpaired') and not self._consent():
                 raise AccessDenied('DEVICE_ACTIVATION_CANCELLED')
             # Fetch current server time after a potentially long human decision.
             ready = decode(self._request('config'))
@@ -463,7 +487,10 @@ class DeviceProvider:
         if key is not None:
             if thumbprint(key.public_jwk()) != self._state['keyThumbprint']:
                 raise AccessDenied('DEVICE_STATE_INVALID')
-            key.forget(removal_authorized=True)
+            try:
+                key.forget(removal_authorized=True)
+            except DeviceKeyError:
+                raise AccessDenied('ACCESS_CLEANUP_PENDING') from None
         self._key = None
         if self._state['serverRevoked'] or self._state['deviceId'] is None:
             self._metadata.remove()

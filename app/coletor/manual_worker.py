@@ -42,6 +42,7 @@ CAPTURE_JS = """() => {
 # password #senha and submit button[name=logar]. No CAPTCHA is solved or bypassed.
 LOGIN_URL = "https://www.smecel.com.br/index.php"
 LOGIN_FIELDS = ("#usuario", "#senha", 'button[type="submit"][name="logar"]')
+LOGIN_OPENER = 'button[onclick="abrirModal()"]:visible'
 
 
 async def sign_in(page, email, password):
@@ -51,6 +52,8 @@ async def sign_in(page, email, password):
     if await page.locator('input[type="password"]').count() == 0:
         return {"logged_in": True}
     user, secret, submit = LOGIN_FIELDS
+    if not await page.locator(user).is_visible():
+        await page.click(LOGIN_OPENER)
     await page.fill(user, email)
     await page.fill(secret, password)
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
