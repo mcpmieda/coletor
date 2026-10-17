@@ -49,9 +49,13 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", checks)
         self.assertIn('Installer archive-only merge', workflow)
         self.assertIn('if ! pr_url="$(gh pr create', workflow)
-        self.assertIn('Actions cannot open archive PR.', workflow)
-        self.assertIn('exit 0', workflow)
-        self.assertIn('branch $branch retains the LFS archive', workflow)
+        # Release publication can succeed while the archive remains stale.
+        # Denied PR creation/merge must fail visibly instead of reporting green.
+        self.assertIn('ARCHIVE_PR_NOT_CREATED', workflow)
+        self.assertIn('ARCHIVE_PR_NOT_MERGED', workflow)
+        self.assertIn('exit 1\\n          fi\\n          echo "Created archive PR', workflow)
+        self.assertIn('The installer is preserved in branch $branch', workflow)
+        self.assertNotIn('Actions cannot open archive PR.', workflow)
         self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", workflow)
         self.assertIn("startsWith(github.event.workflow_run.head_branch, 'automation/instalador-run-')", workflow)
         self.assertIn('all(.[]; .path | startswith(', workflow)
