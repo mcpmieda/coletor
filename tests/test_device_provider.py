@@ -220,7 +220,7 @@ class DeviceProviderTests(unittest.TestCase):
         request = self.transport.request
         def expired(method, path, value=None):
             if path == PREFIX + 'pairings/poll':
-                raise AccessDenied('ACCESS_REQUIRED')
+                raise AccessDenied('PAIRING_RETIRED')
             return request(method, path, value)
         self.transport.request = expired
         # Background polling cannot replace a request or launch the browser.
@@ -253,6 +253,24 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
         self.assertEqual(self.provider._pending, old)
         self.assertEqual(self.browser.call_count, 1)
+
+    def test_real_transport_http_failures_never_retire_the_pending_pairing(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        for status, body in [(500, b'{}'), (502, b'{}'), (504, b'{}'), (429, b'{}'),
+                             (403, b'{"error":"Collector access denied"}'),
+                             (403, b'{"error":"Pairing unavailable","extra":true}')]:
+            with self.subTest(status=status, body=body):
+                reply = Mock(status=status)
+                reply.getheader.side_effect = lambda name: {'Content-Type': 'application/json'}.get(name)
+                reply.read.return_value = body
+                connection = Mock()
+                connection.getresponse.return_value = reply
+                self.provider._transport = OfficialTransport(connection=lambda: connection)
+                with self.assertRaises(AccessDenied): self.provider.open_official_login()
+                self.assertEqual(self.provider._pending, old)
+                self.assertEqual(self.browser.call_count, 1)
+                connection.request.assert_called_once()
 
     def test_pairing_signature_is_bound_and_only_nonsecret_metadata_persists(self):
         self.provider.open_official_login()
@@ -612,6 +630,15 @@ class TransportTests(unittest.TestCase):
                     'GET' if path == 'config' else 'POST', PREFIX+path,
                     None if path == 'config' else {'deviceId': DEVICE})
             self.assertEqual(caught.exception.code, 'ACCESS_UNAVAILABLE')
+
+    def test_only_the_exact_official_poll_denial_marks_a_pairing_retired(self):
+        for status, raw, headers in [(403, b'{"error":"Pairing unavailable"}', {}),
+                (502, b'{"error":"Pairing unavailable"}', {}),
+                (403, b'{"error":"Pairing unavailable"}', {'Content-Type': 'text/html'})]:
+            connection = self.connection(status=status, raw=raw, headers=headers)
+            with self.subTest(status=status, headers=headers), self.assertRaises(AccessDenied) as caught:
+                OfficialTransport(connection=lambda: connection).request('POST', PREFIX+'pairings/poll', {})
+            self.assertEqual(caught.exception.code == 'PAIRING_RETIRED', status == 403 and not headers)
 
     def test_disabled_config_503_is_specific_but_generic_503_stays_transient(self):
         exact=compact({'error':'Collector access unavailable','code':'ACCESS_NOT_CONFIGURED'})

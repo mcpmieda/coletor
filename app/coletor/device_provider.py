@@ -131,6 +131,17 @@ class OfficialTransport:
                                 raise AccessDenied('ACCESS_NOT_CONFIGURED')
                         except (ValueError,TypeError,UnicodeError,RecursionError):
                             pass
+                if (path == PREFIX+'pairings/poll' and reply.status == 403
+                        and reply.getheader('Content-Encoding') in (None, 'identity')
+                        and (reply.getheader('Content-Type') or '').lower().startswith('application/json')
+                        and (length is None or length.isdigit() and int(length) <= 8192)):
+                    raw_error = reply.read(8193)
+                    if len(raw_error) <= 8192:
+                        try:
+                            if json.loads(raw_error, object_pairs_hook=unique) == {'error': 'Pairing unavailable'}:
+                                raise AccessDenied('PAIRING_RETIRED')
+                        except (ValueError, TypeError, UnicodeError, RecursionError):
+                            pass
                 # http.client never follows redirects; no other origin contacted.
                 raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status == 503 else
                                    'ACCESS_NOT_CONFIGURED' if path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
@@ -363,7 +374,7 @@ class DeviceProvider:
                     # pairing instead of an explicit expired state. Only this
                     # explicit login action may start afresh; outages retain
                     # the request, and the new pairing still needs browser auth.
-                    if error.code != 'ACCESS_REQUIRED':
+                    if error.code != 'PAIRING_RETIRED':
                         raise
                     status = None
                 if (status is not None and set(status) == {'contractVersion', 'state'}
