@@ -37,6 +37,8 @@ def vendored_script(url):
     return body if hashlib.sha256(body).hexdigest() == entry[1] else None
 
 
+NO_PRINT_JS = """Object.defineProperty(globalThis, 'print', {configurable: false, writable: false, value: () => undefined});"""
+
 # The list is rendered once a row carries a class link; the placeholder rows
 # shown while it loads have none. Independent of column count or order.
 ROWS_RENDERED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vinculoAlunoExibirTurma.php"]')"""
@@ -129,6 +131,9 @@ async def configure_context(context, request_delegate=None):
     await context.add_init_script("""for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
       Object.defineProperty(globalThis, name, {configurable: false, get: () => undefined});
     }""")
+    # The Smecel diary calls window.print() on load; in the isolated Edge that
+    # opens a print dialog over every class. Reading never prints anything.
+    await context.add_init_script(NO_PRINT_JS)
 
 
 def configure_page(page):

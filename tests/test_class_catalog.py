@@ -85,4 +85,18 @@ class VendoredScriptTests(unittest.TestCase):
             self.assertIsNone(worker.vendored_script('https://code.jquery.com/jquery-2.1.4.min.js'))
 
 
+class NoPrintTests(unittest.TestCase):
+    def test_isolated_edge_disables_the_diary_print_dialog(self):
+        import asyncio
+        from coletor.manual_worker import NO_PRINT_JS, configure_context
+        class Context:
+            def __init__(self): self.scripts=[]
+            async def route(self,*_): pass
+            async def route_web_socket(self,*_): pass
+            async def add_init_script(self,script): self.scripts.append(script)
+        context=Context();asyncio.run(configure_context(context))
+        self.assertIn(NO_PRINT_JS,context.scripts)
+        self.assertIn("'print'",NO_PRINT_JS);self.assertIn('writable: false',NO_PRINT_JS)
+
+
 if __name__=='__main__':unittest.main()
