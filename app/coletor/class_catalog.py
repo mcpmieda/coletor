@@ -16,18 +16,35 @@ CATALOG_JS = """() => {
   const text=norm(document.body.innerText);
   const years=[...document.querySelectorAll('a[role=combobox]')].map(n=>norm(n.innerText)).filter(s=>s.startsWith('ANO LETIVO:'));
   const search=document.querySelector('input[placeholder="Digite o nome ou parte do nome de uma turma"]');
-  const rows=[...document.querySelectorAll('#tbodyTurmas tr')];
+  // Columns are located by their header titles, never by position or count:
+  // Smecel already went from 7 to 11 cells and may reorder or add more.
+  const plain=s=>norm(s).normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase();
+  const patterns={ordinal:/^N\\s*[º°O.]?$/,code:/^COD/,name:/^TURMA$/,stage:/^ETAPA$/,matrix:/^MATRIZ$/,shift:/^TURNO$/};
+  const columns={};let position=0,duplicate=false;
+  const head=[...document.querySelectorAll('#tabelaTurmas tr')].filter(r=>r.querySelector('th')).pop();
+  for(const th of head?head.cells:[]){
+    const label=plain(th.innerText);
+    for(const [key,pattern] of Object.entries(patterns)){
+      if(pattern.test(label)){if(key in columns)duplicate=true;columns[key]=position;}
+    }
+    position+=Math.max(1,th.colSpan||1);
+  }
+  const columns_recognized=!duplicate&&Object.keys(patterns).every(k=>k in columns);
+  const rows=[...document.querySelectorAll('#tbodyTurmas tr')].filter(r=>!r.querySelector('th'));
   if(rows.length>500)return {error:'catalog_too_large'};
+  const cell=(row,key)=>columns_recognized?row.cells[columns[key]]:undefined;
   return {url:location.href,password_form:!!document.querySelector('input[type=password]'),
     recognized_table:document.querySelectorAll('#tabelaTurmas').length===1,
+    columns_recognized,
     context_organization:text.includes('SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO'),
     context_school:text.includes('ESCOLA IEDA ALVES DE OLIVEIRA MCPM'),
     title_years:[...(norm(document.title)+' '+text).matchAll(/Listar Turmas - Ano Letivo (\\d{4})/g)].map(m=>Number(m[1])),
     year_controls:years, search_present:!!search, filtered:!!search?.value.trim(),
-    rows:rows.map(row=>{const c=row.cells;return {cells:c.length,visible:!!row.getClientRects().length,
-      ordinal:norm(c[1]?.innerText),name:norm(c[3]?.innerText),stage:norm(c[4]?.innerText),
-      matrix:norm(c[5]?.innerText),shift:norm(c[6]?.innerText),
-      links:[...c[2]?.querySelectorAll('a[href]')||[]].map(a=>a.getAttribute('href'))};})};
+    rows:rows.map(row=>({visible:!!row.getClientRects().length,
+      ordinal:norm(cell(row,'ordinal')?.innerText),name:norm(cell(row,'name')?.innerText),
+      stage:norm(cell(row,'stage')?.innerText),matrix:norm(cell(row,'matrix')?.innerText),
+      shift:norm(cell(row,'shift')?.innerText),
+      links:[...cell(row,'code')?.querySelectorAll('a[href]')||[]].map(a=>a.getAttribute('href'))}))};
 }"""
 
 
@@ -48,6 +65,7 @@ def matches_list(url, year):
 def catalog_from_observation(value, year):
     if (type(value) is not dict or not matches_list(value.get("url"), year) or value.get("password_form")
             or value.get("recognized_table") is not True or value.get("search_present") is not True
+            or value.get("columns_recognized") is not True
             or value.get("context_organization") is not True or value.get("context_school") is not True
             or value.get("year_controls") != [f"ANO LETIVO: {year}"]
             or not value.get("title_years") or set(value["title_years"]) != {year}):
@@ -57,15 +75,17 @@ def catalog_from_observation(value, year):
         raise ValueError("A lista está vazia ou fora do limite. Nenhuma seleção salva foi apagada.")
     classes, seen, ordinals = [], set(), []
     for row in rows:
-        if type(row) is not dict or row.get("cells") != 7 or type(row.get("links")) is not list or len(row["links"]) != 1:
+        if type(row) is not dict or type(row.get("links")) is not list or len(row["links"]) != 1:
             raise ValueError("Uma linha da lista não corresponde à estrutura reconhecida.")
         href = row["links"][0]
         if not isinstance(href, str):
             raise ValueError("Link de turma não reconhecido.")
         link = urlsplit(urljoin(list_url(year), href))
         query = parse_qsl(link.query, keep_blank_values=True)
+        # The link carries ct alone, or (since 10/2026) ct plus this list's ano.
         if (link.scheme != "https" or link.netloc != "www.smecel.com.br" or link.path != CLASS_LINK_PATH
-                or link.fragment or len(query) != 1 or query[0][0] != "ct"
+                or link.fragment or not query or query[0][0] != "ct"
+                or query[1:] not in ([], [("ano", str(year))])
                 or not re.fullmatch(r"[1-9][0-9]{0,9}", query[0][1])):
             raise ValueError("Link de turma não reconhecido; nenhum link de alunos foi aberto.")
         key = query[0][1]

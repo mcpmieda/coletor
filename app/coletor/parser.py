@@ -94,6 +94,41 @@ def _normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).split())
 
 
+# Student card header, located by label rather than by field count: since
+# 10/2026 some cards carry an extra trailing value (e.g. a situation badge).
+HEADER_LABELS = ("Aluno(a):", "Nascimento:", "Filiação:", "Turma:", "Data da matrícula:")
+MAX_EXTRA_HEADER_FIELDS = 3
+
+
+def _labeled_fields(small: "_Node") -> list[tuple[str, str]]:
+    """(label, value) for each <strong>, label = the text right before it."""
+    pairs, pending = [], []
+
+    def visit(node):
+        for child in node.children:
+            if isinstance(child, str):
+                pending.append(child)
+            elif child.tag == "strong":
+                pairs.append((_normalized("".join(pending)), _normalized(child.text())))
+                pending.clear()
+            else:
+                visit(child)
+    visit(small)
+    return pairs
+
+
+def _student_header(small: "_Node") -> dict[str, str] | None:
+    """Values of the five known labels in their order; trailing extras allowed."""
+    pairs = _labeled_fields(small)
+    if not len(HEADER_LABELS) <= len(pairs) <= len(HEADER_LABELS) + MAX_EXTRA_HEADER_FIELDS:
+        return None
+    if [label for label, _ in pairs[:len(HEADER_LABELS)]] != list(HEADER_LABELS):
+        return None
+    if any(label in HEADER_LABELS for label, _ in pairs[len(HEADER_LABELS):]):
+        return None
+    return dict(pairs[:len(HEADER_LABELS)])
+
+
 def _finish(class_id, year, complete, source_format, students, records, issues):
     students.sort(key=lambda student: student.source_student_ref)
     records.sort(key=lambda record: (record.source_student_ref, record.date, record.lesson))
@@ -231,13 +266,13 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
         seen_refs.add(ref)
         boxes = [node for node in card.walk("div") if _has_class(node, "ls-box1")]
         smalls = list(boxes[0].walk("small")) if len(boxes) == 1 else []
-        fields = list(smalls[0].walk("strong")) if len(smalls) == 1 else []
-        if len(fields) != 5 or not _normalized(smalls[0].text()).startswith("Aluno(a):"):
+        header = _student_header(smalls[0]) if len(smalls) == 1 else None
+        if header is None:
             issue("STUDENT_HEADER_INVALID", "O cabeçalho de uma ficha não corresponde à estrutura esperada.", ref)
             name, class_label = "", ""
         else:
-            name = _normalized(fields[0].text())
-            class_label = _normalized(fields[3].text())
+            name = header["Aluno(a):"]
+            class_label = header["Turma:"]
         if len(name) > 200:
             name = name[:200]
             issue("STUDENT_NAME_TOO_LONG", "Um cabeçalho contém texto além do limite seguro.", ref)

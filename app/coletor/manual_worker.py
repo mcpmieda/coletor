@@ -13,6 +13,36 @@ import time
 from .limits import MAX_HTML_BYTES, MAX_REQUEST_BYTES, MAX_NODES
 from .origin_proxy import OriginProxy, verify_proxy
 
+# Since 10/2026 Smecel renders the class list with jQuery from code.jquery.com.
+# The isolated Edge never contacts that CDN: this exact URL is answered from a
+# bundled copy whose SHA-256 equals the official SRI (sha256-8WqyJLuW...).
+# Every other third-party request stays blocked.
+VENDORED_SCRIPTS = {
+    "https://code.jquery.com/jquery-2.1.4.min.js": (
+        "jquery-2.1.4.min.js", "f16ab224bb962910558715c82f58c10c3ed20f153ddfaa199029f141b5b0255c"),
+}
+VENDOR_DIR = Path(__file__).resolve().parents[1] / "assets" / "vendor"
+
+
+def vendored_script(url):
+    """Bytes for an approved CDN script, or None. A mismatching file is refused."""
+    entry = VENDORED_SCRIPTS.get(url)
+    if entry is None:
+        return None
+    import hashlib
+    try:
+        body = (VENDOR_DIR / entry[0]).read_bytes()
+    except OSError:
+        return None
+    return body if hashlib.sha256(body).hexdigest() == entry[1] else None
+
+
+NO_PRINT_JS = """Object.defineProperty(globalThis, 'print', {configurable: false, writable: false, value: () => undefined});"""
+
+# The list is rendered once a row carries a class link; the placeholder rows
+# shown while it loads have none. Independent of column count or order.
+ROWS_RENDERED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vinculoAlunoExibirTurma.php"]')"""
+
 # Clone only the documented report container; never serialize login inputs.
 CAPTURE_JS = """() => {
   const password_form = !!document.querySelector('input[type="password"]');
@@ -85,7 +115,10 @@ def worker_environment(temporary):
 async def configure_context(context, request_delegate=None):
     from .manual_session import allowed_request
     async def route_request(route):
-        if not allowed_request(route.request.url):
+        script = vendored_script(route.request.url) if route.request.method == "GET" else None
+        if script is not None:
+            await route.fulfill(status=200, content_type="application/javascript; charset=utf-8", body=script)
+        elif not allowed_request(route.request.url):
             await route.abort()
         elif request_delegate is not None:
             await request_delegate(route)  # Python-only synthetic QA injection.
@@ -98,6 +131,9 @@ async def configure_context(context, request_delegate=None):
     await context.add_init_script("""for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
       Object.defineProperty(globalThis, name, {configurable: false, get: () => undefined});
     }""")
+    # The Smecel diary calls window.print() on load; in the isolated Edge that
+    # opens a print dialog over every class. Reading never prints anything.
+    await context.add_init_script(NO_PRINT_JS)
 
 
 def configure_page(page):
@@ -287,6 +323,10 @@ async def browser_session(initial):
                 async def read_catalog(year):
                     await page.goto(list_url(year), wait_until="domcontentloaded")
                     before = page.url
+                    try:
+                        await page.wait_for_function(ROWS_RENDERED_JS, timeout=20000)
+                    except Exception:
+                        pass  # Login redirect or empty list: the observation below rejects it.
                     observation = await page.evaluate(CATALOG_JS)
                     if page.url != before or observation.get("url") != before:
                         raise ValueError("listing_changed")

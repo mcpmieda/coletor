@@ -9,9 +9,9 @@ from coletor.class_catalog import catalog_from_observation, list_url, CONTEXT_KE
 
 def observed(year=2026):
     return {'url': list_url(year), 'password_form': False, 'recognized_table': True,
-            'search_present': True, 'context_organization': True, 'context_school': True,
+            'search_present': True, 'columns_recognized': True, 'context_organization': True, 'context_school': True,
             'title_years': [year], 'year_controls': [f'ANO LETIVO: {year}'], 'filtered': False,
-            'rows': [{'cells': 7, 'visible': True, 'ordinal': str(i), 'name': f'Turma sintética {i} -VESPERTINO',
+            'rows': [{'visible': True, 'ordinal': str(i), 'name': f'Turma sintética {i} -VESPERTINO',
                       'stage': 'Etapa sintética', 'matrix': 'Matriz sintética', 'shift': 'VESPERTINO',
                       'links': [f'vinculoAlunoExibirTurma.php?ct={10+i}']} for i in (1,2)]}
 
@@ -50,6 +50,53 @@ class ClassCatalogTests(unittest.TestCase):
             with self.assertRaises(ValueError):catalog_from_observation(data,2026)
         data=observed();data['rows'][1]['links']=data['rows'][0]['links']
         with self.assertRaises(ValueError):catalog_from_observation(data,2026)
+
+    def test_link_with_the_list_year_is_recognized(self):
+        # Shape observed on 17/10/2026: vinculoAlunoExibirTurma.php?ct=...&ano=<list year>.
+        data=observed()
+        for row in data['rows']: row['links']=[row['links'][0]+'&ano=2026']
+        self.assertEqual([c['class_id'] for c in catalog_from_observation(data,2026)['classes']],['11','12'])
+        for href in ('vinculoAlunoExibirTurma.php?ct=11&ano=2025','vinculoAlunoExibirTurma.php?ano=2026&ct=11',
+                     'vinculoAlunoExibirTurma.php?ct=11&ano=2026&x=1'):
+            data=observed();data['rows'][0]['links']=[href]
+            with self.assertRaises(ValueError):catalog_from_observation(data,2026)
+
+    def test_columns_must_be_found_by_header_title(self):
+        # Column count/order is free; a missing or duplicated title fails closed.
+        with self.assertRaises(ValueError):catalog_from_observation({**observed(),'columns_recognized':False},2026)
+        data=observed();del data['columns_recognized']
+        with self.assertRaises(ValueError):catalog_from_observation(data,2026)
+
+
+class VendoredScriptTests(unittest.TestCase):
+    def test_only_the_pinned_jquery_is_served_locally(self):
+        from coletor.manual_worker import vendored_script
+        body=vendored_script('https://code.jquery.com/jquery-2.1.4.min.js')
+        self.assertTrue(body.startswith(b'/*! jQuery v2.1.4'))
+        for url in ('https://code.jquery.com/jquery-3.7.1.min.js','https://cdn.jsdelivr.net/npm/sweetalert2@11',
+                    'https://www.googletagmanager.com/gtag/js','http://code.jquery.com/jquery-2.1.4.min.js'):
+            self.assertIsNone(vendored_script(url))
+
+    def test_a_tampered_bundled_file_is_refused(self):
+        import coletor.manual_worker as worker
+        from unittest import mock
+        original=worker.VENDORED_SCRIPTS
+        with mock.patch.object(worker,'VENDORED_SCRIPTS',{k:(v[0],'0'*64) for k,v in original.items()}):
+            self.assertIsNone(worker.vendored_script('https://code.jquery.com/jquery-2.1.4.min.js'))
+
+
+class NoPrintTests(unittest.TestCase):
+    def test_isolated_edge_disables_the_diary_print_dialog(self):
+        import asyncio
+        from coletor.manual_worker import NO_PRINT_JS, configure_context
+        class Context:
+            def __init__(self): self.scripts=[]
+            async def route(self,*_): pass
+            async def route_web_socket(self,*_): pass
+            async def add_init_script(self,script): self.scripts.append(script)
+        context=Context();asyncio.run(configure_context(context))
+        self.assertIn(NO_PRINT_JS,context.scripts)
+        self.assertIn("'print'",NO_PRINT_JS);self.assertIn('writable: false',NO_PRINT_JS)
 
 
 if __name__=='__main__':unittest.main()
