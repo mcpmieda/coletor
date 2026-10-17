@@ -138,7 +138,7 @@ def build(output, source_commit):
 def validate_tray_evidence(report):
     common = {"native_window_visible", "native_tray_registered", "native_menu_visible",
               "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
-              "idle_has_no_timer", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
+              "idle_motion_gentle", "window_icon_follows_fox", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
     extended = {"actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
                 "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
                 "error_state_static_and_generic"}

@@ -33,7 +33,7 @@ class WindowsFormsTray:
         self.status_provider = None
         self._current_activity = "idle"
         self._disposed = False
-        self._last_icon = None
+        self._last_icon = self._window_icon = None
         self._frame_updates = 0
         self._quitting = self._told_hidden = False
 
@@ -107,8 +107,10 @@ class WindowsFormsTray:
     def _refresh(self):
         if self._disposed or self._notify is None: return
         snapshot = self._state.snapshot()
-        activity, fox = snapshot["activity"], snapshot["fox"]
-        animated = activity == "reading" and fox["show"] and fox["animate"] and not snapshot["reduced_motion"]
+        activity, fox = self._effective_activity(snapshot), snapshot["fox"]
+        # The fox rests with an occasional blink/ear twitch and works while
+        # collecting; error stays still. Reduced motion or a hidden fox stops it.
+        animated = activity in {"idle", "reading"} and fox["show"] and fox["animate"] and not snapshot["reduced_motion"]
         self._controller.set_policy(AnimationPolicy(enabled=animated, reduced_motion=snapshot["reduced_motion"]))
         self._controller.set_state({"idle": TrayState.IDLE, "reading": TrayState.WORKING, "error": TrayState.ERROR}[activity])
         self._current_activity = activity
@@ -117,6 +119,14 @@ class WindowsFormsTray:
         else: self._timer.Stop()
         self._paint_icon()
         self._visibility_changed()
+
+    def _effective_activity(self, snapshot):
+        """Window activity, plus the unattended collection the window does not drive."""
+        activity = snapshot["activity"]
+        state = (self._collector_status() or {}).get("state")
+        if state == "collecting": return "reading"
+        if activity == "idle" and state in {"error", "login-required"}: return "error"
+        return activity
 
     def _collector_status(self):
         try:
@@ -131,7 +141,9 @@ class WindowsFormsTray:
             self._status_item.Text = text
 
     def _poll_tick(self, *_):
-        if not self._disposed and self._notify is not None: self._update_text()
+        if self._disposed or self._notify is None: return
+        if self._effective_activity(self._state.snapshot()) != self._current_activity: self._refresh()
+        else: self._update_text()
 
     def notify(self, title, text, icon="Warning"):
         """Balloon beside the clock; clicking it opens the window."""
@@ -146,6 +158,14 @@ class WindowsFormsTray:
         key = self._controller.snapshot().frame_key if self._state.snapshot()["fox"]["show"] else "neutral"
         if key != self._last_icon:
             self._notify.Icon = self._neutral if key == "neutral" else self._icons[key]
+            # The window and taskbar button follow the resting gestures and state
+            # changes. Form.Icon rebuilds its small icon on every set, so the fast
+            # working frames (0.6 s) stay on the tray only and keep their cadence.
+            window_key = key if key in self._icons else "fox-idle"
+            if window_key.startswith("fox-working-"): window_key = "fox-working-1"
+            if window_key != self._window_icon and not self._form.IsDisposed:
+                self._form.Icon = self._icons[window_key]
+                self._window_icon = window_key
             self._last_icon = key
             self._frame_updates += 1
 
