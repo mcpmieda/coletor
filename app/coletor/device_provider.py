@@ -294,8 +294,11 @@ class DeviceProvider:
             if self._state is None:
                 self._state = self._metadata.read()
             if self._state and self._state['state'] in {'deletePending', 'revokedLocally'}:
-                self.close()
-                raise AccessDenied('ACCESS_REQUIRED')
+                # Status polling must be read-only for a checkpointed device.
+                # Only explicit login/logout, protected by DesktopApi's queue
+                # preflight, may resume the previously authorized removal.
+                raise AccessDenied('ACCESS_CLEANUP_PENDING' if self._state['state'] == 'deletePending'
+                                   else 'SERVER_REVOCATION_PENDING')
             if self._pending:
                 result = decode(self._request('pairings/poll', {n: self._pending[n] for n in ('id', 'pollToken')}))
                 if set(result) == {'contractVersion', 'state', 'deviceId'} and result['contractVersion'] == 1 and result['state'] == 'completed':
