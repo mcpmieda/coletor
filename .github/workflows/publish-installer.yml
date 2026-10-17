@@ -58,6 +58,12 @@ jobs:
             if [[ -n "$changed" ]] && ! grep -qv '^instalador/' <<< "$changed"; then
               echo 'Installer archive-only merge: skip to prevent release/PR loops.'
               echo 'publish=false' >> "$GITHUB_OUTPUT"
+            elif [[ -n "$changed" ]] && ! grep -qvE '^(instalador/|\.github/workflows/publish-installer\.yml$|tests/test_publish_windows_installer\.py$)' <<< "$changed"; then
+              # These files govern distribution/reporting, not the Windows
+              # binary. Do not generate a fictitious newer application build
+              # solely because its release automation was fixed.
+              echo 'Installer publisher maintenance only: skip unchanged application build.'
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
             else
               echo 'publish=true' >> "$GITHUB_OUTPUT"
             fi
