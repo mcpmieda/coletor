@@ -206,6 +206,14 @@ class ManualSession:
         saved = self._selections.read(scope)["selection"]
         return bool(saved and saved["selected_class_ids"])
 
+    def saved_class_count(self):
+        """How many classes are saved for the current context; display only."""
+        from .class_catalog import CONTEXT_KEY, LIST_PATH
+        scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
+                 "year": 2026, "context_key": CONTEXT_KEY}
+        saved = self._selections.read(scope)["selection"]
+        return len(saved["selected_class_ids"]) if saved else 0
+
     def operational_catalog(self, storage):
         """Python-only collection adapter; never accepts HTML/catalog from UI."""
         credential = storage.load_credential() if hasattr(storage, 'load_credential') else None

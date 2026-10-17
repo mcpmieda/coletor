@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@heroui/react';
 import { Play, Pause, RefreshCw } from 'lucide-react';
 import { isDesktopSettings } from '../localSettings';
-import { collectorBridge, checkedCollector, COLLECTOR_STATES, COLLECTOR_CODES, type CollectorStatus, type CollectorResult } from '../collector';
+import { collectorBridge, checkedCollector, isConfigured, lastRun, COLLECTOR_STATES, COLLECTOR_CODES, type CollectorStatus, type CollectorResult, type RunSummary } from '../collector';
 import { StatusChip } from '../ui';
 import SmecelAccess from './SmecelAccess';
 
@@ -11,16 +11,22 @@ function tone(status: CollectorStatus | null) {
   if (status?.state === 'error' || status?.state === 'login-required') return 'warning';
   return status?.active ? 'success' : 'default';
 }
-function receiptText(receipt: NonNullable<CollectorStatus['lastReceipt']>) {
-  const parts = [`${receipt.resolvedRecords} aluno(s) reconhecido(s)`];
-  if (receipt.unresolvedRecords) parts.push(`${receipt.unresolvedRecords} não reconhecido(s)`);
-  if (receipt.conflicts) parts.push(`${receipt.conflicts} conflito(s)`);
-  return `Último envio: ${when(receipt.receivedAt)} · ${parts.join(' · ')}`;
+export function RunFigures({ run }: Readonly<{ run: RunSummary }>) {
+  return <dl className="receipt-grid" aria-label="Última coleta">
+    <div><dt>Última coleta</dt><dd>{when(new Date(run.at * 1000).toISOString())}</dd></div>
+    <div><dt>Turmas enviadas</dt><dd className={run.classes < run.total ? 'attention' : undefined}>{run.classes} de {run.total}</dd></div>
+    <div><dt>Alunos reconhecidos</dt><dd>{run.resolved}</dd></div>
+    <div><dt>Não reconhecidos</dt><dd className={run.unresolved ? 'attention' : undefined}>{run.unresolved}</dd></div>
+    <div><dt>Conflitos</dt><dd className={run.conflicts ? 'attention' : undefined}>{run.conflicts}</dd></div>
+  </dl>;
 }
 
-export default function CollectorControl() {
+/** Collection status first; the Smecel access and class choices fold away once configured. */
+export default function CollectorControl({ children }: Readonly<{ children?: ReactNode }>) {
   const [status, setStatus] = useState<CollectorStatus | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [lastCollection, setLastCollection] = useState<RunSummary | null>(null);
   const active = useRef(false), mounted = useRef(false), commandVersion = useRef(0);
   useEffect(() => {
     mounted.current = true;
@@ -33,6 +39,8 @@ export default function CollectorControl() {
       try {
         const value = checkedCollector(await (await collectorBridge()).get_collector_status());
         if (mounted.current && version === commandVersion.current && !active.current) { setStatus(value); setError(''); }
+        const history = await (await collectorBridge()).get_collector_history();
+        if (mounted.current && !('error' in history)) setLastCollection(lastRun(history.entries));
       } catch (e) { if (mounted.current && version === commandVersion.current && !active.current) setError(e instanceof Error ? e.message : 'Não foi possível verificar a coleta.'); }
       finally { reading = false; }
     }
@@ -50,21 +58,30 @@ export default function CollectorControl() {
   }
   const code = status?.code;
   const schoolPaused = status?.settings?.paused === true;
+  const progress = status?.progress;
+  const configured = isConfigured(status);
+  const setup = <><SmecelAccess status={status} onStatus={setStatus} />{children}</>;
   return <>
-    <section className="panel source-panel" aria-labelledby="collector-title">
+    <section className="panel source-panel collector-hero" aria-labelledby="collector-title">
       <div className="section-heading"><h2 id="collector-title">Coleta da escola</h2><StatusChip tone={tone(status)}>{status ? COLLECTOR_STATES[status.state] : 'Verificando'}</StatusChip></div>
+      {status?.state === 'collecting' && progress && <div className="collect-progress">
+        <progress max={Math.max(progress.total, 1)} value={progress.completed} aria-label="Turmas enviadas" />
+        <output>Enviando {progress.completed} de {progress.total} turma(s){progress.classLabel ? ` · ${progress.classLabel}` : ''}</output></div>}
+      {lastCollection && status?.state !== 'collecting' && <RunFigures run={lastCollection} />}
       <div className="source-actions">
-        {!status?.active && <Button isDisabled={busy} onPress={() => { void run(async () => (await collectorBridge()).activate_collector()); }}><Play size={16} />Ativar coleta neste computador</Button>}
-        <Button variant={status?.active ? 'primary' : 'secondary'} isDisabled={busy || !status?.active || status.localPaused || schoolPaused} onPress={() => { void run(async () => (await collectorBridge()).collect_now()); }}><RefreshCw size={16} />Coletar agora</Button>
+        {!status?.active && <Button isDisabled={busy || !configured} onPress={() => { void run(async () => (await collectorBridge()).activate_collector()); }}><Play size={16} />Ativar coleta automática</Button>}
+        {status?.active && <Button isDisabled={busy || status.localPaused || schoolPaused || status.state === 'collecting'} onPress={() => { void run(async () => (await collectorBridge()).collect_now()); }}><RefreshCw size={16} />Coletar agora</Button>}
         {status?.active && <Button variant="secondary" isDisabled={busy} onPress={() => { void run(async () => (await collectorBridge()).pause_collector(!status.localPaused)); }}><Pause size={16} />{status.localPaused ? 'Retomar neste computador' : 'Pausar neste computador'}</Button>}
       </div>
-      {status?.state === 'collecting' && <output>Coletando {status.progress.completed} de {status.progress.total} turma(s){status.progress.classLabel ? ` · ${status.progress.classLabel}` : ''}</output>}
+      {!status?.active && !configured && status && <p className="muted">Salve o acesso ao Smecel e escolha as turmas abaixo para ativar a coleta automática.</p>}
       {code && <output className="collector-code">{COLLECTOR_CODES[code] ?? 'Confira a conexão e tente novamente.'}</output>}
       {(code === 'lease-fenced' || code === 'revision-conflict') && <Button variant="secondary" isDisabled={busy} onPress={() => { void run(async () => (await collectorBridge()).discard_pending_collection()); }}>Descartar lote pendente</Button>}
-      {status?.lastReceipt && <p className="muted">{receiptText(status.lastReceipt)}</p>}
       {status?.active && !status.persistent && <p className="muted">Sem proteção do Windows: a fila fica só na memória enquanto o programa estiver aberto.</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
     </section>
-    <SmecelAccess status={status} onStatus={setStatus} />
+    {configured ? <details className="panel tools-panel setup-panel" open={setupOpen} onToggle={event => setSetupOpen(event.currentTarget.open)}>
+      <summary><span>Configuração deste computador</span><span className="muted">Acesso {status?.credential?.account} · {status?.selectedClasses} turma(s) escolhida(s)</span><span className="setup-edit">Alterar</span></summary>
+      <div className="setup-stack">{setup}</div>
+    </details> : setup}
   </>;
 }

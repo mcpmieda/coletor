@@ -78,20 +78,21 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
     } catch (e) { if (id === operation.current) { setError(e instanceof Error ? e.message : 'Não foi possível carregar as turmas.'); } }
     finally { active.current = false; onBusy(false); }
   }
-  async function enter() {
-    if (!confirmation) return;
+  /** One click: open the isolated Edge, sign in with the saved access and read the list. */
+  async function load() {
+    setCatalog(null); setClassId(''); onClear();
     await perform(async () => {
       const id=operation.current, api=await bridge();
-      if(id!==operation.current)throw new Error('Abertura cancelada.');
-      const prepared=checked(await api.prepare_manual_login(Number(year)));
-      if(id!==operation.current){await api.close_manual_session();throw new Error('Abertura cancelada.');}
-      return checked(await api.open_manual_session(prepared.generation, true));
+      let current=session;
+      if(!current || current.state==='closed' || current.cleanup_pending){
+        const prepared=checked(await api.prepare_manual_login(Number(year)));
+        if(id!==operation.current){await api.close_manual_session();throw new Error('Abertura cancelada.');}
+        current=checked(await api.open_manual_session(prepared.generation, true));
+        if(id!==operation.current){await api.close_manual_session();throw new Error('Abertura cancelada.');}
+        setSession(current);
+      }
+      return checked(await api.discover_manual_classes(current.generation, true));
     });
-  }
-  async function discover() {
-    if (!session) return;
-    setCatalog(null); setClassId(''); onClear();
-    await perform(async () => checked(await (await bridge()).discover_manual_classes(session.generation, true)));
   }
   async function close() {
     if (closing.current) return;
@@ -108,6 +109,12 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
     onClear();setConfirmation(false);
     await perform(async()=>checked(await (await bridge()).save_manual_class_selection(session.generation,ids,catalog.selection_revision)));
   }
+  async function selectAll(all: boolean) {
+    if (!catalog || !session || active.current || busy) return;
+    const ids=all ? catalog.catalog.classes.map(item=>item.class_id) : [];
+    onClear();setConfirmation(false);
+    await perform(async()=>checked(await (await bridge()).save_manual_class_selection(session.generation,ids,catalog.selection_revision)));
+  }
   async function capture() {
     if (!session || !classId || !confirmation || active.current || busy || closing.current) return;
     const generation=session.generation, id=++operation.current;
@@ -120,26 +127,27 @@ export default function ManualSource({ busy, onBusy, onRead, onClear }: {
   }
   const live=!!session && (session.state!=='closed' || session.cleanup_pending);
   const opened=live && session.state!=='prepared' && session.state!=='opening' && !session.cleanup_pending;
+  const selected=catalog?.selected_class_ids.length ?? 0, total=catalog?.catalog.classes.length ?? 0;
   return <section className="panel source-panel" aria-labelledby="manual-source-title">
-    <h2 id="manual-source-title">Smecel: entrar e escolher turmas</h2>
-    <p>Entre no Smecel pela janela do Edge e marque as turmas que este computador vai coletar. As escolhas ficam salvas.</p>
-    <div className="manual-controls"><TextField className="manual-year" value={year} onChange={v=>{yearEdited.current=true;setYear(v);}} isDisabled={busy || !!live}><Label>Ano letivo no Smecel</Label><Input inputMode="numeric" maxLength={4}/></TextField>
-      {!live && <><label className="consent"><input type="checkbox" checked={confirmation} disabled={busy} onChange={e=>setConfirmation(e.target.checked)}/>Autorizo abrir o Smecel neste computador.</label><Button isDisabled={busy || !confirmation} onPress={()=>{void enter();}}>Entrar no Smecel</Button></>}
-      {opened && <Button isDisabled={busy} onPress={()=>{void discover();}}>Carregar turmas</Button>}
+    <div className="section-heading"><div><h2 id="manual-source-title">Turmas deste computador</h2>
+      <p>O Coletor abre o Smecel, entra com o acesso salvo e mostra a lista. As escolhas ficam salvas.</p></div></div>
+    <div className="manual-controls"><TextField className="manual-year" value={year} onChange={v=>{yearEdited.current=true;setYear(v);}} isDisabled={busy || !!live}><Label>Ano letivo</Label><Input inputMode="numeric" maxLength={4}/></TextField>
+      <Button isDisabled={busy || !/^\d{4}$/.test(year)} onPress={()=>{void load();}}>{busy && !catalog ? 'Carregando turmas…' : catalog ? 'Recarregar turmas' : 'Carregar turmas do Smecel'}</Button>
+      {live && <Button variant="ghost" onPress={()=>{void close();}}>Fechar o Smecel</Button>}
     </div>
-    {opened && !catalog && <output>Entre no Smecel na janela do Edge e clique em Carregar turmas. Com o acesso salvo, o Coletor entra sozinho.</output>}
+    {opened && !catalog && error && <output>Se o Smecel pedir, entre na janela do Edge e clique em Carregar turmas de novo.</output>}
     {catalog && <>
-      <output>{catalog.catalog.context_label} · Ano {session?.scope?.year} · {catalog.catalog.classes.length} turma(s) na lista{catalog.catalog.filtered ? ' (lista filtrada)' : ''}</output>
-      <fieldset className="class-choices" disabled={busy}><legend>Turmas deste computador</legend>{catalog.catalog.classes.map(item=><label className="class-choice" key={item.class_id}><input type="checkbox" aria-label={`Selecionar ${item.name}`} checked={catalog.selected_class_ids.includes(item.class_id)} onChange={e=>{void toggle(item.class_id,e.target.checked);}}/>{item.name}<span className="muted">{item.shift}</span></label>)}</fieldset>
-      <output>Seleção salva.{catalog.unavailable_class_ids.length>0 ? ` ${catalog.unavailable_class_ids.length} turma(s) escolhida(s) não aparece(m) nesta lista.` : ''}</output>
+      <div className="class-toolbar"><output>{catalog.catalog.context_label} · Ano {session?.scope?.year} · {selected} de {total} turma(s) escolhida(s){catalog.catalog.filtered ? ' · lista filtrada' : ''}</output>
+        <div className="source-actions"><Button size="sm" variant="secondary" isDisabled={busy || selected===total} onPress={()=>{void selectAll(true);}}>Marcar todas</Button><Button size="sm" variant="ghost" isDisabled={busy || selected===0} onPress={()=>{void selectAll(false);}}>Desmarcar todas</Button></div></div>
+      <fieldset className="class-choices" disabled={busy}><legend className="sr-only">Turmas deste computador</legend>{catalog.catalog.classes.map(item=><label className="class-choice" key={item.class_id}><input type="checkbox" aria-label={`Selecionar ${item.name}`} checked={catalog.selected_class_ids.includes(item.class_id)} onChange={e=>{void toggle(item.class_id,e.target.checked);}}/>{item.name}<span className="muted">{item.shift}</span></label>)}</fieldset>
+      {catalog.unavailable_class_ids.length>0 && <output>{catalog.unavailable_class_ids.length} turma(s) escolhida(s) não aparece(m) nesta lista.</output>}
       {catalog.notice && <output>{catalog.notice}</output>}
-      <h3 className="manual-subtitle">Conferir uma turma sem enviar</h3>
-      <label className="manual-select"><span>Turma para conferir</span><select aria-label="Turma para conferir" value={classId} disabled={busy} onChange={e=>{setClassId(e.target.value);setConfirmation(false);onClear();}}><option value="">Escolha uma turma marcada</option>{catalog.catalog.classes.filter(item=>catalog.selected_class_ids.includes(item.class_id)).map(item=><option value={item.class_id} key={item.class_id}>{item.name}</option>)}</select></label>
-      <label className="consent"><input type="checkbox" checked={confirmation} disabled={busy || !classId} onChange={e=>setConfirmation(e.target.checked)}/>Autorizo ler este diário só para conferir aqui.</label>
-      <Button isDisabled={busy || !classId || !confirmation} onPress={()=>{void capture();}}>Ler diário manualmente</Button>
-      <Button variant="ghost" isDisabled={busy} onPress={()=>{if(session)void perform(async()=>checked(await (await bridge()).clear_manual_class_selection(session.generation,catalog.selection_revision)));}}>Limpar turmas escolhidas</Button>
+      <details className="manual-check"><summary>Conferir uma turma sem enviar</summary>
+        <label className="manual-select"><span>Turma para conferir</span><select aria-label="Turma para conferir" value={classId} disabled={busy} onChange={e=>{setClassId(e.target.value);setConfirmation(false);onClear();}}><option value="">Escolha uma turma marcada</option>{catalog.catalog.classes.filter(item=>catalog.selected_class_ids.includes(item.class_id)).map(item=><option value={item.class_id} key={item.class_id}>{item.name}</option>)}</select></label>
+        <label className="consent"><input type="checkbox" checked={confirmation} disabled={busy || !classId} onChange={e=>setConfirmation(e.target.checked)}/>Autorizo ler este diário só para conferir aqui.</label>
+        <Button isDisabled={busy || !classId || !confirmation} onPress={()=>{void capture();}}>Ler diário</Button>
+      </details>
     </>}
-    {(live || active.current) && <Button variant="ghost" onPress={()=>{void close();}}>Encerrar sessão e descartar prévia</Button>}
     {error && <p role="alert" className="error-message">{error}</p>}
   </section>;
 }

@@ -189,3 +189,28 @@ main { min-width: 0; }
 .manual-select select { border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; background: var(--surface); color: var(--foreground); font: inherit; }
 .manual-select select:focus-visible, .consent input:focus-visible, .class-choice input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .source-panel > .source-actions + output, .source-panel > button { margin-top: 12px; }
+
+/* Coleta: status first, setup folded once configured. */
+.receipt-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 18px 0 4px; }
+.receipt-grid div { background: var(--surface-secondary); border-radius: 10px; padding: 10px 12px; }
+.receipt-grid dt { color: var(--muted); font-size: 12px; }
+.receipt-grid dd { font-size: 20px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.receipt-grid div:first-child dd { font-size: 15px; padding-top: 4px; }
+.receipt-grid dd.attention { color: #b45309; }
+.dark .receipt-grid dd.attention, [data-theme='dark'] .receipt-grid dd.attention { color: #fbbf24; }
+.collect-progress { margin-top: 16px; }
+.collect-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.collect-progress output { margin-top: 6px !important; }
+.setup-panel > summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; list-style: none; }
+.setup-panel > summary::-webkit-details-marker { display: none; }
+.setup-panel > summary .muted { font-weight: 400; font-size: 12px; }
+.setup-panel .setup-edit { margin-left: auto; color: var(--accent); font-size: 12px; }
+.setup-panel[open] .setup-edit { visibility: hidden; }
+.setup-stack > .panel { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+.class-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.class-toolbar output { margin-top: 0 !important; }
+.class-toolbar .source-actions { margin-top: 0 !important; }
+.manual-check { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.manual-check > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+.manual-check[open] > summary { color: var(--foreground); margin-bottom: 8px; }
+@media (max-width: 760px) { .receipt-grid { grid-template-columns: 1fr 1fr; } }

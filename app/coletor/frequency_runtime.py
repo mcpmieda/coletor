@@ -28,7 +28,7 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
               'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
-              'PENDING_BATCHES'}
+              'PENDING_BATCHES', 'SOURCE_READ_FAILED'}
 # Problems an operator must see even with the window hidden in the tray.
 ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
@@ -275,7 +275,9 @@ class FrequencyRuntime:
     def _error(self, error, label=None):
         code = getattr(error, 'code', 'unavailable')
         if isinstance(error, SessionError):
-            code = 'SOURCE_LOGIN_FAILED' if str(error) == 'SOURCE_LOGIN_FAILED' else 'SOURCE_LOGIN_REQUIRED'
+            # A diary that failed after the list was validated is a read
+            # problem, retried at the next time; anything else asks for login.
+            code = str(error) if str(error) in {'SOURCE_LOGIN_FAILED', 'SOURCE_READ_FAILED'} else 'SOURCE_LOGIN_REQUIRED'
         if code not in SAFE_CODES: code = 'unavailable'
         # With a saved Smecel login an expired session is retried at the next
         # scheduled time. A refused password or no saved login waits for a person.
@@ -293,8 +295,11 @@ class FrequencyRuntime:
             except Exception: pass
 
     def public_status(self):
+        count = getattr(self._source, 'saved_class_count', None)
+        try: selected = count() if count else None
+        except Exception: selected = None
         with self._lock:
-            return {'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
+            return {'selectedClasses': selected, 'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
                     'persistent': self._storage.persistent, 'progress': dict(self._progress),
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
@@ -563,7 +568,12 @@ class FrequencyRuntime:
                     with self._lock:
                         self._class = current['classId']
                         self._progress['classLabel'] = source['name']
-                    preview = self._source.operational_capture(source['class_id'])
+                    try:
+                        preview = self._source.operational_capture(source['class_id'])
+                    except SessionError:
+                        # The list was just validated: a failed diary is a read
+                        # problem (shown as such), not a reason to ask for login.
+                        raise SessionError('SOURCE_READ_FAILED') from None
                     self._check(epoch, lease=False)
                     after_capture = self._fresh()
                     if after_capture['settings']['paused']: raise FrequencyError('paused')
