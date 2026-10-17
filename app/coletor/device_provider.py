@@ -349,8 +349,19 @@ class DeviceProvider:
             if self._state:
                 public = self._load().public_jwk()
                 if self._state['state'] == 'active':
-                    if decode(self._request('revoke', self._proof('collector-revoke'))) != {'revoked': True}:
-                        raise AccessDenied('ACCESS_CLEANUP_PENDING')
+                    # An earlier revocation can have reached the server even
+                    # when its acknowledgement was lost. Never assume success:
+                    # confirm the exact old device/key on the official server.
+                    try:
+                        revoked = decode(self._request('revoke', self._proof('collector-revoke'))) == {'revoked': True}
+                    except AccessDenied:
+                        revoked = False
+                    if not revoked:
+                        status = decode(self._request('device-status', {
+                            'deviceId': self._state['deviceId'],
+                            'keyThumbprint': self._state['keyThumbprint']}))
+                        if status != {'revoked': True}:
+                            raise AccessDenied('SERVER_REVOCATION_PENDING')
             else:
                 provider = TPM_PROVIDER
                 key = self._key_factory(provider=provider)
