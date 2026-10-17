@@ -326,6 +326,37 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertIsNotNone(restarted._pending)
         restarted.release()
 
+    def test_repairing_accepts_only_confirmed_revocation_after_lost_receipt(self):
+        self.activate()
+        self.transport.revoked = True  # Server had already revoked the old ID.
+        original = self.transport.request
+        def missing_revocation_receipt(method, path, value=None):
+            if path == PREFIX + 'revoke':
+                raise AccessDenied('ACCESS_REQUIRED')
+            return original(method, path, value)
+        self.transport.request = missing_revocation_receipt
+        self.provider.open_official_login()
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertIsNotNone(self.provider._pending)
+        self.assertTrue(any(suffix == 'device-status' for _, suffix, _ in self.transport.calls))
+        self.assertEqual(sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls), 2)
+
+    def test_repairing_never_bypasses_revocation_without_server_proof(self):
+        self.activate()
+        original = self.transport.request
+        def rejected_revocation(method, path, value=None):
+            if path == PREFIX + 'revoke':
+                raise AccessDenied('ACCESS_REQUIRED')
+            return original(method, path, value)
+        self.transport.request = rejected_revocation
+        pairing_before = sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as denied:
+            self.provider.open_official_login()
+        self.assertEqual(denied.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.assertEqual(self.provider._state['state'], 'active')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(sum(suffix == 'pairings' for _, suffix, _ in self.transport.calls), pairing_before)
+
     def test_metadata_unlink_failure_after_key_delete_is_recoverable_on_retry_and_restart(self):
         self.activate()
         original = self.provider._metadata.remove
