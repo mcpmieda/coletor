@@ -149,6 +149,7 @@ class FrequencyRuntime:
         self._history = history or CollectorHistory(self._storage.directory.parent, clock=clock)
         self._on_alert = on_alert
         self._lock = threading.RLock()
+        self._bracket = threading.local()
         self._operation = threading.Lock()
         self._epoch = 0
         self._active, self._paused, self._closed = False, False, False
@@ -166,7 +167,22 @@ class FrequencyRuntime:
         self._on_started, self._on_finished = on_started, on_finished
 
     def _request(self, payload):
+        if getattr(self._bracket, 'active', False):
+            return self._provider.frequency_request(payload)
         return self._access.run(lambda: self._provider.frequency_request(payload))
+
+    def _verified(self, work):
+        """Run consecutive steps inside ONE access bracket on this thread.
+
+        Every bracket is still opened and closed by a fresh online verification
+        with the same identity, as a single access.run. Only the duplicate
+        checks between back-to-back steps disappear. Other threads (heartbeat)
+        keep their own brackets; transmissions stay outside this one."""
+        def bracketed():
+            self._bracket.active = True
+            try: return work()
+            finally: self._bracket.active = False
+        return self._access.run(bracketed)
 
     def _mutation(self, operation, **fields):
         payload = {'operation': operation, 'academicYear': 2026, 'requestId': str(uuid.uuid4()), **fields}
@@ -534,25 +550,30 @@ class FrequencyRuntime:
             heartbeat.start()
             for source, central in pairs:
                 self._check(epoch, lease=False)
-                fresh = self._fresh()
-                if fresh['settings']['paused']: raise FrequencyError('paused')
-                # Every class starts with a new database concession, fencing and
-                # requestId. Heartbeat only reports status; it does not renew.
-                self._acquire(fresh, force=True)
-                self._check(epoch)
-                current = next((c for c in fresh['classes'] if c['classId'] == central['classId']
-                                and class_key(c['sourceClassLabel']) == class_key(source['name'])), None)
-                if current is None: raise FrequencyError('source-invalid')
-                with self._lock:
-                    self._class = current['classId']
-                    self._progress['classLabel'] = source['name']
-                preview = self._access.run(lambda: self._source.operational_capture(source['class_id']))
-                self._check(epoch, lease=False)
-                after_capture = self._fresh()
-                if after_capture['settings']['paused']: raise FrequencyError('paused')
-                if self._lease is None or self._lease['deadline'] <= self._clock():
-                    self._acquire(after_capture, force=True)
+                def read_class(source=source, central=central):
+                    fresh = self._fresh()
+                    if fresh['settings']['paused']: raise FrequencyError('paused')
+                    # Every class starts with a new database concession, fencing and
+                    # requestId. Heartbeat only reports status; it does not renew.
+                    self._acquire(fresh, force=True)
                     self._check(epoch)
+                    current = next((c for c in fresh['classes'] if c['classId'] == central['classId']
+                                    and class_key(c['sourceClassLabel']) == class_key(source['name'])), None)
+                    if current is None: raise FrequencyError('source-invalid')
+                    with self._lock:
+                        self._class = current['classId']
+                        self._progress['classLabel'] = source['name']
+                    preview = self._source.operational_capture(source['class_id'])
+                    self._check(epoch, lease=False)
+                    after_capture = self._fresh()
+                    if after_capture['settings']['paused']: raise FrequencyError('paused')
+                    if self._lease is None or self._lease['deadline'] <= self._clock():
+                        self._acquire(after_capture, force=True)
+                        self._check(epoch)
+                    return current, preview, after_capture
+                # Status, concession, source read and the post-read status share
+                # one verified bracket; the transmission below opens its own.
+                current, preview, after_capture = self._verified(read_class)
                 school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
                 del preview

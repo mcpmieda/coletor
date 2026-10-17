@@ -268,6 +268,19 @@ class SignInFormTests(unittest.TestCase):
         self.assertEqual(page.filled, {'#usuario': SYNTHETIC_LOGIN['email'], '#senha': SYNTHETIC_LOGIN['password']})
         self.assertEqual(asyncio.run(sign_in(self.page(False), **SYNTHETIC_LOGIN)), {'logged_in': False})
 
+    def test_reuses_the_login_page_only_when_the_worker_says_it_is_fresh(self):
+        import asyncio
+        from coletor.manual_worker import LOGIN_URL, sign_in
+        page = self.page(True); page.url = LOGIN_URL
+        self.assertEqual(asyncio.run(sign_in(page, **SYNTHETIC_LOGIN, reload=False)), {'logged_in': True})
+        self.assertEqual(page.visited, [])
+        page = self.page(True); page.url = LOGIN_URL
+        asyncio.run(sign_in(page, **SYNTHETIC_LOGIN))
+        self.assertEqual(page.visited, [LOGIN_URL])
+        page = self.page(True); page.url = 'https://www.smecel.com.br/sistema/escola/turmaListar.php?ano=2026'
+        asyncio.run(sign_in(page, **SYNTHETIC_LOGIN, reload=False))
+        self.assertEqual(page.visited, [LOGIN_URL])
+
     def test_opens_hidden_administrative_login_before_filling_saved_credentials(self):
         import asyncio
         from coletor.manual_worker import LOGIN_FIELDS, LOGIN_OPENER, sign_in

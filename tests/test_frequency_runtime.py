@@ -37,11 +37,13 @@ class SyntheticCrypto:
 
 
 class Access:
-    def __init__(self): self.denied = False; self.calls = 0
+    def __init__(self): self.denied = False; self.calls = 0; self.depth = 0
     def run(self, work):
         self.calls += 1
         if self.denied: raise AccessDenied()
-        result = work()
+        self.depth += 1
+        try: result = work()
+        finally: self.depth -= 1
         if self.denied: raise AccessDenied()
         return result
 
@@ -123,6 +125,13 @@ class RuntimeTests(unittest.TestCase):
         self.addCleanup(self.runtime.shutdown)
 
     def test_real_flow_selected_worker_sparse_sixth_slot_receipt_and_no_uid(self):
+        outside, request = [], self.provider.frequency_request
+        def bracketed(payload):
+            if self.access.depth == 0: outside.append(payload['operation'])
+            return request(payload)
+        self.provider.frequency_request = bracketed
+        captured = []
+        self.source.on_capture = lambda: captured.append(self.access.depth)
         result = self.runtime.collect()
         self.assertEqual(result['state'], 'ready', repr(result))
         self.assertEqual(result['lastReceipt']['resolvedRecords'], 1)
@@ -133,7 +142,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(all(not c['complete'] for c in payload['coverage']))
         self.assertNotIn('studentUid', json.dumps(payload))
         self.assertEqual(self.storage.queue(), [])
-        self.assertGreater(self.access.calls, 6)
+        # Every server request and the source read run inside a verified
+        # bracket. Per class: status+lease+read+status share one; send has its own.
+        self.assertEqual(outside, [])
+        self.assertEqual(captured, [1])
+        self.assertEqual(self.access.calls, 6)
 
     def test_uncertain_send_consults_receipt_before_retry_and_never_duplicates(self):
         self.provider.fail_after_commit = True

@@ -41,8 +41,14 @@ escolhas visíveis,conservando as demais. Limpar seleção deste ano e contexto
 remove também as pendentes. Lock do SO,revisão e escrita atômica protegem contra
 conflito/falha. Corrupção não copia nem ecoa conteúdo arbitrário.
 
-Antes de cada leitura,o worker relê a lista no ano solicitado,confere contexto
-e disponibilidade,e só então abre diario_frequencia.php?ct=...&ano=... já conhecido.
+Antes de cada leitura,o worker confere a lista do ano solicitado (contexto e
+disponibilidade) e só então abre diario_frequencia.php?ct=...&ano=... já conhecido.
+A lista validada nesta sessão vale para os diários seguintes por até 5 min,
+enquanto só o worker navegou a janela: qualquer outra navegação (clique,
+redirecionamento, login, mudança de histórico) ou falha de leitura a descarta e
+a próxima turma relê a lista. Sessão expirada é reconhecida na hora pelo
+redirecionamento ou pelo formulário de senha, sem esperar as linhas por 20 s.
+Imagens, fontes e mídia das páginas de leitura são recusadas (nenhum host novo).
 Não abre vínculos/listas de alunos. Diário somente em memória; identidade e
 completude não comprovadas; envio bloqueado incondicionalmente.
 
