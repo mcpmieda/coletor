@@ -48,6 +48,7 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertIn('workflow_dispatch:', checks)
         self.assertIn("github.event_name != 'pull_request'", checks)
         self.assertIn('Installer archive-only merge', workflow)
+        self.assertIn('Installer publisher maintenance only', workflow)
         self.assertIn('if ! pr_url="$(gh pr create', workflow)
         # Release publication can succeed while the archive remains stale.
         # Denied PR creation/merge must fail visibly instead of reporting green.
