@@ -334,7 +334,16 @@ class DeviceProvider:
             self._state = self._metadata.read()
             if self._state:
                 if self._state['state'] in {'deletePending', 'revokedLocally'}:
-                    raise AccessDenied('ACCESS_CLEANUP_PENDING')
+                    # A previous *explicit* removal already checkpointed this
+                    # device's deletion. Resume it instead of trapping login
+                    # forever. DesktopApi has checked the protected queue before
+                    # allowing this path. An unconfirmed server revocation or
+                    # a Windows key failure must still fail closed.
+                    self.close()
+                    self._state = self._metadata.read()
+                    if self._state is not None:
+                        raise AccessDenied('ACCESS_CLEANUP_PENDING')
+            if self._state:
                 public = self._load().public_jwk()
                 if self._state['state'] == 'active':
                     if decode(self._request('revoke', self._proof('collector-revoke'))) != {'revoked': True}:
