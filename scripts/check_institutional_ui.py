@@ -21,12 +21,14 @@ try:
         browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH", p.chromium.executable_path), headless=True)
         page = browser.new_page(viewport={"width": 1240, "height": 900}, locale="pt-BR", reduced_motion="reduce")
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.add_init_script("""window.__fixture={authorized:false,statusCalls:0,settingsCalls:0,logoutCalls:0,defer:false,pending:[]};
+        page.add_init_script("""window.__fixture={authorized:false,statusCalls:0,settingsCalls:0,logoutCalls:0,loginCalls:0,loginErrorCode:null,defer:false,pending:[]};
           window.pywebview={api:{
             get_institutional_access_status:async()=>{const f=window.__fixture;f.statusCalls++;
               if(f.defer) return new Promise(resolve=>f.pending.push(resolve));
               return {authenticated:f.authorized,authorized:f.authorized,pairingCode:f.pairingCode,code:f.code};},
-            open_institutional_login:async()=>({ok:true}),
+            open_institutional_login:async()=>{const f=window.__fixture;f.loginCalls++;
+              if(f.loginErrorCode) return {error:'Autorização não disponível.',code:f.loginErrorCode};
+              f.pairingCode='654321';return {ok:true};},
             logout_institutional_access:async()=>{window.__fixture.logoutCalls++;window.__fixture.authorized=false;return {ok:true};},
             get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
             discard_local_pending_collection:async()=>({ok:true,discarded:false}),
@@ -41,6 +43,19 @@ try:
         expect(page.get_by_role("button", name="Usar dados de exemplo")).to_have_count(0)
         assert page.evaluate("window.__fixture.settingsCalls") == 0
         assert page.locator('input[type=password]').count() == 0
+        # The exact production loop: native "Sim" fails, then automatic
+        # authorization polling wrongly replaces the failure with the default.
+        for code in ('DEVICE_KEY_UNAVAILABLE', 'ACCESS_UNAVAILABLE', 'PAIRING_PENDING'):
+            page.evaluate("(code) => window.__fixture.loginErrorCode=code", code)
+            page.get_by_role('button', name='Entrar no Ecossistema').click()
+            expect(page.get_by_text('Código: ' + code + '.', exact=False)).to_be_visible()
+            page.evaluate("window.dispatchEvent(new Event('coletoraccesschanged'));window.dispatchEvent(new Event('focus'))")
+            expect(page.get_by_text('Código: ' + code + '.', exact=False)).to_be_visible()
+        assert page.evaluate("window.__fixture.loginCalls") == 3
+        page.evaluate("window.__fixture.loginErrorCode=null")
+        page.get_by_role('button', name='Entrar no Ecossistema').click()
+        expect(page.get_by_text('654321', exact=True)).to_be_visible()
+        expect(page.get_by_text('Pedido iniciado. Confira o código', exact=False)).to_be_visible()
         page.screenshot(path=str(out / "blocked.png"), full_page=True)
         page.evaluate("window.__fixture.pairingCode='123456';window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_text('123456', exact=True)).to_be_visible()
@@ -69,7 +84,7 @@ try:
         assert not errors, errors
         (out / "results.json").write_text(json.dumps({"passed": True, "synthetic_bridge_only": True,
             "native_authorization_proven": False, "checks": ["denied-before-settings", "login-without-password-field",
-            "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
+            "login-errors-survive-status-poll", "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
         browser.close()
 finally:
     server.shutdown()

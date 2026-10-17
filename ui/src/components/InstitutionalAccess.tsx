@@ -34,6 +34,30 @@ async function bridge(): Promise<InstitutionalBridge> {
     throw new Error('O acesso institucional está disponível no programa Windows.');
   return native as InstitutionalBridge;
 }
+/** User-visible messages are based on fixed, nonsecret codes, never native error text. */
+function loginFailureMessage(code?: string): string {
+  const messages: Record<string, string> = {
+    PAIRING_PENDING: 'Já existe uma solicitação de autorização neste computador. Confira o código exibido ou cancele a tentativa anterior.',
+    ACCESS_UNAVAILABLE: 'Não foi possível consultar o servidor do Ecossistema. Confira a conexão com a internet.',
+    LOGIN_UNAVAILABLE: 'O Windows não conseguiu abrir o navegador. Confira o navegador padrão e cancele a solicitação pendente antes de tentar novamente.',
+    ACCESS_NOT_CONFIGURED: 'O serviço de autorização do Ecossistema não está disponível ou configurado.',
+    DEVICE_KEY_UNAVAILABLE: 'O Windows não conseguiu preparar a chave protegida deste perfil. Confira as permissões do dispositivo.',
+    DEVICE_KEY_MISSING: 'A chave protegida do computador não foi encontrada. Não exclua arquivos; solicite suporte.',
+    DEVICE_STATE_INVALID: 'O estado de segurança deste computador está inconsistente. Não exclua chaves nem lotes; solicite suporte.',
+    DEVICE_ACTIVATION_CANCELLED: 'A autorização da chave do dispositivo foi cancelada na confirmação do Windows.',
+    ACCESS_CLEANUP_PENDING: 'Há uma limpeza de acesso pendente; conclua a saída antes de tentar novamente.',
+    SERVER_REVOCATION_PENDING: 'A revogação do vínculo anterior ainda precisa ser concluída.',
+    PENDING_BATCHES: 'Há lotes sem recibo. Confira os recibos e não exclua dados antes de trocar o acesso.',
+    PROTECTED_STORAGE_UNAVAILABLE: 'Não foi possível conferir os lotes protegidos; nenhum dado deve ser descartado.',
+    CANCELLED: 'Outra operação está em andamento. Aguarde antes de iniciar a autorização.',
+    ACCESS_REQUIRED: 'O Coletor não conseguiu iniciar a autorização. Verifique o acesso do dispositivo.',
+    INVALID_ACCESS_RESPONSE: 'O servidor retornou uma resposta inválida de autorização.',
+  };
+  const key = typeof code === 'string' && Object.hasOwn(messages, code) ? code : undefined;
+  return key
+    ? messages[key] + ' Código: ' + key + '.'
+    : 'Não foi possível iniciar a autorização. Se persistir, solicite suporte.';
+}
 export default function InstitutionalAccess() {
   const [authorized, setAuthorized] = useState(false), [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
@@ -43,6 +67,8 @@ export default function InstitutionalAccess() {
   const [recoveryNotice, setRecoveryNotice] = useState('');
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
   const previouslyAuthorized = useRef(false);
+  // Polling must not erase the result of a direct user-initiated login action.
+  const loginFailure = useRef<string | null>(null);
   const recheck = useCallback(async () => {
     if (checking.current === epoch.current || operation.current || !mounted.current) return;
     const current = epoch.current;
@@ -61,15 +87,18 @@ export default function InstitutionalAccess() {
         if (confirmed.authenticated !== true || confirmed.authorized !== true) {
           previouslyAuthorized.current = false; setAuthorized(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
         }
-        previouslyAuthorized.current = true; paintTheme(readTheme()); setAuthorized(true); setNotice('');
+        previouslyAuthorized.current = true; loginFailure.current = null; paintTheme(readTheme()); setAuthorized(true); setNotice('');
       } else {
         previouslyAuthorized.current = false; setAuthorized(false);
-        setNotice(result.code === 'ACCESS_NOT_CONFIGURED' ? 'A configuração do acesso ainda não foi concluída.'
+        if (!loginFailure.current) setNotice(result.code === 'ACCESS_NOT_CONFIGURED'
+          ? 'A configuração do acesso ainda não foi concluída.'
+          : result.pairingCode ? 'Pedido iniciado. Confira o código e continue no navegador.'
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
     } catch (error) {
       if (mounted.current && current === epoch.current) {
-        previouslyAuthorized.current = false; setAuthorized(false); setNotice(error instanceof Error ? error.message : 'Não foi possível verificar o acesso.');
+        previouslyAuthorized.current = false; setAuthorized(false);
+        if (!loginFailure.current) setNotice(error instanceof Error ? error.message : 'Não foi possível verificar o acesso.');
       }
     } finally { if (checking.current === current) checking.current = null; }
   }, []);
@@ -83,17 +112,27 @@ export default function InstitutionalAccess() {
   }, [recheck]);
   async function login() {
     if (operation.current) return;
-    operation.current = true; epoch.current++; setBusy(true); setNotice('Continue no navegador do Ecossistema.');
+    operation.current = true; epoch.current++; loginFailure.current = null;
+    setBusy(true); setNotice('Preparando a autorização no Windows e no Ecossistema.');
     try {
       const result = await (await bridge()).open_institutional_login();
-      if ('error' in result) throw new Error(result.code === 'ACCESS_NOT_CONFIGURED'
-        ? 'A configuração do acesso ainda não foi concluída.' : result.error);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não foi possível abrir o acesso.'); }
-    finally { operation.current = false; setBusy(false); void recheck(); }
+      if ('error' in result) {
+        loginFailure.current = loginFailureMessage(result.code);
+        setNotice(loginFailure.current);
+      } else {
+        setNotice('Pedido preparado. Confira o navegador e o código mostrado abaixo.');
+      }
+    } catch {
+      // Never copy potentially sensitive native exceptions into the DOM.
+      loginFailure.current = loginFailureMessage();
+      setNotice(loginFailure.current);
+    } finally {
+      operation.current = false; setBusy(false); void recheck();
+    }
   }
   async function logout() {
     if (operation.current) return;
-    operation.current = true; epoch.current++; setBusy(true);
+    operation.current = true; epoch.current++; loginFailure.current = null; setBusy(true);
     let blockedByPendingBatch = false;
     try {
       const result = await (await bridge()).logout_institutional_access();
