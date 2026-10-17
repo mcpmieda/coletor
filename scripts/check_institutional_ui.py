@@ -52,9 +52,18 @@ try:
             page.evaluate("window.dispatchEvent(new Event('coletoraccesschanged'));window.dispatchEvent(new Event('focus'))")
             expect(page.get_by_text('Código: ' + code + '.', exact=False)).to_be_visible()
         assert page.evaluate("window.__fixture.loginCalls") == 3
-        page.evaluate("window.__fixture.loginErrorCode=null")
+        # Windows shell dispatch failed after the server created a pairing.
+        # The same pending request must be reopenable, without device logout.
+        page.evaluate("window.__fixture.loginErrorCode='LOGIN_UNAVAILABLE';window.__fixture.pairingCode='654321'")
         page.get_by_role('button', name='Entrar no Ecossistema').click()
+        expect(page.get_by_text('Código: LOGIN_UNAVAILABLE.', exact=False)).to_be_visible()
+        expect(page.get_by_role('button', name='Abrir navegador novamente')).to_be_visible()
+        page.evaluate("window.dispatchEvent(new Event('focus'))")
+        expect(page.get_by_role('button', name='Abrir navegador novamente')).to_be_visible()
+        page.evaluate("window.__fixture.loginErrorCode=null")
+        page.get_by_role('button', name='Abrir navegador novamente').click()
         expect(page.get_by_text('654321', exact=True)).to_be_visible()
+        assert page.evaluate("window.__fixture.loginCalls") == 5
         expect(page.get_by_text('Pedido iniciado. Confira o código', exact=False)).to_be_visible()
         page.screenshot(path=str(out / "blocked.png"), full_page=True)
         page.evaluate("window.__fixture.pairingCode='123456';window.dispatchEvent(new Event('coletoraccesschanged'))")
@@ -84,7 +93,7 @@ try:
         assert not errors, errors
         (out / "results.json").write_text(json.dumps({"passed": True, "synthetic_bridge_only": True,
             "native_authorization_proven": False, "checks": ["denied-before-settings", "login-without-password-field",
-            "login-errors-survive-status-poll", "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
+            "login-errors-survive-status-poll", "native-browser-retry-ui", "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
         browser.close()
 finally:
     server.shutdown()
