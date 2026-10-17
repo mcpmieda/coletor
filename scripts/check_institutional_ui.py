@@ -27,7 +27,8 @@ try:
               if(f.defer) return new Promise(resolve=>f.pending.push(resolve));
               return {authenticated:f.authorized,authorized:f.authorized,pairingCode:f.pairingCode,code:f.code};},
             open_institutional_login:async()=>{const f=window.__fixture;f.loginCalls++;
-              return f.loginErrorCode?{error:'Autorização não disponível.',code:f.loginErrorCode}:{ok:true};},
+              if(f.loginErrorCode) return {error:'Autorização não disponível.',code:f.loginErrorCode};
+              f.pairingCode='654321';return {ok:true};},
             logout_institutional_access:async()=>{window.__fixture.logoutCalls++;window.__fixture.authorized=false;return {ok:true};},
             get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
             discard_local_pending_collection:async()=>({ok:true,discarded:false}),
@@ -53,7 +54,8 @@ try:
         assert page.evaluate("window.__fixture.loginCalls") == 3
         page.evaluate("window.__fixture.loginErrorCode=null")
         page.get_by_role('button', name='Entrar no Ecossistema').click()
-        expect(page.get_by_text('Pedido preparado. Confira o navegador', exact=False)).to_be_visible()
+        expect(page.get_by_text('654321', exact=True)).to_be_visible()
+        expect(page.get_by_text('Pedido iniciado. Confira o código', exact=False)).to_be_visible()
         page.screenshot(path=str(out / "blocked.png"), full_page=True)
         page.evaluate("window.__fixture.pairingCode='123456';window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_text('123456', exact=True)).to_be_visible()
