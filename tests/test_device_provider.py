@@ -433,7 +433,7 @@ class DeviceProviderTests(unittest.TestCase):
         state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
         self.provider._state = state
         self.provider._metadata.save(state)
-        self.crypto.properties['Export Policy'] = b'\\x01\\x00\\x00\\x00'
+        self.crypto.properties['Export Policy'] = b'\x01\x00\x00\x00'
         paired_before = sum(path == 'pairings' for _, path, _ in self.transport.calls)
         with self.assertRaises(AccessDenied) as caught:
             self.provider.open_official_login()
