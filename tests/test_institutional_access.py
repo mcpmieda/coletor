@@ -145,22 +145,52 @@ class InstitutionalAccessTests(unittest.TestCase):
             with self.assertRaises(AccessDenied):
                 validate_authorization(item, NOW)
 
+    def test_denied_background_polls_never_close_an_unauthorized_source(self):
+        from unittest.mock import Mock
+        cleanup = Mock(side_effect=RuntimeError('synthetic-close-not-allowed'))
+        provider = Provider([AccessDenied('ACCESS_REQUIRED'),
+                             AccessDenied('PAIRING_PENDING'),
+                             AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        self.assertEqual(gate.status()['code'], 'ACCESS_REQUIRED')
+        self.assertEqual(gate.status()['code'], 'PAIRING_PENDING')
+        self.assertEqual(gate.status()['code'], 'ACCESS_REQUIRED')
+        cleanup.assert_not_called()
+        self.assertFalse(gate._cleanup_pending)
+        gate.open_login()
+        self.assertTrue(provider.opened)
+        cleanup.assert_not_called()
+
+    def test_first_failed_authenticated_poll_cancels_once_not_on_every_poll(self):
+        from unittest.mock import Mock
+        cleanup = Mock()
+        provider = Provider([response(), AccessDenied('ACCESS_REQUIRED'),
+                             AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        self.assertTrue(gate.status()['authorized'])
+        self.assertFalse(gate.status()['authorized'])
+        self.assertFalse(gate.status()['authorized'])
+        cleanup.assert_called_once()
+        self.assertFalse(gate._cleanup_pending)
+
     def test_cleanup_failure_keeps_gate_locked(self):
         def failed_cleanup():
             raise RuntimeError('private browser cleanup failed')
-        provider = Provider([response(authorized=False), response()])
+        provider = Provider([response(), response(authorized=False)])
         gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=failed_cleanup)
+        self.assertTrue(gate.status()['authorized'])
         self.assertFalse(gate.status()['authorized'])
         self.assertEqual(gate.status()['code'], 'ACCESS_CLEANUP_PENDING')
-        self.assertEqual(provider.reads, 1)
+        self.assertEqual(provider.reads, 2)
         with self.assertRaises(AccessDenied):
             gate.open_login()
 
     def test_transient_worker_cleanup_is_retried_before_opening_browser(self):
         from unittest.mock import Mock
         cleanup = Mock(side_effect=[RuntimeError('synthetic-worker-close'), None])
-        provider = Provider([])
+        provider = Provider([response()])
         gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        self.assertTrue(gate.status()['authorized'])
         gate.open_login()
         self.assertTrue(provider.opened)
         self.assertFalse(gate._cleanup_pending)
@@ -169,8 +199,9 @@ class InstitutionalAccessTests(unittest.TestCase):
     def test_repeated_worker_cleanup_failure_still_denies_login(self):
         from unittest.mock import Mock
         cleanup = Mock(side_effect=RuntimeError('synthetic-unclosed-worker'))
-        provider = Provider([])
+        provider = Provider([response()])
         gate = InstitutionalAccess(provider, clock=lambda: NOW, on_locked=cleanup)
+        self.assertTrue(gate.status()['authorized'])
         with self.assertRaises(AccessDenied) as caught:
             gate.open_login()
         self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')

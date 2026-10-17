@@ -39,7 +39,7 @@ function loginFailureMessage(code?: string): string {
   const messages: Record<string, string> = {
     PAIRING_PENDING: 'Já existe uma solicitação de autorização neste computador. Confira o código exibido ou cancele a tentativa anterior.',
     ACCESS_UNAVAILABLE: 'Não foi possível consultar o servidor do Ecossistema. Confira a conexão com a internet.',
-    LOGIN_UNAVAILABLE: 'O Windows não conseguiu abrir o navegador. Confira o navegador padrão e cancele a solicitação pendente antes de tentar novamente.',
+    LOGIN_UNAVAILABLE: 'O Windows não confirmou a abertura do navegador. Clique em Entrar no Ecossistema novamente para tentar abrir o mesmo pedido, sem apagar a chave.',
     ACCESS_NOT_CONFIGURED: 'O serviço de autorização do Ecossistema não está disponível ou configurado.',
     DEVICE_KEY_UNAVAILABLE: 'O Windows não conseguiu preparar a chave protegida deste perfil. Confira as permissões do dispositivo.',
     DEVICE_KEY_MISSING: 'A chave protegida do computador não foi encontrada. Não exclua arquivos; solicite suporte.',
@@ -79,7 +79,7 @@ export default function InstitutionalAccess() {
       if (!mounted.current || current !== epoch.current) return;
       setRecovery(local);
       setPairingCode(typeof result.pairingCode === 'string' && /^[0-9]{6}$/.test(result.pairingCode) ? result.pairingCode : '');
-      setCleanupPending(result.code === 'ACCESS_CLEANUP_PENDING' || result.code === 'SERVER_REVOCATION_PENDING');
+      setCleanupPending(result.code === 'SERVER_REVOCATION_PENDING');
       if (result.authenticated === true && result.authorized === true) {
         if (!previouslyAuthorized.current) await initializeLocalSettings();
         const confirmed = await (await bridge()).get_institutional_access_status();
@@ -92,6 +92,8 @@ export default function InstitutionalAccess() {
         previouslyAuthorized.current = false; setAuthorized(false);
         if (!loginFailure.current) setNotice(result.code === 'ACCESS_NOT_CONFIGURED'
           ? 'A configuração do acesso ainda não foi concluída.'
+          : result.code === 'ACCESS_CLEANUP_PENDING' ? 'A limpeza anterior ainda não terminou. Use Entrar no Ecossistema para repetir a verificação segura.'
+          : result.code === 'SERVER_REVOCATION_PENDING' ? 'A revogação do dispositivo anterior ainda precisa ser confirmada no Ecossistema.'
           : result.pairingCode ? 'Pedido iniciado. Confira o código e continue no navegador.'
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
@@ -186,7 +188,7 @@ export default function InstitutionalAccess() {
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>
-    <Button isDisabled={busy} onPress={() => { void login(); }}><LogIn size={18} />Entrar no Ecossistema</Button>
+    <Button isDisabled={busy} onPress={() => { void login(); }}><LogIn size={18} />{pairingCode ? "Abrir navegador novamente" : "Entrar no Ecossistema"}</Button>
     <Button variant="ghost" isDisabled={busy} onPress={() => { void recheck(); }}>Verificar acesso</Button>
     {(pairingCode || cleanupPending) && <Button variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>{cleanupPending ? 'Concluir saída' : 'Cancelar autorização'}</Button>}
     {recoveryPanel()}

@@ -157,6 +157,63 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual([p[1] for p in self.transport.calls], ['config'])
         self.assertFalse(self.root.exists())
 
+    def test_windows_uses_shell_execute_https_association_not_python_webbrowser(self):
+        from coletor.device_provider import launch_system_browser
+        shell = Mock(return_value=33)
+        url = OFFICIAL_ORIGIN + '/frequency-collector/connect?pairing=' + DEVICE
+        self.assertTrue(launch_system_browser(url, platform='nt', shell_execute=shell))
+        shell.assert_called_once_with(None, 'open', url, None, None, 1)
+        shell.return_value = 31
+        self.assertFalse(launch_system_browser(url, platform='nt', shell_execute=shell))
+        shell.reset_mock()
+        self.assertFalse(launch_system_browser('https://attacker.invalid/connect',
+                                              platform='nt', shell_execute=shell))
+        self.assertFalse(launch_system_browser('file:///C:/private.txt',
+                                              platform='nt', shell_execute=shell))
+        shell.assert_not_called()
+
+    def test_login_browser_failure_retains_pairing_and_retries_without_new_consent(self):
+        self.browser.return_value = False
+        with self.assertRaises(AccessDenied) as failed:
+            self.provider.open_official_login()
+        self.assertEqual(failed.exception.code, 'LOGIN_UNAVAILABLE')
+        first = dict(self.provider._pending)
+        self.assertEqual(self.provider.public_status()['pairingCode'], '123456')
+        with self.assertRaises(AccessDenied) as pending:
+            self.provider.verify_online()
+        self.assertEqual(pending.exception.code, 'PAIRING_PENDING')
+        self.browser.return_value = True
+        self.provider.open_official_login()
+        self.assertEqual(self.provider._pending, first)
+        self.assertEqual(self.browser.call_count, 2)
+        self.assertEqual(self.browser.call_args_list[0].args, self.browser.call_args_list[1].args)
+        self.consent.assert_called_once()
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 1)
+        self.assertTrue(self.crypto.exists)
+
+    def test_expired_in_memory_pairing_creates_fresh_request_only_after_server_poll(self):
+        self.provider.open_official_login()
+        previous_id = self.provider._pending['id']
+        self.transport.change = lambda suffix, body: (
+            {'contractVersion': 1, 'state': 'expired'}
+            if suffix == 'pairings/poll' else body)
+        self.provider.open_official_login()
+        self.assertNotEqual(self.provider._pending['id'], previous_id)
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
+        self.assertEqual(self.consent.call_count, 2)
+
+    def test_unknown_pending_poll_never_reissues_a_pairing(self):
+        self.provider.open_official_login()
+        old = dict(self.provider._pending)
+        self.transport.change = lambda suffix, body: (
+            {'contractVersion': 1, 'state': 'unknown'}
+            if suffix == 'pairings/poll' else body)
+        with self.assertRaises(AccessDenied) as failure:
+            self.provider.open_official_login()
+        self.assertEqual(failure.exception.code, 'INVALID_ACCESS_RESPONSE')
+        self.assertEqual(self.provider._pending, old)
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 1)
+
     def test_pairing_signature_is_bound_and_only_nonsecret_metadata_persists(self):
         self.provider.open_official_login()
         self.assertEqual(self.provider.public_status(), {'pairingCode': '123456'})

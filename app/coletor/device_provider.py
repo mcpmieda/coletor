@@ -30,6 +30,32 @@ FREQUENCY_BYTES = 16 * 1024 * 1024
 FREQUENCY_ERRORS = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy', 'lease-fenced', 'paused', 'source-invalid', 'identity-review'}
 
 
+def launch_system_browser(url, new=2, *, platform=None, shell_execute=None):
+    """Open a fixed-origin collector page using the Windows URL association.
+
+    Python's webbrowser registry is unreliable in embedded pythonw.exe builds.
+    ShellExecuteW uses the configured Windows HTTPS association directly.
+    The native OS result proves dispatch, not that a page has loaded.
+    """
+    if (not isinstance(url, str)
+            or not url.startswith(OFFICIAL_ORIGIN + '/frequency-collector/')):
+        return False
+    if (os.name if platform is None else platform) != 'nt':
+        try:
+            return bool(webbrowser.open(url, new=new))
+        except (OSError, RuntimeError):
+            return False
+    try:
+        shell = shell_execute
+        if shell is None:
+            shell = ctypes.windll.shell32.ShellExecuteW
+            shell.restype = ctypes.c_void_p
+        result = shell(None, 'open', url, None, None, 1)
+        return result is not None and int(result) > 32
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
 def canonical_frequency(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
 
@@ -187,7 +213,7 @@ def native_confirmation(software=False):
 
 class DeviceProvider:
     def __init__(self, directory=None, *, transport=None, key_factory=WindowsDeviceKey,
-                 consent=native_confirmation, browser=webbrowser.open, clock=time.time):
+                 consent=native_confirmation, browser=launch_system_browser, clock=time.time):
         self._metadata = DeviceMetadata(directory)
         self._transport = transport or OfficialTransport()
         self._key_factory, self._consent, self._browser, self._clock = key_factory, consent, browser, clock
@@ -324,7 +350,31 @@ class DeviceProvider:
     def open_official_login(self):
         with self._lock:
             if self._pending:
-                raise AccessDenied('PAIRING_PENDING')
+                # A failed browser dispatch must not strand an already-created
+                # pairing or force device logout/key removal. Reopen the same
+                # validated official URL, with no new consent or private data
+                # exposed to JavaScript. Discard expired/rejected requests only
+                # after the server's own poll says they are no longer pending.
+                status = decode(self._request('pairings/poll', {
+                    n: self._pending[n] for n in ('id', 'pollToken')}))
+                if (set(status) == {'contractVersion', 'state'}
+                        and status['contractVersion'] == 1
+                        and status['state'] in {'pending', 'confirmed', 'exchanging'}):
+                    url = (OFFICIAL_ORIGIN + '/frequency-collector/connect?pairing='
+                           + self._pending['id'])
+                    if not self._browser(url, new=2):
+                        raise AccessDenied('LOGIN_UNAVAILABLE')
+                    return
+                if (set(status) == {'contractVersion', 'state', 'deviceId'}
+                        and status['contractVersion'] == 1
+                        and status['state'] == 'completed'):
+                    self.verify_online()  # Claim once, without issuing a new key.
+                    return
+                if (set(status) != {'contractVersion', 'state'}
+                        or status['contractVersion'] != 1
+                        or status['state'] not in {'expired', 'cancelled', 'denied'}):
+                    raise AccessDenied('INVALID_ACCESS_RESPONSE')
+                self._pending = None
             ready = decode(self._request('config'))
             if set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['contractVersion'] != 1 or ready['ready'] is not True:
                 raise AccessDenied('ACCESS_NOT_CONFIGURED')

@@ -108,6 +108,9 @@ class InstitutionalAccess:
         # A failed server/device logout is not cured by closing a browser worker.
         self._logout_cleanup_pending = False
         self._cleanup_operation = threading.RLock()
+        # Background polling before initial authorization cannot own a source
+        # capture. Cancel workers only when an actual valid grant was observed.
+        self._verified_access = False
         self._locked_code = None
 
     def _verify(self, generation):
@@ -120,6 +123,7 @@ class InstitutionalAccess:
             with self._lock:
                 if generation != self._generation:
                     raise AccessDenied()
+                self._verified_access = True
             return proof
         except AccessDenied as error:
             self._invalidate(error.code)
@@ -136,8 +140,14 @@ class InstitutionalAccess:
             # capture must independently pass its final online verification.
             if not transient:
                 self._generation += 1
+            needs_cleanup = not transient and self._verified_access
+            if needs_cleanup:
+                self._verified_access = False
             self._locked_code = code
-        if not transient:
+        if needs_cleanup:
+            # An unauthenticated polling failure must not repeatedly close an
+            # idle source, then set ACCESS_CLEANUP_PENDING during first login.
+            # A previously verified grant still fences and cancels its work.
             with self._cleanup_operation:
                 try:
                     self._on_locked()
