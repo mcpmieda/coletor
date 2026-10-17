@@ -334,6 +334,61 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertFalse((self.root/'device.json').exists())
         restarted.release()
 
+    def test_next_login_resumes_previously_authorized_delete_checkpoint(self):
+        # A prior explicit logout saved deletePending but could not unlink the
+        # metadata. Reopening must not require deleting the profile manually.
+        self.activate()
+        original_remove = self.provider._metadata.remove
+        self.provider._metadata.remove = Mock(side_effect=PermissionError('synthetic-locked-metadata'))
+        with self.assertRaises(PermissionError):
+            self.provider.close()
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.assertFalse(self.crypto.exists)
+        self.provider._metadata.remove = original_remove
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
+
+    def test_pending_remote_revocation_never_starts_new_pairing(self):
+        self.activate()
+        original_request = self.transport.request
+        self.transport.request = lambda method, path, value=None: (
+            (_ for _ in ()).throw(AccessDenied('ACCESS_UNAVAILABLE'))
+            if path.endswith('/revoke') else original_request(method, path, value))
+        with self.assertRaises(AccessDenied):
+            self.provider.close()
+        self.assertEqual(self.provider.removal_status()['state'], 'revokedLocally')
+        self.transport.request = original_request
+        paired_before = sum(path == 'pairings' for _, path, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'SERVER_REVOCATION_PENDING')
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
+        self.assertFalse(self.crypto.exists)
+        self.transport.revoked = True  # Explicit remote action, not inferred from a timeout.
+        self.provider.open_official_login()
+        self.assertIsNotNone(self.provider._pending)
+        self.assertTrue(self.crypto.exists)
+
+    def test_unsafe_key_checkpoint_is_never_automatically_replaced(self):
+        self.provider.open_official_login()
+        self.provider._pending = None
+        self.provider._key.close()
+        self.provider._key = None
+        state = {**self.provider._state, 'state': 'deletePending', 'serverRevoked': True}
+        self.provider._state = state
+        self.provider._metadata.save(state)
+        self.crypto.properties['Export Policy'] = b'\\x01\\x00\\x00\\x00'
+        paired_before = sum(path == 'pairings' for _, path, _ in self.transport.calls)
+        with self.assertRaises(AccessDenied) as caught:
+            self.provider.open_official_login()
+        self.assertEqual(caught.exception.code, 'ACCESS_CLEANUP_PENDING')
+        self.assertTrue(self.crypto.exists)
+        self.assertEqual(self.provider.removal_status()['state'], 'deletePending')
+        self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), paired_before)
+
     def test_policy_failure_is_never_treated_as_an_already_deleted_key(self):
         self.activate()
         self.provider._key.close()
