@@ -227,5 +227,32 @@ class AnnualParserTests(unittest.TestCase):
         self.assertEqual(parse_annual_html(css, "TESTE-A", 2026).records, self.clean.records)
 
 
+class StudentHeaderByLabelTests(unittest.TestCase):
+    """Since 10/2026 some Smecel cards append a value after Data da matrícula."""
+    END = "Data da matrícula: <strong>[não coletado]</strong>"
+
+    def parse(self, html):
+        snapshot = parse_annual_html(html, "TESTE-A", 2026)
+        return snapshot, Counter(i.code for i in snapshot.issues if i.severity == "error")
+
+    def test_trailing_extra_value_keeps_the_student(self):
+        html = build_fixture(include_edge_cases=False).replace(
+            self.END, self.END + "<br><strong>SITUAÇÃO SINTÉTICA</strong>", 2)
+        snapshot, errors = self.parse(html)
+        self.assertNotIn("STUDENT_HEADER_INVALID", errors)
+        self.assertNotIn("STUDENT_NAME_MISSING", errors)
+        self.assertEqual(snapshot.students[0].display_name, "Aluno sintético 001")
+        self.assertEqual(snapshot.students[1].display_name, "Aluno sintético 002")
+
+    def test_missing_reordered_or_repeated_labels_fail_closed(self):
+        base = build_fixture(include_edge_cases=False)
+        for html in (base.replace("Nascimento: <strong>[não coletado]</strong><br>", "", 1),
+                     base.replace("Turma:", "Classe:", 1),
+                     base.replace(self.END, self.END + "<br>Turma: <strong>X</strong>", 1),
+                     base.replace(self.END, self.END + "".join("<strong>x</strong>" for _ in range(4)), 1)):
+            _, errors = self.parse(html)
+            self.assertIn("STUDENT_HEADER_INVALID", errors)
+
+
 if __name__ == "__main__":
     unittest.main()
