@@ -28,7 +28,10 @@ Pausa local interrompe o trabalho deste PC; pausa escolar é CAS no servidor.
 Sessão Smecel expirada: com o acesso salvo (DPAPI, só leitura pelo worker), o
 Coletor entra sozinho uma vez por coleta; senha recusada para a coleta até o
 acesso ser corrigido, com aviso ao lado do relógio, sem tentar em loop.
-Lista/contexto/ano e diário/URL exatos são revalidados antes de cada captura.
+Lista/contexto/ano e diário/URL exatos são revalidados antes de cada captura
+(a lista, por até 5 min na mesma sessão enquanto ninguém mais navegou a janela).
+Status, concessão, leitura e status pós-leitura de uma turma ficam num único
+bloco verificado online na entrada e na saída; o envio abre o seu próprio.
 Não se seguem vínculos de alunos para buscar identidade. Contexto observado não
 é prova criptográfica de identidade da conta Smecel.
 
