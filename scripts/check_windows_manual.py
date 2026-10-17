@@ -111,42 +111,44 @@ def worker(args):
         try:
             checks['native_window_visible'] = bool(window.native.Visible)
             alpha="[...document.querySelectorAll('input')].find(n=>n.getAttribute('aria-label')==='Selecionar Turma sintética Alpha')"
-            year_ready="(()=>{const label=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()==='Ano letivo no Smecel');return document.getElementById(label?.htmlFor)?.disabled===false;})()"
+            year_ready="(()=>{const label=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()==='Ano letivo');return document.getElementById(label?.htmlFor)?.disabled===false;})()"
+            load_ready="[...document.querySelectorAll('button')].some(n=>['Carregar turmas do Smecel','Recarregar turmas'].includes(n.textContent.trim())&&!n.disabled)"
+            def load_classes(proof_file, wait_for):
+                # One click opens Edge and reads the list. The synthetic login
+                # happens just after opening; without a saved access the operator
+                # signs in and clicks again, exactly as the UI tells them.
+                window.evaluate_js("(() => {const n=[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Carregar turmas do Smecel');if(n&&!n.disabled)n.click();return true;})()")
+                deadline=time.monotonic()+20
+                while not proof_file.exists() and time.monotonic()<deadline:time.sleep(0.05)
+                smoke.wait_js(window,"!!("+wait_for+") || ("+load_ready+")",50)
+                if not window.evaluate_js("!!("+wait_for+")"):
+                    window.evaluate_js("(() => {const n=[...document.querySelectorAll('button')].find(n=>['Carregar turmas do Smecel','Recarregar turmas'].includes(n.textContent.trim()));if(n&&!n.disabled)n.click();return true;})()")
+                    smoke.wait_js(window,wait_for,50)
             smoke.wait_js(window, '!!window.pywebview?.api.prepare_manual_login && '+year_ready)
             checks['prepared_without_browser']=not drivers
-            checks['opening_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Entrar no Smecel')?.disabled===true")
-            controls.checkbox(window,'Autorizo abrir o Smecel neste computador.')
-            controls.click(window,'Entrar no Smecel')
-            smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Carregar turmas'&&!n.disabled)",50)
-            checks['separate_edge_started']=len(drivers)==1 and drivers[0]._process is not None
+            # Opening Edge requires the operator's explicit click on the button.
+            checks['opening_requires_consent']=not drivers and window.evaluate_js("[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Carregar turmas do Smecel')")
             progress=args.output.parent/'post-open-navigation.json'
-            deadline=time.monotonic()+20
-            while not progress.exists() and time.monotonic()<deadline:time.sleep(0.05)
+            load_classes(progress, alpha)
+            checks['separate_edge_started']=len(drivers)==1 and drivers[0]._process is not None
             proof=json.loads(progress.read_text(encoding='utf-8')) if progress.exists() else {}
             checks['post_open_synthetic_login_navigation']=proof=={'post_open_navigation':True,'synthetic_login_received':True}
             if not checks['post_open_synthetic_login_navigation']:smoke.fail('post_open_navigation_blocked_before_capture')
-            controls.click(window,'Carregar turmas')
-            smoke.wait_js(window,alpha)
             checks['classes_discovered_without_ct']=not window.evaluate_js("document.body.textContent.includes('Código numérico da turma no Smecel')")
             window.evaluate_js(alpha+".click();true")
             smoke.wait_js(window,"[...document.querySelectorAll('option')].some(n=>n.value==='11') && !document.querySelector('fieldset.class-choices').disabled")
-            controls.click(window,'Encerrar sessão e descartar prévia')
+            controls.click(window,'Fechar o Smecel')
             smoke.wait_js(window,year_ready)
             progress.unlink(missing_ok=True)
-            controls.checkbox(window,'Autorizo abrir o Smecel neste computador.')
-            controls.click(window,'Entrar no Smecel')
-            smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Carregar turmas'&&!n.disabled)",50)
-            deadline=time.monotonic()+20
-            while not progress.exists() and time.monotonic()<deadline:time.sleep(0.05)
+            load_classes(progress, alpha+"?.checked")
             if not progress.exists():smoke.fail('second_login_not_completed')
-            controls.click(window,'Carregar turmas')
-            smoke.wait_js(window,alpha+"?.checked")
             stored=json.loads((args.output.parent/'settings/class-selection.json').read_text(encoding='utf-8'))
             checks['selection_persisted_and_revalidated']=stored['profiles'][0]['selected_class_ids']==['11'] and set(stored)=={'schemaVersion','localRevision','profiles'}
-            checks['reading_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Ler diário manualmente')?.disabled===true")
+            window.evaluate_js("document.querySelector('details.manual-check').open=true;true")
+            checks['reading_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Ler diário')?.disabled===true")
             consent='Autorizo ler este diário só para conferir aqui.'
             controls.checkbox(window,consent)
-            controls.click(window,'Ler diário manualmente')
+            controls.click(window,'Ler diário')
             smoke.wait_js(window,"document.body.textContent.includes('Prévia da turma') && document.body.textContent.includes('Leitura manual do Smecel')")
             checks['manual_preview_rendered']=True
             checks['transmission_blocked']=window.evaluate_js("document.body.textContent.includes('Envio desativado') && document.querySelector('.summary-grid>div:last-child strong')?.textContent==='0'")
@@ -158,7 +160,7 @@ def worker(args):
               });return true;
             })()""")
             controls.checkbox(window, consent)
-            controls.click(window, 'Ler diário manualmente')
+            controls.click(window, 'Ler diário')
             capture_marker = args.output.parent / 'second-capture-started.json'
             deadline = time.monotonic() + 10
             while not capture_marker.exists() and time.monotonic() < deadline:
@@ -166,7 +168,7 @@ def worker(args):
             if not capture_marker.exists():
                 smoke.fail('second_capture_not_started')
             cancel_started = time.monotonic()
-            controls.click(window, 'Encerrar sessão e descartar prévia')
+            controls.click(window, 'Fechar o Smecel')
             smoke.wait_js(window, "!document.body.textContent.includes('Prévia da turma') && "+year_ready)
             report['cancel_elapsed_ms'] = round((time.monotonic() - cancel_started) * 1000)
             time.sleep(1.5)
@@ -181,8 +183,8 @@ def worker(args):
             report['failure'] = str(error) if isinstance(error, smoke.SmokeFailure) else 'manual_native_worker_failed'
             report['diagnostic'] = window.evaluate_js("""(() => ({
               previewVisible: document.body.textContent.includes('Prévia da turma'),
-              prepareDisabled: [...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Entrar no Smecel')?.disabled ?? null,
-              closeVisible: [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Encerrar sessão e descartar prévia'),
+              prepareDisabled: [...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Carregar turmas do Smecel')?.disabled ?? null,
+              closeVisible: [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Fechar o Smecel'),
               errorVisible: !!document.querySelector('.error-message'),
             }))()""")
             report['driver_diagnostic'] = [{'stopped': d._process is None,

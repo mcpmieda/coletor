@@ -20,12 +20,14 @@ ENTRAR E PREPARAR
 2. Confirme na janela do Windows a autorização deste computador.
    A chave fica protegida pelo Windows; TPM é padrão. Software exige outra confirmação.
    A senha e os tokens Microsoft não ficam no Coletor.
-3. Use Entrar no Smecel e faça o login diretamente na janela separada do Edge.
-   Não use seu perfil pessoal do Edge. Para a coleta entrar sozinha, salve o
-   e-mail e a senha do Smecel em Acesso ao Smecel; ficam protegidos pelo Windows.
-4. Clique Carregar turmas e selecione as turmas pelos nomes observados na lista.
-   Escolhas ficam salvas por ano/contexto e são revalidadas a cada captura.
-5. Use Ativar coleta neste computador.
+3. Em Acesso ao Smecel, salve o e-mail e a senha do Smecel; ficam protegidos
+   pelo Windows e permitem que o Coletor entre sozinho.
+4. Em Turmas deste computador, clique Carregar turmas do Smecel. O Coletor abre
+   uma janela separada do Edge, entra com o acesso salvo e mostra a lista.
+   Marque as turmas (ou Marcar todas). Escolhas ficam salvas por ano/contexto
+   e são revalidadas a cada captura. Sem acesso salvo, entre na janela do Edge
+   e clique Carregar turmas do Smecel de novo.
+5. Use Ativar coleta automática.
    O Windows pergunta se pode guardar sessão Smecel e fila cifradas para este usuário.
    Recusar mantém os dados somente na memória até fechar o programa.
 
