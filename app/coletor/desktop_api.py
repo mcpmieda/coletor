@@ -123,7 +123,61 @@ class DesktopApi(PreviewApi):
             return {'error': 'Não foi possível concluir. Confira o estado do coletor e a conexão.', 'code': 'unavailable'}
 
     def get_collector_status(self):
-        return self._operational(self._collector.refresh)
+        result = self._operational(self._collector.refresh)
+        if 'error' not in result: self._remember_status(result)
+        return result
+
+    # ---- Instant opening: a non-secret summary of the last verified status.
+    _SNAPSHOT_FIELDS = ('state', 'code', 'active', 'localPaused', 'persistent', 'credential', 'selectedClasses',
+                        'classesMode', 'settings', 'lastReceipt')
+
+    def _snapshot_path(self):
+        return self._settings._directory / 'ui-snapshot.json'
+
+    def _remember_status(self, status):
+        """Masked account, counts, schedule and last receipt only; never the
+        password, tokens, students or diary content."""
+        import json, tempfile
+        try:
+            clean = {k: status.get(k) for k in self._SNAPSHOT_FIELDS}
+            payload = json.dumps({'version': 1, 'savedAt': time.time(), 'status': clean}, ensure_ascii=False)
+            if len(payload) > 64_000: return
+            directory = self._snapshot_path().parent
+            directory.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix='.ui-snapshot-', suffix='.tmp', dir=directory)
+            try:
+                with os.fdopen(descriptor, 'w', encoding='utf-8') as file: file.write(payload)
+                os.replace(temporary, self._snapshot_path())
+            finally:
+                if os.path.exists(temporary): os.unlink(temporary)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def _forget_status(self):
+        try: self._snapshot_path().unlink(missing_ok=True)
+        except OSError: pass
+
+    def get_startup_snapshot(self):
+        """Read locally, without the network, so the window opens ready. The
+        live status replaces it moments later; nothing here authorizes work."""
+        import json
+        paired = False
+        try:
+            device = json.loads((self._settings._directory / 'device.json').read_text(encoding='utf-8'))
+            paired = isinstance(device, dict) and device.get('state') == 'active'
+        except (OSError, ValueError):
+            pass
+        status = None
+        if paired:
+            try:
+                cached = json.loads(self._snapshot_path().read_text(encoding='utf-8'))
+                if isinstance(cached, dict) and cached.get('version') == 1 and isinstance(cached.get('status'), dict):
+                    status = {k: cached['status'].get(k) for k in self._SNAPSHOT_FIELDS}
+            except (OSError, ValueError):
+                pass
+        try: history = self._collector.recent_history(200) if paired else []
+        except Exception: history = []
+        return {'paired': paired, 'status': status, 'history': history, 'settings': self._read_settings()['settings']}
 
     def activate_collector(self):
         result = self._operational(self._collector.activate)
@@ -140,7 +194,10 @@ class DesktopApi(PreviewApi):
 
     def save_source_credential(self, email, password):
         # Write-only: the window never receives the saved password back.
-        try: return self._collector.save_credential(email, password)
+        try:
+            result = self._collector.save_credential(email, password)
+            self._remember_status(result)
+            return result
         except StorageError as error:
             if error.code == 'SOURCE_CREDENTIAL_INVALID':
                 return {'error': 'Confira o e-mail e a senha do Smecel.', 'code': error.code}
@@ -149,10 +206,12 @@ class DesktopApi(PreviewApi):
             return {'error': 'Não foi possível salvar o acesso do Smecel.', 'code': 'unavailable'}
 
     def forget_source_credential(self):
-        return self._operational(self._collector.forget_credential)
+        result = self._operational(self._collector.forget_credential)
+        if 'error' not in result: self._remember_status(result)
+        return result
 
     def get_collector_history(self):
-        return {'entries': self._collector.recent_history(50)}
+        return {'entries': self._collector.recent_history(200)}
 
     def save_shared_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_settings(revision, schedule))
@@ -259,6 +318,7 @@ class DesktopApi(PreviewApi):
             if blocked is not None: return blocked
             try:
                 self._access.logout()
+                self._forget_status()
                 self._resume.set(False)
                 self._collector.cancel(purge=True)
                 self._manual_session.close()
@@ -390,6 +450,18 @@ class DesktopApi(PreviewApi):
     def save_theme(self, theme):
         return self._save("theme", theme)
 
+    def save_browser_preference(self, visible):
+        if type(visible) is not bool: return {"error": "Preferência inválida."}
+        return self._save("browser", {"visible": visible})
+
+    def save_classes_mode(self, mode):
+        result = self._save("classes", {"mode": mode})
+        if "error" not in result:
+            # The count shown in Tarefas follows the new mode at once.
+            status = self._operational(self._collector.public_status)
+            if "error" not in status: self._remember_status(status)
+        return result
+
 
 
 def _protected(method):
@@ -408,7 +480,7 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_manual_class_selection", "clear_manual_class_selection", "capture_selected_class",
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
-              "save_schedule", "save_theme", "get_collector_history"):
+              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
 for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',
