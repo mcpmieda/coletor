@@ -83,6 +83,18 @@ class ManualSession:
         self._selections = ClassSelectionStore(settings_directory)
         self._preferences = LocalSettings(settings_directory)
 
+    def _browser_hidden(self, can_sign_in):
+        """Hidden only when the Coletor can sign in by itself; a person must be
+        able to see the Smecel window to sign in manually."""
+        try: visible = self._preferences.read()["settings"]["browser"]["visible"]
+        except (OSError, KeyError, TypeError): visible = False
+        return can_sign_in and not visible
+
+    def _new_driver(self, can_sign_in):
+        driver = self._factory()
+        if hasattr(driver, "hidden"): driver.hidden = self._browser_hidden(can_sign_in)
+        return driver
+
     def _all_classes(self):
         """'Todas as turmas' (default): every class of the current list, so a new
         Smecel class is collected without anyone choosing it."""
@@ -237,7 +249,7 @@ class ManualSession:
             if saved is None and credential is None: raise SessionError('SOURCE_LOGIN_REQUIRED')
             prepared = self.prepare_login(2026)
             # Supply restored state before the isolated worker is started.
-            driver = self._factory()
+            driver = self._new_driver(credential is not None)
             if saved is not None: driver._storage_state = saved
             with self._lock:
                 self._check(prepared['generation'], True, {'prepared'})
@@ -293,12 +305,12 @@ class ManualSession:
         if type(generation) is not int or generation != self._generation or self._state not in states:
             raise SessionError("A sessão mudou. Prepare e confira a turma novamente.")
 
-    def open(self, generation, confirmed):
+    def open(self, generation, confirmed, can_sign_in=False):
         with self._lock:
             self._check(generation, confirmed, {"prepared"})
             self._state = "opening"
             try:
-                driver = self._factory()
+                driver = self._new_driver(can_sign_in)
             except Exception:
                 self._state = "prepared"
                 raise SessionError("Não foi possível preparar o navegador isolado.") from None

@@ -316,7 +316,10 @@ class DesktopApi(PreviewApi):
             return {"error": "Confira a etapa, a turma e o ano. Se a sessão não responder, feche-a e prepare novamente."}
 
     def open_manual_session(self, generation, confirmed):
-        return self._manual(lambda: self._manual_session.open(generation, confirmed))
+        # With a saved Smecel access the Coletor signs in itself, so the window
+        # can stay hidden (Ajustes); otherwise the person signs in in Edge.
+        can_sign_in = bool(self._collector.saved_credential())
+        return self._manual(lambda: self._manual_session.open(generation, confirmed, can_sign_in))
 
     def close_manual_session(self):
         if self._collector.public_status()['active']:

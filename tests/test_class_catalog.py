@@ -129,4 +129,29 @@ class NoPrintTests(unittest.TestCase):
         self.assertIn("'print'",NO_PRINT_JS);self.assertIn('writable: false',NO_PRINT_JS)
 
 
+class HiddenBrowserTests(unittest.TestCase):
+    def test_hidden_edge_uses_headless_engine_and_visible_identity(self):
+        from coletor.manual_worker import browser_options, visible_identity
+        class Proxy: configuration = {"server": "http://127.0.0.1:1"}
+        self.assertFalse(browser_options(Proxy())["headless"])
+        self.assertTrue(browser_options(Proxy(), True)["headless"])
+        self.assertIn("--disable-quic", browser_options(Proxy(), True)["args"])  # same isolation flags
+        class Browser: version = "155.0.4283.62"
+        self.assertEqual(visible_identity(Browser(), False), {})
+        agent = visible_identity(Browser(), True)["user_agent"]
+        self.assertIn("Edg/155.0.0.0", agent); self.assertNotIn("Headless", agent)
+
+    def test_hidden_only_when_the_coletor_can_sign_in_by_itself(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        from coletor.manual_session import ManualSession
+        class Driver: hidden = None
+        with tempfile.TemporaryDirectory() as directory:
+            session = ManualSession(Driver, directory)
+            self.assertTrue(session._new_driver(True).hidden)
+            self.assertFalse(session._new_driver(False).hidden)  # a person must sign in
+            LocalSettings(directory).update("browser", {"visible": True})
+            self.assertFalse(session._new_driver(True).hidden)
+
+
 if __name__=='__main__':unittest.main()
