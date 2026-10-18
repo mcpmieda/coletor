@@ -42,7 +42,7 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertEqual(actual["theme"], "dark")
         self.assertEqual(actual["fox"], {"version": 1, "show": False, "animate": False})
         self.assertEqual(set(p.name for p in self.directory.iterdir()), {"settings.json", "settings.lock"})
-        self.assertEqual(set(actual), {"schemaVersion", "schedule", "theme", "fox"})
+        self.assertEqual(set(actual), {"schemaVersion", "schedule", "theme", "fox", "browser", "classes"})
 
     def test_invalid_payload_never_replaces_previous_settings(self):
         self.store.update("theme", "dark")
@@ -125,6 +125,27 @@ class LocalSettingsTests(unittest.TestCase):
             result = api.get_local_settings()
         self.assertEqual(result["settings"], default_settings())
         self.assertNotIn("DO_NOT_ECHO", json.dumps(result))
+
+class NewPreferenceTests(unittest.TestCase):
+    def test_older_files_get_minimal_intervention_defaults(self):
+        from coletor.local_settings import validate_settings
+        old = {"schemaVersion": 1, "schedule": None, "theme": "dark", "fox": {"version": 1, "show": True, "animate": True}}
+        clean = validate_settings(old)
+        self.assertEqual(clean["browser"], {"visible": False})
+        self.assertEqual(clean["classes"], {"mode": "all"})
+        self.assertEqual(clean["theme"], "dark")
+
+    def test_browser_and_class_preferences_are_strict(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            settings = LocalSettings(directory)
+            self.assertEqual(settings.update("browser", {"visible": True})["browser"], {"visible": True})
+            self.assertEqual(settings.update("classes", {"mode": "chosen"})["classes"], {"mode": "chosen"})
+            for field, value in (("browser", {"visible": "yes"}), ("classes", {"mode": "some"}), ("browser", {})):
+                with self.assertRaises(ValueError): settings.update(field, value)
+            self.assertEqual(settings.read()["settings"]["browser"], {"visible": True})
+
 
 if __name__ == "__main__":
     unittest.main()

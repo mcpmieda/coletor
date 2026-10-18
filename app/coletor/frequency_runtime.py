@@ -299,7 +299,8 @@ class FrequencyRuntime:
         try: selected = count() if count else None
         except Exception: selected = None
         with self._lock:
-            return {'selectedClasses': selected, 'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
+            return {'selectedClasses': selected, 'classesMode': 'all' if selected is None and count else 'chosen',
+                    'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
                     'persistent': self._storage.persistent, 'progress': dict(self._progress),
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,

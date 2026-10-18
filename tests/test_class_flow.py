@@ -29,6 +29,9 @@ class Driver:
 class ClassFlowTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        # These scenarios cover hand-picked classes ('Escolher turmas').
+        from coletor.local_settings import LocalSettings
+        LocalSettings(self.temp.name).update('classes',{'mode':'chosen'})
         self.driver=Driver();self.session=ManualSession(lambda:self.driver,self.temp.name)
     def enter(self,year=2026):
         prepared=self.session.prepare_login(year)
@@ -86,5 +89,25 @@ class ClassFlowTests(unittest.TestCase):
         self.session.save_choices(gen,['12'],listed['selection_revision'])
         gen=self.enter(2026);self.assertEqual(self.session.discover(gen,True)['selected_class_ids'],['11'])
 
+
+
+
+class AllClassesTests(unittest.TestCase):
+    """Default 'Todas as turmas': no one has to choose, and new classes join."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.driver=Driver();self.session=ManualSession(lambda:self.driver,self.temp.name)
+    def test_every_listed_class_is_selected_and_new_ones_join(self):
+        self.assertTrue(self.session.has_saved_class_selection())
+        self.assertIsNone(self.session.saved_class_count())
+        self.driver.ids=['11']
+        prepared=self.session.prepare_login(2026);self.session.open(prepared['generation'],True)
+        listed=self.session.discover(prepared['generation'],True)
+        self.assertEqual(listed['selected_class_ids'],['11'])
+        self.driver.ids=['11','12']  # A class created later in Smecel.
+        listed=self.session.discover(prepared['generation'],True)
+        self.assertEqual(listed['selected_class_ids'],['11','12'])
+        self.assertEqual(self.session.capture_selected(prepared['generation'],'12',True)['session']['state'],'preview_ready')
+        self.assertEqual(self.driver.captures,['12'])
 
 if __name__=='__main__':unittest.main()
