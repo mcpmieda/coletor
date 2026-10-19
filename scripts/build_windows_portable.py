@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
 import json
+import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
@@ -68,6 +69,20 @@ def ui_license_notices(destination):
     (destination / "LICENCAS-UI.txt").write_text("\n\n-----\n\n".join(notices), encoding="utf-8")
 
 
+LAUNCHER = "ColetorFrequencia.exe"
+
+
+def build_launcher(runtime):
+    """Name and fox icon for Windows (Task Manager, right-click menu): a small
+    .NET Framework launcher, compiled by the csc.exe that ships with Windows,
+    that starts the untouched, PSF-signed pythonw.exe beside it."""
+    csc = Path(os.environ.get("WINDIR", "C:/Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    subprocess.run([str(csc), "-nologo", "-target:winexe", "-optimize", "-utf8output",
+                    "-win32icon:" + str(ROOT / "app/assets/fox-icons/fox-idle.ico"),
+                    "-out:" + str(runtime / LAUNCHER), str(ROOT / "installer/launcher/ColetorFrequencia.cs")],
+                   check=True, stdout=subprocess.DEVNULL)
+
+
 def build(output, source_commit):
     if sys.platform != "win32" or platform.machine().lower() not in {"amd64", "x86_64"}:
         raise SystemExit("Build requires Windows x64")
@@ -101,9 +116,10 @@ def build(output, source_commit):
     shutil.copyfile(ROOT / "app/coletor/preview-limits.json", app / "preview-limits.json")
     shutil.copytree(ROOT / "app/assets", runtime / "app/assets")
     shutil.copytree(ROOT / "ui/dist", runtime / "ui/dist")
+    build_launcher(runtime)
     shutil.copyfile(ROOT / "docs/PORTABLE_LEIA_ME.txt", bundle / "LEIA-ME.txt")
     (bundle / "Abrir Coletor.cmd").write_bytes(
-        b'@echo off\r\nsetlocal\r\nstart "Coletor de Frequencia" "%~dp0programa\\pythonw.exe" -B -m coletor.portable\r\n')
+        b'@echo off\r\nsetlocal\r\nstart "Coletor de Frequencia" "%~dp0programa\\ColetorFrequencia.exe"\r\n')
     (bundle / "Remover acesso deste PC.cmd").write_bytes(
         b'@echo off\r\nsetlocal\r\necho Feche o Coletor antes de continuar.\r\n'
         b'echo Esta acao retira o acesso deste PC; nao apaga a pasta nem configuracoes.\r\n'
