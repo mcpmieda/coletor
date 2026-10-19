@@ -119,13 +119,25 @@ async def sign_in(page, email, password, *, reload=True):
     return {"logged_in": await page.locator('input[type="password"]').count() == 0}
 
 
-def browser_options(proxy):
-    return {"channel": "msedge", "headless": False, "chromium_sandbox": True,
+def browser_options(proxy, hidden=False):
+    # Hidden = Edge's own headless mode: same engine, profile isolation, proxy
+    # gate and request filter; only the window is not shown.
+    return {"channel": "msedge", "headless": bool(hidden), "chromium_sandbox": True,
             "proxy": proxy.configuration,
             # HTTP/1.1 tunnels cannot coalesce an approved TLS connection across
             # origins; QUIC and non-proxied WebRTC UDP must not bypass the gate.
             "args": ["--disable-http2", "--disable-quic",
                      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]}
+
+
+def visible_identity(browser, hidden):
+    """Hidden Edge announces itself as 'HeadlessEdg'; present the same user agent
+    a visible Edge of this exact version sends (Chromium reduced format)."""
+    if not hidden: return {}
+    version = browser.version
+    major = version.split(".", 1)[0]
+    return {"user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                           f"Chrome/{major}.0.0.0 Safari/537.36 Edg/{major}.0.0.0")}
 
 
 def worker_environment(temporary):
@@ -185,8 +197,9 @@ def configure_page(page):
 
 
 class BrowserWorker:
-    def __init__(self, storage_state=None):
+    def __init__(self, storage_state=None, hidden=False):
         self._storage_state = storage_state
+        self.hidden = hidden
         self._process = None
         self._job = None
         self._temporary = None
@@ -249,7 +262,7 @@ class BrowserWorker:
                                              creationflags=subprocess.CREATE_NO_WINDOW)
             # Child waits on stdin: containment is established before any Edge/Node child.
             self._job.assign(self._process.pid)
-        initial = {"command": "open", "url": url}
+        initial = {"command": "open", "url": url, "hidden": self.hidden is True}
         if self._storage_state is not None: initial['storage_state'] = self._storage_state
         self._rpc(initial)
         self._storage_state = None
@@ -335,10 +348,11 @@ async def browser_session(initial):
         raise ValueError("invalid_scope")
     with OriginProxy() as proxy:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(**browser_options(proxy))
+            browser = await playwright.chromium.launch(**browser_options(proxy, initial.get("hidden") is True))
             try:
                 context = await browser.new_context(accept_downloads=False, service_workers="block",
-                                                    storage_state=initial.get('storage_state'))
+                                                    storage_state=initial.get('storage_state'),
+                                                    **visible_identity(browser, initial.get("hidden") is True))
                 page = await context.new_page()
                 configure_page(page)
                 await verify_proxy(page, proxy)

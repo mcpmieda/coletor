@@ -17,8 +17,8 @@ spec = importlib.util.spec_from_file_location('settings_smoke', Path(__file__).w
 controls = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controls)
 CHECKS = ['bundled_application', 'native_window_visible', 'prepared_without_browser', 'opening_requires_consent',
-          'separate_edge_started', 'post_open_synthetic_login_navigation', 'classes_discovered_without_ct', 'selection_persisted_and_revalidated', 'no_student_link_opened', 'reading_requires_consent', 'manual_preview_rendered', 'transmission_blocked',
-          'cancelled_result_hidden', 'session_scope_cleared', 'browser_processes_stopped', 'owned_temporaries_removed', 'window_closed']
+          'separate_edge_started', 'post_open_synthetic_login_navigation', 'classes_discovered_without_ct', 'selection_persisted_and_revalidated', 'no_student_link_opened',
+          'closing_choice_ends_session', 'session_scope_cleared', 'browser_processes_stopped', 'owned_temporaries_removed', 'window_closed']
 
 
 def synthetic_browser(progress):
@@ -124,6 +124,14 @@ def worker(args):
                 if not window.evaluate_js("!!("+wait_for+")"):
                     window.evaluate_js("(() => {const n=[...document.querySelectorAll('button')].find(n=>['Carregar turmas do Smecel','Recarregar turmas'].includes(n.textContent.trim()));if(n&&!n.disabled)n.click();return true;})()")
                     smoke.wait_js(window,wait_for,50)
+            # Classes are chosen in Ajustes > Turmas > Somente as escolhidas > Escolher turmas.
+            nav="document.querySelector('nav[aria-label=\"Navegação principal\"]')"
+            smoke.wait_js(window, '!!'+nav)
+            window.evaluate_js("(() => {const n=[..."+nav+".querySelectorAll('button')].find(n=>n.textContent.trim()==='Ajustes');n.click();return true;})()")
+            smoke.wait_js(window, "[...document.querySelectorAll('h1')].some(n=>n.textContent.trim()==='Ajustes')")
+            controls.click(window, 'Somente as escolhidas')
+            smoke.wait_js(window, "[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Escolher turmas'&&!n.disabled)")
+            controls.click(window, 'Escolher turmas')
             smoke.wait_js(window, '!!window.pywebview?.api.prepare_manual_login && '+year_ready)
             checks['prepared_without_browser']=not drivers
             # Opening Edge requires the operator's explicit click on the button.
@@ -136,7 +144,7 @@ def worker(args):
             if not checks['post_open_synthetic_login_navigation']:smoke.fail('post_open_navigation_blocked_before_capture')
             checks['classes_discovered_without_ct']=not window.evaluate_js("document.body.textContent.includes('Código numérico da turma no Smecel')")
             window.evaluate_js(alpha+".click();true")
-            smoke.wait_js(window,"[...document.querySelectorAll('option')].some(n=>n.value==='11') && !document.querySelector('fieldset.class-choices').disabled")
+            smoke.wait_js(window,"!document.querySelector('fieldset.class-choices').disabled && !!("+alpha+")?.checked")
             controls.click(window,'Fechar o Smecel')
             smoke.wait_js(window,year_ready)
             progress.unlink(missing_ok=True)
@@ -144,35 +152,13 @@ def worker(args):
             if not progress.exists():smoke.fail('second_login_not_completed')
             stored=json.loads((args.output.parent/'settings/class-selection.json').read_text(encoding='utf-8'))
             checks['selection_persisted_and_revalidated']=stored['profiles'][0]['selected_class_ids']==['11'] and set(stored)=={'schemaVersion','localRevision','profiles'}
-            window.evaluate_js("document.querySelector('details.manual-check').open=true;true")
-            checks['reading_requires_consent']=window.evaluate_js("[...document.querySelectorAll('button')].find(n=>n.textContent.trim()==='Ler diário')?.disabled===true")
-            consent='Autorizo ler este diário só para conferir aqui.'
-            controls.checkbox(window,consent)
-            controls.click(window,'Ler diário')
-            smoke.wait_js(window,"document.body.textContent.includes('Prévia da turma') && document.body.textContent.includes('Leitura manual do Smecel')")
-            checks['manual_preview_rendered']=True
-            checks['transmission_blocked']=window.evaluate_js("document.body.textContent.includes('Envio desativado') && document.querySelector('.summary-grid>div:last-child strong')?.textContent==='0'")
             checks['no_student_link_opened']=not (args.output.parent/'unexpected-student-navigation.json').exists()
-            window.evaluate_js("""(() => {
-              const api=window.pywebview.api, close=api.close_manual_session.bind(api);
-              api.close_manual_session=(...args)=>close(...args).then(r=>{
-                window.__closeDiagnosis={ok:!('error' in r),state:r.state??null,pending:r.cleanup_pending??null,message:r.error??null};return r;
-              });return true;
-            })()""")
-            controls.checkbox(window, consent)
-            controls.click(window, 'Ler diário')
-            capture_marker = args.output.parent / 'second-capture-started.json'
-            deadline = time.monotonic() + 10
-            while not capture_marker.exists() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            if not capture_marker.exists():
-                smoke.fail('second_capture_not_started')
-            cancel_started = time.monotonic()
-            controls.click(window, 'Fechar o Smecel')
-            smoke.wait_js(window, "!document.body.textContent.includes('Prévia da turma') && "+year_ready)
-            report['cancel_elapsed_ms'] = round((time.monotonic() - cancel_started) * 1000)
-            time.sleep(1.5)
-            checks['cancelled_result_hidden'] = window.evaluate_js("!document.body.textContent.includes('Prévia da turma')")
+            # Concluir (not "Fechar o Smecel") must end the Edge session it opened.
+            controls.click(window, 'Concluir')
+            smoke.wait_js(window, "!document.querySelector('[role=dialog]')")
+            window.evaluate_js("window.__manualStatus=null;window.pywebview.api.get_manual_session_status().then(r=>window.__manualStatus=r);true")
+            smoke.wait_js(window, '!!window.__manualStatus')
+            checks['closing_choice_ends_session']=window.evaluate_js("window.__manualStatus.state==='closed'") and all(d._process is None for d in drivers)
             window.evaluate_js("window.__manualStatus=null;window.pywebview.api.get_manual_session_status().then(r=>window.__manualStatus=r);true")
             smoke.wait_js(window, '!!window.__manualStatus')
             checks['session_scope_cleared'] = window.evaluate_js("window.__manualStatus.state==='closed' && window.__manualStatus.scope===null")

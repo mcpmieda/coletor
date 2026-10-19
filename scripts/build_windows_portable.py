@@ -139,9 +139,9 @@ def validate_tray_evidence(report):
     common = {"native_window_visible", "native_tray_registered", "native_menu_visible",
               "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
               "idle_motion_gentle", "window_icon_follows_fox", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops"}
-    extended = {"actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-                "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
-                "error_state_static_and_generic"}
+    extended = {"menu_header_shows_live_status", "menu_collect_and_pause_reach_collector", "actual_collection_state",
+                "collect_disabled_while_collecting", "reading_animation_bounded", "reduced_motion_stops_native_timer",
+                "error_state_static_and_generic", "menu_header_flags_error", "menu_notifications_and_logs"}
     close = {"active_collection_close_hides"}
     workers = report.get("workers", [])
     if (report.get("test") != "portable_windows_tray" or report.get("status") != "passed"
@@ -165,8 +165,7 @@ def validate_manual_evidence(report, browser=False):
                  "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
                  "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored'} if browser else
                 {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
-                 "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
+                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "closing_choice_ends_session", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
     if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
             or report.get("cleanup", {}).get("remaining_processes") != 0
             or report.get("real_network") is not False or report.get("real_credentials") is not False

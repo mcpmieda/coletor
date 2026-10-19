@@ -42,7 +42,7 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertEqual(actual["theme"], "dark")
         self.assertEqual(actual["fox"], {"version": 1, "show": False, "animate": False})
         self.assertEqual(set(p.name for p in self.directory.iterdir()), {"settings.json", "settings.lock"})
-        self.assertEqual(set(actual), {"schemaVersion", "schedule", "theme", "fox"})
+        self.assertEqual(set(actual), {"schemaVersion", "schedule", "theme", "fox", "browser", "classes", "notifications"})
 
     def test_invalid_payload_never_replaces_previous_settings(self):
         self.store.update("theme", "dark")
@@ -108,7 +108,7 @@ class LocalSettingsTests(unittest.TestCase):
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
         api = DesktopApi(self.directory, access=SyntheticAccess())
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "discard_local_pending_collection", "discard_pending_collection", "discover_manual_classes", "forget_source_credential", "get_collector_history", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_recovery_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_school_collection", "prepare_manual_login", "preview_html", "save_manual_class_selection", "save_schedule", "save_shared_schedule", "save_source_credential", "save_theme", "set_tray_context"])
+                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "discard_local_pending_collection", "discard_pending_collection", "discover_manual_classes", "forget_source_credential", "get_collector_history", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_recovery_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "get_startup_snapshot", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_school_collection", "prepare_manual_login", "preview_html", "save_browser_preference", "save_classes_mode", "save_manual_class_selection", "save_notifications", "save_schedule", "save_shared_schedule", "save_source_credential", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())
@@ -126,6 +126,78 @@ class LocalSettingsTests(unittest.TestCase):
         self.assertEqual(result["settings"], default_settings())
         self.assertNotIn("DO_NOT_ECHO", json.dumps(result))
 
+class NewPreferenceTests(unittest.TestCase):
+    def test_older_files_get_minimal_intervention_defaults(self):
+        from coletor.local_settings import validate_settings
+        old = {"schemaVersion": 1, "schedule": None, "theme": "dark", "fox": {"version": 1, "show": True, "animate": True}}
+        clean = validate_settings(old)
+        self.assertEqual(clean["browser"], {"visible": False})
+        self.assertEqual(clean["classes"], {"mode": "all"})
+        self.assertEqual(clean["theme"], "dark")
+
+    def test_browser_and_class_preferences_are_strict(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            settings = LocalSettings(directory)
+            self.assertEqual(settings.update("browser", {"visible": True})["browser"], {"visible": True})
+            self.assertEqual(settings.update("classes", {"mode": "chosen"})["classes"], {"mode": "chosen"})
+            for field, value in (("browser", {"visible": "yes"}), ("classes", {"mode": "some"}), ("browser", {})):
+                with self.assertRaises(ValueError): settings.update(field, value)
+            self.assertEqual(settings.read()["settings"]["browser"], {"visible": True})
+
+
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class UpgradeKeepsChosenClassesTests(unittest.TestCase):
+    def test_install_that_chose_classes_keeps_its_choice_after_the_upgrade(self):
+        import json, tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "settings.json").write_text(json.dumps(
+                {"schemaVersion": 1, "schedule": None, "theme": "dark", "fox": {"version": 1, "show": True, "animate": True}}), encoding="utf-8")
+            (folder / "class-selection.json").write_text(json.dumps(
+                {"schemaVersion": 2, "localRevision": 1, "profiles": [{"selected_class_ids": ["11"], "scope": {"origin": "https://www.smecel.com.br", "list_path": "/sistema/escola/turmaListar.php", "year": 2026, "context_key": "synthetic"}}]}), encoding="utf-8")
+            self.assertEqual(LocalSettings(folder).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_real_v1_selection_file_keeps_its_choice(self):
+        import json, tempfile
+        from coletor.class_selection import validate_selection
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "settings.json").write_text(json.dumps(
+                {"schemaVersion": 1, "schedule": None, "theme": "system", "fox": {"version": 1, "show": True, "animate": True}}), encoding="utf-8")
+            v1 = validate_selection({"schemaVersion": 1, "localRevision": 3, "selected_class_ids": ["11", "12"],
+                "scope": {"origin": "https://www.smecel.com.br", "list_path": "/sistema/escola/turmaListar.php",
+                          "year": 2026, "context_key": "synthetic"}})
+            (folder / "class-selection.json").write_text(json.dumps(v1), encoding="utf-8")
+            self.assertEqual(LocalSettings(folder).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_unreadable_selection_file_never_widens_to_every_class(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "class-selection.json").write_text("{broken", encoding="utf-8")
+            self.assertEqual(LocalSettings(directory).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_new_install_defaults_to_every_class(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(LocalSettings(directory).read()["settings"]["classes"], {"mode": "all"})
+
+    def test_cached_read_follows_saves(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            settings = LocalSettings(directory)
+            self.assertEqual(settings.read()["settings"]["theme"], "system")
+            settings.update("theme", "dark")
+            self.assertEqual(settings.read()["settings"]["theme"], "dark")
+            settings.read()["settings"]["fox"]["show"] = False  # Callers get a copy.
+            self.assertTrue(settings.read()["settings"]["fox"]["show"])

@@ -24,18 +24,23 @@ from .protected_storage import ProtectedStorage, StorageError
 
 SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy',
               'lease-fenced', 'paused', 'source-invalid', 'identity-review', 'SOURCE_LOGIN_REQUIRED',
-              'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
+              'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES', 'NO_CLASSES_IN_SHIFT',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
-              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
+              'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
               'PENDING_BATCHES', 'SOURCE_READ_FAILED'}
 # Problems an operator must see even with the window hidden in the tray.
-ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
+ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
                'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
                'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
+LEASE_SECONDS = 300
+# Same limit as the Ecossistema's frequencyScheduleV2 (recheck included).
+MAX_DAILY_TIMES = 48
 # Routine waits are not failures: a reserve computer or a school pause.
-QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
+# NO_CLASSES_IN_SHIFT: a slot of a shift this school (or this PC's choice) has
+# no linked class for. Nothing to do, and nothing wrong.
+QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT'}
 
 
 def discard_confirmation():
@@ -78,7 +83,7 @@ def validate_schedule(schedule):
         if (not isinstance(rule, dict) or set(rule) != {'weekday', 'shift', 'enabled', 'times', 'recheck'}
                 or type(rule['weekday']) is not int or not 0 <= rule['weekday'] <= 6
                 or rule['shift'] not in {'matutino', 'vespertino'} or type(rule['enabled']) is not bool
-                or not isinstance(rule['times'], list) or len(rule['times']) > 16): raise FrequencyError('invalid-request')
+                or not isinstance(rule['times'], list) or len(rule['times']) > MAX_DAILY_TIMES): raise FrequencyError('invalid-request')
         key = (rule['weekday'], rule['shift'])
         if key in keys: raise FrequencyError('invalid-request')
         keys.add(key)
@@ -89,7 +94,7 @@ def validate_schedule(schedule):
         recheck = rule['recheck']
         if recheck is not None and (not isinstance(recheck, str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', recheck)
                                     or any(t >= recheck for t in times)): raise FrequencyError('invalid-request')
-        if len(times) + (1 if recheck is not None else 0) > 16: raise FrequencyError('invalid-request')
+        if len(times) + (1 if recheck is not None else 0) > MAX_DAILY_TIMES: raise FrequencyError('invalid-request')
     return copy.deepcopy(schedule)
 
 
@@ -160,6 +165,8 @@ class FrequencyRuntime:
         self._progress = {'completed': 0, 'total': 0, 'classLabel': None}
         self._minute = None
         self._fired = set()
+        self._pending_slots, self._last_schedule = set(), None
+        self._stale = {}  # Fenced, uncommitted batches by source class (see _drain).
         self._source_blocked = False
         self._last_tick = 0
         self._thread = None
@@ -267,7 +274,9 @@ class FrequencyRuntime:
 
     @staticmethod
     def _state_for(code):
-        if code == 'lease-busy': return 'reserve'
+        # No network for a moment is a wait, not a fault: the collector retries
+        # by itself, so every consumer (tray, window, fox, snapshot) sees 'reserve'.
+        if code in {'lease-busy', 'NO_CLASSES_IN_SHIFT', 'ACCESS_UNAVAILABLE'}: return 'reserve'
         if code in {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED'}: return 'login-required'
         if code in {'paused', 'CANCELLED'}: return 'paused'
         return 'error'
@@ -299,7 +308,8 @@ class FrequencyRuntime:
         try: selected = count() if count else None
         except Exception: selected = None
         with self._lock:
-            return {'selectedClasses': selected, 'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
+            return {'selectedClasses': selected, 'classesMode': 'all' if selected is None and count else 'chosen',
+                    'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
                     'persistent': self._storage.persistent, 'progress': dict(self._progress),
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
@@ -320,6 +330,13 @@ class FrequencyRuntime:
         except AccessDenied:
             return  # Not yet paired; no storage authority is available.
         self._storage.bind(*binding)  # Pending batches and corruption MUST propagate.
+        # Bound with the live generation and still undecryptable: an older
+        # generation's queue that nothing can receipt. Set aside, kept and logged,
+        # so collection continues without anyone discarding it by hand.
+        if self._storage.quarantine_unreadable_queue():
+            self._history.record('queue-quarantined')
+        restored, self._storage.restored = self._storage.restored, 0
+        if restored: self._history.record('queue-restored', sent=restored)
 
     def save_credential(self, email, password):
         self._storage.bind(*self._provider.storage_binding())
@@ -351,16 +368,18 @@ class FrequencyRuntime:
                 with self._lock:
                     self._lease = {**existing, 'deadline': deadline}
                 return
-        request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': 120}
+        # The server's maximum: a slow network (several seconds per request) must
+        # not let one class outlive its concession and fence the whole run.
+        request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': LEASE_SECONDS}
         requested_at = self._clock()
         reply = self._committed(self._request(request), request)
         if type(reply.get('fencingToken')) is not int or reply['fencingToken'] < 1: raise FrequencyError('unavailable')
-        # The database issues exactly the requested 120-second lease *after*
+        # The database issues exactly the requested lease *after*
         # this request begins. A deadline based on the request start is a safe
         # lower bound even when the preceding status or network is slow. Do not
-        # infer 120 seconds of freshness from the time the reply arrived.
+        # infer the full lease of freshness from the time the reply arrived.
         if stamp(reply['expiresAt']) <= stamp(status['serverTime']): raise FrequencyError('lease-fenced')
-        deadline = requested_at + 120 - 2
+        deadline = requested_at + LEASE_SECONDS - 2
         if deadline <= self._clock(): raise FrequencyError('lease-fenced')
         with self._lock:
             self._lease = {**reply, 'deadline': deadline}
@@ -421,7 +440,9 @@ class FrequencyRuntime:
         with self._lock:
             if self._closed or not self._active or self._paused: return
             epoch = self._epoch
-        if self._operation.locked(): return
+        if self._operation.locked():
+            self._note_busy_slot()
+            return
         status = self._fresh()
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
@@ -429,12 +450,14 @@ class FrequencyRuntime:
         if self._code == 'CENTER_CLASSES_REQUIRED' and status['classes']:
             with self._lock: self._code, self._state = None, 'reserve'
         schedule = status['settings']['schedule']
+        self._last_schedule = schedule
         # A device with no executable agenda or a known source blocker must
         # not monopolise the school lease. Eligible leaders still heartbeat
         # every 30 s so that the admin sees connected/standby computers.
         if schedule is None or not any(
             r['enabled'] and (r['times'] or r['recheck']) for r in schedule['rules']
         ):
+            self._pending_slots = set()  # An emptied agenda cancels delayed slots.
             self._release_if_ineligible(status)
             return
         if not status['classes']:
@@ -449,7 +472,7 @@ class FrequencyRuntime:
             self.source_ready()
         blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
-                    'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review', 'revision-conflict',
+                    'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review',
                     'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES'}
         if self._source_blocked or self._code in blockers:
             self._release_if_ineligible(status)
@@ -468,12 +491,32 @@ class FrequencyRuntime:
         self._fired = {key for key in self._fired if key[0] >= oldest}
         shifts = {r['shift'] for r in schedule['rules'] if r['enabled'] and r['weekday'] == (now.weekday() + 1) % 7
                   and wall_time in [*r['times'], r['recheck']] and (civil_day, r['shift'], wall_time) not in self._fired}
+        keys = {(civil_day, shift, wall_time) for shift in shifts}
+        # Slots that came while a long collection was still running run once,
+        # coalesced, right after it ends (never in parallel, never after sleep).
+        # Each delayed slot must still exist in the agenda as it is now: an
+        # edited, removed or disabled time is cancelled, not run.
+        today = (now.weekday() + 1) % 7
+        live = {(r['shift'], t) for r in schedule['rules'] if r['enabled'] and r['weekday'] == today
+                for t in [*r['times'], *([r['recheck']] if r['recheck'] else [])]}
+        pending = {k for k in self._pending_slots if k not in self._fired}
+        late = {k for k in pending if k[0] == civil_day and (k[1], k[2]) in live}
+        cancelled = pending - late
+        self._pending_slots = set()
+        if cancelled:
+            self._history.record('late-cancelled', label=', '.join(sorted({k[2] for k in cancelled})))
+        if late:
+            shifts |= {k[1] for k in late}; keys |= late
+            self._history.record('late-start', label=', '.join(sorted({k[2] for k in late})))
         if shifts:
-            if self._source_blocked or self._code in {'lease-fenced', 'revision-conflict', 'source-invalid',
+            # lease-fenced and revision-conflict are NOT blockers: a fenced batch
+            # waits for a confirmed re-read and the next status carries the new
+            # class revision, so the next slot heals them without anyone.
+            if self._source_blocked or self._code in {'source-invalid',
                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'SOURCE_CLASS_UNAVAILABLE',
                    'SOURCE_CLASS_AMBIGUOUS', 'identity-review'}: return
-            keys = {(civil_day, shift, wall_time) for shift in shifts}
             if not self._operation.acquire(blocking=False):
+                self._pending_slots |= late
                 self._minute = None  # A concurrent command may finish within this minute.
                 return
             try:
@@ -490,13 +533,24 @@ class FrequencyRuntime:
                 self._operation.release()
                 raise
 
+    def _note_busy_slot(self):
+        """Remember a scheduled minute that found the previous collection busy."""
+        schedule = self._last_schedule
+        if not schedule: return
+        now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
+        civil_day, wall_time = now.date().isoformat(), now.strftime('%H:%M')
+        for r in schedule['rules']:
+            if (r['enabled'] and r['weekday'] == (now.weekday() + 1) % 7 and wall_time in [*r['times'], r['recheck']]
+                    and (civil_day, r['shift'], wall_time) not in self._fired):
+                self._pending_slots.add((civil_day, r['shift'], wall_time))
+
     def collect(self, shifts=None, *, _claimed=False):
         # A scheduled invocation already owns the operation lock so its minute
         # cannot be marked fired before a capture is accepted.
         if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
         self._on_started()
         heartbeat_stop = threading.Event()
-        heartbeat = None
+        heartbeat, started = None, False
         try:
             with self._lock:
                 epoch = self._epoch
@@ -519,8 +573,13 @@ class FrequencyRuntime:
             pairs, unmatched = self._pair_classes(sources, status['classes'], shifts)
             if not pairs:
                 # Zero coverage cannot be a successful scheduled window and
-                # must not consume another computer's school leadership.
-                raise FrequencyError('NO_SELECTED_CLASSES' if not unmatched else 'SOURCE_CLASS_AMBIGUOUS')
+                # must not consume another computer's school leadership. It is
+                # not a blocker either: the next slot (other shift) still runs.
+                if unmatched:
+                    error = FrequencyError('CLASS_RECONCILIATION_REQUIRED')
+                    error.label = ', '.join(unmatched)
+                    raise error
+                raise FrequencyError('NO_CLASSES_IN_SHIFT')
             self._acquire(status)
             self._check(epoch)
             self._drain(epoch)
@@ -528,6 +587,7 @@ class FrequencyRuntime:
                 self._state, self._code = 'collecting', None
                 self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}
             self._history.record('collection-started', sent=len(pairs))
+            started = True
             def renew():
                 while not heartbeat_stop.wait(30):
                     with self._lock:
@@ -583,7 +643,9 @@ class FrequencyRuntime:
                     return current, preview, after_capture
                 # Status, concession, source read and the post-read status share
                 # one verified bracket; the transmission below opens its own.
+                read_started = time.monotonic()
                 current, preview, after_capture = self._verified(read_class)
+                send_started = time.monotonic()
                 school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
                 del preview
@@ -591,25 +653,40 @@ class FrequencyRuntime:
                     self._check(epoch)
                     self._storage.enqueue(payload)
                 self._send(payload, epoch)
+                self._supersede(source['class_id'])
                 with self._lock:
                     self._progress['completed'] += 1
                     receipt = dict(self._last_receipt or {})
                 self._history.record('class-sent', label=source['name'], sent=receipt.get('resolvedRecords'),
-                                     unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'))
+                                     unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'),
+                                     read_ms=round((send_started - read_started) * 1000),
+                                     send_ms=round((time.monotonic() - send_started) * 1000))
             self._check(epoch)
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
                 self._state, self._class = 'ready', None
                 self._progress['classLabel'] = None
-            self._history.record('collection-finished', sent=len(pairs))
-            if unmatched:
-                # The classes the Centro recognizes were sent; the others need a link there.
-                self._error(FrequencyError('CLASS_RECONCILIATION_REQUIRED'), label=', '.join(unmatched))
+            # The outcome is decided before the closing fact, so the history shows
+            # a run with a pending alert as such, never as a clean success.
+            closing = ('CLASS_RECONCILIATION_REQUIRED' if unmatched else
+                       # "Todas" promises the whole school: a filtered or partial
+                       # Smecel list must not look complete.
+                       'SOURCE_LIST_FILTERED' if catalog.get('all_classes') and catalog['catalog'].get('filtered') else None)
+            self._history.record('collection-finished', sent=len(pairs), code=closing)
+            if closing:
+                self._error(FrequencyError(closing), label=', '.join(unmatched) if unmatched else None)
             return self.public_status()
         except Exception as error:
-            self._error(error)
+            self._error(error, label=getattr(error, 'label', None))
+            code = getattr(error, 'code', None)
+            if started and code in QUIET_CODES:
+                # A run stopped by a pause, a school pause or another PC's lease
+                # still gets a closing fact (other codes are recorded as failures),
+                # so the history never shows it running forever.
+                self._history.record('collection-stopped', code=code)
             if getattr(error, 'code', None) in {
-                'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
+                'NO_SELECTED_CLASSES', 'NO_CLASSES_IN_SHIFT', 'CLASS_RECONCILIATION_REQUIRED',
+                'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
                 'CENTER_CLASSES_REQUIRED', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED',
                 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES', 'source-invalid',
                 'identity-review', 'revision-conflict',
@@ -663,7 +740,10 @@ class FrequencyRuntime:
     def _reconcile_receipts(self, epoch):
         # Reopening with an uncertain queue consults the original receipt
         # BEFORE acquiring a fresh concession or doing any source work.
-        for entry in self._storage.queue():
+        entries = self._storage.queue()
+        expired = self._storage.take_expired()
+        if expired: self._history.record('queue-expired', sent=expired)
+        for entry in entries:
             self._check(epoch, lease=False)
             payload = entry['payload']
             result = self._receipt(payload)
@@ -694,6 +774,11 @@ class FrequencyRuntime:
             self._last_receipt = {k: result[k] for k in ('receivedAt', 'resolvedRecords', 'unresolvedRecords', 'conflicts')}
 
     def _drain(self, epoch):
+        """Send what the current grant can still deliver. A batch from an older
+        concession that the server confirms it never committed (no receipt)
+        stays protected until a fresh read of the same class is confirmed, so a
+        failed re-read never loses the previous observation."""
+        self._stale = {}
         for entry in self._storage.queue():
             self._check(epoch)
             payload = entry['payload']
@@ -701,10 +786,21 @@ class FrequencyRuntime:
             if receipt is not None:
                 self._storage.acknowledge(payload['requestId'])
                 continue
-            # A takeover or changed CAS requires a fresh capture and visible
-            # operator action. Never silently rewrite queued signed payloads.
-            if payload.get('fencingToken') != self._lease['fencingToken']: raise FrequencyError('lease-fenced')
+            # Never rewritten or re-signed: it is superseded by this run's
+            # confirmed re-read (see _supersede), so nobody discards it by hand.
+            if payload.get('fencingToken') != self._lease['fencingToken']:
+                self._stale.setdefault(payload.get('sourceClassId'), []).append(payload)
+                continue
             self._send(payload, epoch)
+
+    def _supersede(self, source_class_id):
+        """Drop a stale batch only after a fresh read of the same class has a
+        server receipt. Absence from this run (other shift, unselected,
+        unmatched or filtered list) proves nothing, so those stay protected."""
+        stale = self._stale
+        for payload in stale.pop(source_class_id, []):
+            self._storage.acknowledge(payload['requestId'])
+            self._history.record('superseded', label=payload.get('sourceClassLabel'))
 
     def save_settings(self, expected_revision, schedule):
         validate_schedule(schedule)
@@ -742,6 +838,7 @@ class FrequencyRuntime:
             self._epoch += 1
             lease, self._lease = self._lease, None
             self._class = None
+            self._pending_slots = set()  # A pause never leaves a delayed run behind.
             self._state = 'paused' if pause or school_pause else 'connect'
             if pause: self._paused = True
             if school_pause: self._school_paused = True

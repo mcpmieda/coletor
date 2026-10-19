@@ -79,7 +79,27 @@ class ManualSession:
         self._catalog = None
         self._mode = "annual"
         from .class_selection import ClassSelectionStore
+        from .local_settings import LocalSettings
         self._selections = ClassSelectionStore(settings_directory)
+        self._preferences = LocalSettings(settings_directory)
+
+    def _browser_hidden(self, can_sign_in):
+        """Hidden only when the Coletor can sign in by itself; a person must be
+        able to see the Smecel window to sign in manually."""
+        try: visible = self._preferences.read()["settings"]["browser"]["visible"]
+        except (OSError, KeyError, TypeError): visible = False
+        return can_sign_in and not visible
+
+    def _new_driver(self, can_sign_in):
+        driver = self._factory()
+        if hasattr(driver, "hidden"): driver.hidden = self._browser_hidden(can_sign_in)
+        return driver
+
+    def _all_classes(self):
+        """'Todas as turmas' (default): every class of the current list, so a new
+        Smecel class is collected without anyone choosing it."""
+        try: return self._preferences.read()["settings"]["classes"]["mode"] == "all"
+        except (OSError, KeyError, TypeError): return True
 
     def prepare_login(self, year):
         from .class_catalog import list_url
@@ -96,8 +116,10 @@ class ManualSession:
     def _catalog_reply(self):
         from .class_selection import revalidate_choices
         saved = self._selections.read(self._catalog["scope"])
-        choices = revalidate_choices(saved["selection"], self._catalog["scope"],
-                                     [c["class_id"] for c in self._catalog["classes"]])
+        available = [c["class_id"] for c in self._catalog["classes"]]
+        choices = revalidate_choices(saved["selection"], self._catalog["scope"], available)
+        if self._all_classes():
+            choices = {"selected_class_ids": available, "unavailable_class_ids": [], "context_matches": True, "all_classes": True}
         return {"session": self._status(), "catalog": self._catalog, **choices,
                 "selection_revision": saved["local_revision"], "notice": saved["notice"]}
 
@@ -203,11 +225,14 @@ class ManualSession:
         from .class_catalog import CONTEXT_KEY, LIST_PATH
         scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
                  "year": 2026, "context_key": CONTEXT_KEY}
+        if self._all_classes(): return True
         saved = self._selections.read(scope)["selection"]
         return bool(saved and saved["selected_class_ids"])
 
     def saved_class_count(self):
-        """How many classes are saved for the current context; display only."""
+        """How many classes are saved for the current context; display only.
+        None means every class of the school ('Todas as turmas')."""
+        if self._all_classes(): return None
         from .class_catalog import CONTEXT_KEY, LIST_PATH
         scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
                  "year": 2026, "context_key": CONTEXT_KEY}
@@ -224,7 +249,7 @@ class ManualSession:
             if saved is None and credential is None: raise SessionError('SOURCE_LOGIN_REQUIRED')
             prepared = self.prepare_login(2026)
             # Supply restored state before the isolated worker is started.
-            driver = self._factory()
+            driver = self._new_driver(credential is not None)
             if saved is not None: driver._storage_state = saved
             with self._lock:
                 self._check(prepared['generation'], True, {'prepared'})
@@ -280,12 +305,12 @@ class ManualSession:
         if type(generation) is not int or generation != self._generation or self._state not in states:
             raise SessionError("A sessão mudou. Prepare e confira a turma novamente.")
 
-    def open(self, generation, confirmed):
+    def open(self, generation, confirmed, can_sign_in=False):
         with self._lock:
             self._check(generation, confirmed, {"prepared"})
             self._state = "opening"
             try:
-                driver = self._factory()
+                driver = self._new_driver(can_sign_in)
             except Exception:
                 self._state = "prepared"
                 raise SessionError("Não foi possível preparar o navegador isolado.") from None

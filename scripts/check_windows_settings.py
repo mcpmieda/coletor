@@ -14,42 +14,52 @@ spec.loader.exec_module(smoke)
 SCENARIOS=("save","reopen","restored","recovered")
 
 
-def click(window,label):
-    expression="""(() => {const label=%s; const n=[...document.querySelectorAll('button')].find(n=>n.textContent.trim()===label || n.getAttribute('aria-label')===label); if(!n||n.disabled)return false;n.click();return true;})()""" % json.dumps(label)
+def click(window,label,root="document"):
+    expression="""(() => {const label=%s; const n=[...%s.querySelectorAll('button')].find(n=>n.textContent.trim()===label || n.getAttribute('aria-label')===label); if(!n||n.disabled)return false;n.click();return true;})()""" % (json.dumps(label),root)
     if not window.evaluate_js(expression): smoke.fail("settings_button_unavailable")
 
 
-def set_input(window,label,value):
-    expression="""(() => {const label=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()===%s);const n=document.getElementById(label?.htmlFor);if(!n||n.disabled)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,%s);n.dispatchEvent(new Event('input',{bubbles:true}));return true;})()""" % (json.dumps(label),json.dumps(value))
-    if not window.evaluate_js(expression): smoke.fail("settings_input_unavailable")
+def page(window,label):
+    click(window,label,"(document.querySelector('nav[aria-label=\"Navegação principal\"]')||document)")
+    smoke.wait_js(window,"[...document.querySelectorAll('h1')].some(n=>n.textContent.trim()===%s)" % json.dumps(label))
 
 
-def monday_js(value):
-    return """(() => {const label=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()==='Buscar frequência Segunda-feira Manhã');return document.getElementById(label?.htmlFor)?.value.startsWith(%s);})()""" % json.dumps(value)
+def saturday_js(selected):
+    # Saturday toggle inside the agenda dialog (HeroUI ToggleButton exposes aria-pressed).
+    return """(() => {const n=document.querySelector('[role=dialog] button[aria-label="Sábado"]');return !!n && (n.getAttribute('aria-pressed')==='true')===%s;})()""" % json.dumps(selected)
 
 
-def checkbox(window,label):
-    expression="""(() => {const n=[...document.querySelectorAll('label')].find(n=>n.textContent.trim()===%s)?.querySelector('input');if(!n||n.disabled)return false;n.click();return true;})()""" % json.dumps(label)
-    if not window.evaluate_js(expression): smoke.fail("settings_checkbox_unavailable")
+def open_agenda(window):
+    page(window,"Tarefas")
+    smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.getAttribute('aria-label')==='Editar agenda'&&!n.disabled)")
+    click(window,"Editar agenda")
+    smoke.wait_js(window,"!!document.querySelector('[role=dialog] button[aria-label=\"Sábado\"]')")
 
 
-def theme(window,label):
-    expression="""(() => {const n=[...document.querySelectorAll('button')].find(n=>(n.getAttribute('aria-labelledby')||'').split(' ').some(id=>document.getElementById(id)?.textContent.trim()==='Tema'));if(!n)return false;n.click();return true;})()"""
-    if not window.evaluate_js(expression): smoke.fail("theme_trigger_unavailable")
-    smoke.wait_js(window,"!!document.querySelector('[role=option]')")
-    expression="""(() => {const n=[...document.querySelectorAll('[role=option]')].find(n=>n.textContent.trim()===%s);if(!n)return false;n.click();return true;})()""" % json.dumps(label)
-    if not window.evaluate_js(expression): smoke.fail("theme_option_unavailable")
+def save_agenda(window):
+    # A schedule made in the Ecossistema with different shifts asks for an
+    # explicit confirmation before it is unified.
+    window.evaluate_js("""(() => {const n=document.querySelector('[role=dialog] input[type=checkbox]');if(n&&!n.checked)n.click();return true;})()""")
+    smoke.wait_js(window,"[...document.querySelector('[role=dialog]').querySelectorAll('button')].some(n=>n.textContent.trim()==='Salvar'&&!n.disabled)")
+    click(window,"Salvar","document.querySelector('[role=dialog]')")
+    smoke.wait_js(window,"!document.querySelector('[role=dialog]')")
 
 
 def stored(window,predicate):
     deadline=time.monotonic()+15
     while time.monotonic()<deadline:
-        window.evaluate_js("window.__localSettingsProbe=null;Promise.all([window.pywebview.api.get_local_settings(),window.pywebview.api.get_collector_status()]).then(([r,c])=>{if(c.settings?.schedule)r.settings.schedule={rules:c.settings.schedule.rules.map(v=>({...v,weekday:v.weekday===0?7:v.weekday,selected:v.enabled,reconciliation:v.recheck||''})).sort((a,b)=>a.weekday-b.weekday||a.shift.localeCompare(b.shift))};window.__localSettingsProbe=r;});true")
+        window.evaluate_js("window.__localSettingsProbe=null;Promise.all([window.pywebview.api.get_local_settings(),window.pywebview.api.get_collector_status()]).then(([r,c])=>{window.__localSettingsProbe={settings:r.settings,notice:r.notice,shared:c.settings?.schedule||null};});true")
         smoke.wait_js(window,"!!window.__localSettingsProbe",timeout=10)
         result=window.evaluate_js("window.__localSettingsProbe")
         if predicate(result): return result
         time.sleep(.1)
     smoke.fail("settings_disk_acknowledgement_timeout")
+
+
+def saturday_stored(result):
+    """Shared agenda: weekday 6 is Saturday."""
+    rules=(result.get("shared") or {}).get("rules") or []
+    return any(r["weekday"]==6 and r["enabled"] for r in rules)
 
 
 def exercise(window,args,result):
@@ -58,44 +68,46 @@ def exercise(window,args,result):
         if not value: smoke.fail(name)
         checks[name]=True
     try:
-        smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Horários de coleta'&&!n.disabled) && typeof window.pywebview?.api?.get_local_settings==='function'")
+        smoke.wait_js(window,"!!document.querySelector('nav[aria-label=\"Navegação principal\"]') && typeof window.pywebview?.api?.get_local_settings==='function'")
         info,handle=smoke.native_info(window)
         require("native_window_visible",info["visible"] and info["edgechromium"])
-        click(window,"Horários de coleta")
-        smoke.wait_js(window,monday_js("08:"))
         if args.scenario=="save":
-            require("fresh_default_schedule",window.evaluate_js(monday_js("08:05")))
-            set_input(window,"Buscar frequência Segunda-feira Manhã","08:15, 09:00, 09:55, 11:05, 11:55")
-            click(window,"Salvar horários")
-            smoke.wait_js(window,"document.body.innerText.includes('Horários compartilhados com os computadores da escola.')")
-            theme(window,"Escuro")
+            open_agenda(window)
+            require("fresh_default_schedule_weekdays_only",window.evaluate_js(saturday_js(False)))
+            click(window,"Sábado")
+            smoke.wait_js(window,saturday_js(True))
+            save_agenda(window)
+            page(window,"Ajustes")
+            click(window,"Escuro")
             smoke.wait_js(window,"document.documentElement.dataset.theme==='dark'")
-            stored(window,lambda r:r.get("settings",{}).get("schedule",{}).get("rules",[{}])[0].get("times",[None])[0]=="08:15"
-                   and r["settings"]["theme"]=="dark")
+            stored(window,lambda r:saturday_stored(r) and r["settings"]["theme"]=="dark")
             require("agenda_and_theme_saved_to_disk")
         elif args.scenario=="reopen":
-            require("agenda_survives_normal_close",window.evaluate_js(monday_js("08:15")))
             require("theme_survives_normal_close",window.evaluate_js("document.documentElement.dataset.theme==='dark'"))
             require("fox_always_shown",window.evaluate_js("!!document.querySelector('.fox-stage')"))
-            click(window,"Usar sugestão")
-            smoke.wait_js(window,monday_js("08:05"))
-            stored(window,lambda r:r["settings"]["schedule"]["rules"][0]["times"][0]=="08:15")
-            require("restore_does_not_save_implicitly")
-            click(window,"Salvar horários")
-            stored(window,lambda r:r["settings"]["schedule"]["rules"][0]["times"][0]=="08:05")
+            open_agenda(window)
+            require("agenda_survives_normal_close",window.evaluate_js(saturday_js(True)))
+            click(window,"Sábado")
+            smoke.wait_js(window,saturday_js(False))
+            stored(window,saturday_stored)
+            require("toggle_does_not_save_implicitly")
+            save_agenda(window)
+            stored(window,lambda r:not saturday_stored(r))
             require("restored_schedule_saved")
         elif args.scenario=="restored":
-            require("restored_schedule_survives_close",window.evaluate_js(monday_js("08:05")))
             require("other_preferences_preserved",window.evaluate_js("document.documentElement.dataset.theme==='dark' && !!document.querySelector('.fox-stage')"))
+            open_agenda(window)
+            require("restored_schedule_survives_close",window.evaluate_js(saturday_js(False)))
+            click(window,"Cancelar","document.querySelector('[role=dialog]')")
         else:
-            require("corrupt_file_defaults_visible",window.evaluate_js(monday_js("08:05")))
-            require("corrupt_file_notice_visible",window.evaluate_js("document.querySelector('.local-settings-notice')?.textContent.includes('Não foi possível ler')"))
-            require("corrupt_file_restores_nonsecret_preferences",window.evaluate_js("document.querySelector('.fox-stage')!==null"))
-            click(window,"Salvar horários")
-            theme(window,"Escuro")
-            stored(window,lambda r:not r.get("notice") and r["settings"]["schedule"]["rules"][0]["times"][0]=="08:05")
-            smoke.wait_js(window,"!document.querySelector('.local-settings-notice')")
-            require("explicit_save_recovers_valid_file_and_clears_notice")
+            require("corrupt_file_defaults_visible",window.evaluate_js("document.documentElement.dataset.theme!=='dark' && !!document.querySelector('.fox-stage')"))
+            open_agenda(window)
+            require("shared_agenda_unaffected_by_local_file",window.evaluate_js(saturday_js(False)))
+            click(window,"Cancelar","document.querySelector('[role=dialog]')")
+            page(window,"Ajustes")
+            click(window,"Escuro")
+            stored(window,lambda r:not r.get("notice") and r["settings"]["theme"]=="dark")
+            require("explicit_save_recovers_valid_file")
         window.evaluate_js("window.scrollTo(0,0)")
         result["screenshot"]=smoke.capture_window(handle,args.output_dir/("settings-"+args.scenario+".png"))
         result["status"]="passed"
@@ -156,8 +168,11 @@ def orchestrator(args):
                     if process.returncode!=0 or result["status"]!="passed": smoke.fail("settings_scenario_failed")
                     if sentinel.read_bytes()!=b"UNRELATED_APP_SENTINEL": smoke.fail("other_application_modified")
                     data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
-                    if set(data)!={"schemaVersion","schedule","theme","fox"}: smoke.fail("unexpected_persistent_data")
-                    if sorted(p.name for p in isolated.iterdir())!=["collector-instance.lock", "settings.json", "settings.lock"]: smoke.fail("unexpected_settings_file")
+                    if set(data)!={"schemaVersion","schedule","theme","fox","browser","classes","notifications"}: smoke.fail("unexpected_persistent_data")
+                    if sorted(p.name for p in isolated.iterdir()) not in (["collector-instance.lock", "settings.json", "settings.lock"],["collector-instance.lock", "settings.json", "settings.lock", "ui-snapshot.json"]): smoke.fail("unexpected_settings_file")
+                    snapshot=isolated/"ui-snapshot.json"
+                    # The instant-open summary is display data only: never a secret.
+                    if snapshot.is_file() and any(word in snapshot.read_text(encoding="utf-8").lower() for word in ("password","senha","token","secret")): smoke.fail("secret_in_ui_snapshot")
                 finally:
                     job.close()
                     if process is not None and process.poll() is None: process.kill();process.wait(timeout=10)

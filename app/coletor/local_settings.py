@@ -17,7 +17,18 @@ RECOVERY_NOTICE = "Não foi possível ler as configurações salvas. Mostramos a
 
 
 def default_settings():
-    return {"schemaVersion": 1, "schedule": None, "theme": "system", "fox": {"version": 1, "show": True, "animate": True}}
+    return {"schemaVersion": 1, "schedule": None, "theme": "system", "fox": {"version": 1, "show": True, "animate": True},
+            # Minimal intervention: collect every class of the school (new ones
+            # included) with the isolated Edge hidden, unless the operator opts out.
+            "browser": {"visible": False}, "classes": {"mode": "all"},
+            # Balloons beside the clock for problems that need a person.
+            "notifications": {"show": True}}
+
+
+def default_settings_without_classes():
+    value = default_settings()
+    del value["classes"]
+    return value
 
 
 def exact_fields(value, fields):
@@ -69,12 +80,38 @@ def validate_fox(value):
     return dict(value)
 
 
+def validate_browser(value):
+    exact_fields(value, {"visible"})
+    if type(value["visible"]) is not bool:
+        raise ValueError("Invalid browser preference")
+    return dict(value)
+
+
+def validate_classes(value):
+    exact_fields(value, {"mode"})
+    if value["mode"] not in ("all", "chosen"):
+        raise ValueError("Invalid class preference")
+    return dict(value)
+
+
+def validate_notifications(value):
+    exact_fields(value, {"show"})
+    if type(value["show"]) is not bool:
+        raise ValueError("Invalid notification preference")
+    return dict(value)
+
+
 def validate_settings(value):
-    exact_fields(value, {"schemaVersion", "schedule", "theme", "fox"})
+    # Files written before browser/classes/notifications existed stay valid with the defaults.
+    if type(value) is dict and {"schemaVersion", "schedule", "theme", "fox"} <= set(value):
+        value = {**default_settings(), **value}
+    exact_fields(value, {"schemaVersion", "schedule", "theme", "fox", "browser", "classes", "notifications"})
     if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["theme"] not in ("system", "light", "dark"):
         raise ValueError("Invalid preferences")
     return {"schemaVersion": 1, "schedule": None if value["schedule"] is None else validate_schedule(value["schedule"]),
-            "theme": value["theme"], "fox": validate_fox(value["fox"])}
+            "theme": value["theme"], "fox": validate_fox(value["fox"]),
+            "browser": validate_browser(value["browser"]), "classes": validate_classes(value["classes"]),
+            "notifications": validate_notifications(value["notifications"])}
 
 
 def user_settings_directory():
@@ -94,6 +131,7 @@ class LocalSettings:
         self._directory = Path(directory) if directory is not None else user_settings_directory()
         self._path = self._directory / "settings.json"
         self._lock = threading.RLock()
+        self._cached, self._cached_stamp = None, None
 
     @contextmanager
     def _process_lock(self):
@@ -121,28 +159,56 @@ class LocalSettings:
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    def _had_chosen_classes(self):
+        """Installations from before 'Todas as turmas' chose classes by hand:
+        an upgrade keeps that choice instead of silently collecting every class.
+        Uses the selection store's own reader (V1 and V2 files). A selection file
+        that exists but cannot be read keeps 'chosen' too: never widen by error."""
+        if not (self._directory / "class-selection.json").exists():
+            return False
+        from .class_selection import ClassSelectionStore  # Imports this module.
+        data, notice = ClassSelectionStore(self._directory)._read()
+        if notice or data is None:
+            return True
+        return any(profile["selected_class_ids"] for profile in data["profiles"])
+
+    def _upgrade(self, value):
+        if isinstance(value, dict) and "classes" not in value and self._had_chosen_classes():
+            value = {**value, "classes": {"mode": "chosen"}}
+        return value
+
     def _read(self):
         try:
             with self._path.open("rb") as file:
                 raw = file.read(MAX_BYTES + 1)
         except FileNotFoundError:
-            return default_settings(), ""
+            return validate_settings(self._upgrade(default_settings_without_classes())), ""
         try:
             if len(raw) > MAX_BYTES:
                 raise ValueError("Settings too large")
-            return validate_settings(json.loads(raw.decode("utf-8"))), ""
+            return validate_settings(self._upgrade(json.loads(raw.decode("utf-8")))), ""
         except (ValueError, UnicodeError, RecursionError, TypeError):
             # No invalid-content backup or input echo. Replace only after a valid
             # explicit save; never copy arbitrary material from a damaged file.
             return default_settings(), RECOVERY_NOTICE
 
     def read(self):
+        """Parsed once per file version: the tray and status calls read this
+        every few seconds, so an unchanged file is not parsed again."""
         with self._lock:
-            settings, notice = self._read()
-            return {"settings": settings, "notice": notice}
+            try:
+                stat = self._path.stat()
+                stamp = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                stamp = None
+            if stamp is None or stamp != self._cached_stamp:
+                self._cached = self._read()
+                self._cached_stamp = stamp
+            settings, notice = self._cached
+            return {"settings": deepcopy(settings), "notice": notice}
 
     def update(self, field, value):
-        if field not in {"schedule", "theme", "fox"}:
+        if field not in {"schedule", "theme", "fox", "browser", "classes", "notifications"}:
             raise ValueError("Unknown preference")
         with self._lock, self._process_lock():
             settings, _ = self._read()  # Preserve unrelated allowed preferences.
@@ -166,5 +232,6 @@ class LocalSettings:
                 os.replace(temporary, self._path)
             finally:
                 Path(temporary).unlink(missing_ok=True)
+            self._cached_stamp = None  # Same-second writes keep the size: never trust the cache here.
             return deepcopy(clean)
 

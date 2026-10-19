@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
-import { ShieldCheck, LogIn } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 import { nativeApi } from '../api';
 import { initializeLocalSettings } from '../localSettings';
 import { paintTheme, readTheme } from '../theme';
-import App from '../App';
+import DesktopApp from '../desktop/DesktopApp';
 
 export interface LocalRecovery {
   pending: boolean; count: number | null; oldest: number | null;
   newest: number | null; unreadable: boolean;
+  /** False while the queue waits for the live access to be opened (not a problem). */
+  bound?: boolean;
 }
 export interface InstitutionalBridge {
   get_local_recovery_status(): Promise<LocalRecovery>;
@@ -64,6 +66,8 @@ export default function InstitutionalAccess() {
   const [pairingCode, setPairingCode] = useState('');
   const [cleanupPending, setCleanupPending] = useState(false);
   const [recovery, setRecovery] = useState<LocalRecovery | null>(null);
+  // Live-confirmed access (the panel may already show from the local summary).
+  const [verified, setVerified] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState('');
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
   const previouslyAuthorized = useRef(false);
@@ -85,11 +89,15 @@ export default function InstitutionalAccess() {
         const confirmed = await (await bridge()).get_institutional_access_status();
         if (!mounted.current || current !== epoch.current) return;
         if (confirmed.authenticated !== true || confirmed.authorized !== true) {
-          previouslyAuthorized.current = false; setAuthorized(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
+          previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
         }
-        previouslyAuthorized.current = true; loginFailure.current = null; paintTheme(readTheme()); setAuthorized(true); setNotice('');
+        previouslyAuthorized.current = true; loginFailure.current = null; paintTheme(readTheme()); setAuthorized(true); setVerified(true); setNotice('');
+      } else if (result.code === 'ACCESS_UNAVAILABLE' && previouslyAuthorized.current === false && optimistic.current) {
+        // Offline at opening: keep the panel from the local summary; the
+        // collector itself retries and never works without live access.
+        setNotice('');
       } else {
-        previouslyAuthorized.current = false; setAuthorized(false);
+        previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); optimistic.current = false;
         if (!loginFailure.current) setNotice(result.code === 'ACCESS_NOT_CONFIGURED'
           ? 'A configuração do acesso ainda não foi concluída.'
           : result.code === 'ACCESS_CLEANUP_PENDING' ? 'A limpeza anterior ainda não terminou. Use Entrar no Ecossistema para repetir a verificação segura.'
@@ -98,14 +106,24 @@ export default function InstitutionalAccess() {
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
     } catch (error) {
-      if (mounted.current && current === epoch.current) {
-        previouslyAuthorized.current = false; setAuthorized(false);
+      if (mounted.current && current === epoch.current && !optimistic.current) {
+        previouslyAuthorized.current = false; setAuthorized(false); setVerified(false);
         if (!loginFailure.current) setNotice(error instanceof Error ? error.message : 'Não foi possível verificar o acesso.');
       }
     } finally { if (checking.current === current) checking.current = null; }
   }, []);
+  const optimistic = useRef(false);
   useEffect(() => {
-    mounted.current = true; void recheck();
+    mounted.current = true;
+    // Instant opening: a computer authorized before shows its panel from the
+    // local summary right away; the live check below confirms or closes it.
+    void bridge().then(api => (api as InstitutionalBridge & { get_startup_snapshot?: () => Promise<{ paired: boolean; settings?: { theme?: string } }> })
+      .get_startup_snapshot?.()).then(snapshot => {
+        if (!mounted.current || !snapshot?.paired || previouslyAuthorized.current) return;
+        const theme = snapshot.settings?.theme;
+        if (theme === 'light' || theme === 'dark' || theme === 'system') paintTheme(theme);
+        optimistic.current = true; setAuthorized(true); setNotice('');
+      }).catch(() => undefined).finally(() => { void recheck(); });
     const focus = () => { if (document.visibilityState !== 'hidden') void recheck(); };
     const timer = setInterval(focus, 30_000);
     window.addEventListener('focus', focus); window.addEventListener('online', focus); window.addEventListener('coletoraccesschanged', focus);
@@ -146,7 +164,7 @@ export default function InstitutionalAccess() {
         }
         throw new Error(result.error);
       }
-      previouslyAuthorized.current = false; setAuthorized(false);
+      previouslyAuthorized.current = false; optimistic.current = false; setAuthorized(false); setVerified(false);
       setNotice('Este computador foi desconectado.');
     } catch (error) {
       setCleanupPending(true);
@@ -184,7 +202,10 @@ export default function InstitutionalAccess() {
       </Button>
     </section>;
   }
-  if (authorized) return <><div className="institutional-account"><span><ShieldCheck size={16} />Acesso ao coletor autorizado</span><Button size="sm" variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>Sair da conta</Button></div>{notice && <p role="alert">{notice}</p>}{recovery?.pending && recovery.unreadable && recoveryPanel()}{recoveryNotice && <p role="alert">{recoveryNotice}</p>}<App /></>;
+  // Authorized: the collector reconciles, supersedes or sets aside the local
+  // queue by itself. Only a queue still unreadable after it was opened with
+  // the live access (bound) asks a person.
+  if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && recovery.bound !== false && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}<DesktopApp /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>

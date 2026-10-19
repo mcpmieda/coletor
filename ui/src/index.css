@@ -127,6 +127,8 @@ main { min-width: 0; }
 .brand-fox { background: transparent; }
 .brand-fox img, .fox-sprite { image-rendering: pixelated; object-fit: contain; }
 .fox-companion { border-top: 1px solid var(--border); padding-top: 10px; }
+/* Sidebar fox: no divider, so the speech bubble floats in clear space above it. */
+.fox-sidebar .fox-companion { border-top: 0; }
 .fox-stage { position: relative; min-height: 170px; text-align: center; padding-top: 4px; }
 .fox-button { border: 0; background: transparent; margin: 0 auto; padding: 0; width: 128px; height: 128px; display: block; animation: fox-breathe 3.8s steps(2,end) infinite; }
 .fox-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 10px; }

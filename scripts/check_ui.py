@@ -202,44 +202,52 @@ try:
         collector = {'state': 'connect', 'code': None, 'active': False, 'localPaused': False, 'persistent': False,
                      'progress': {'completed': 0, 'total': 0, 'classLabel': None}, 'lastReceipt': None,
                      'settings': {'revision': 2, 'paused': False, 'schedule': shared}}
-        recovery_page.add_init_script('window.syntheticSettings='+json_module.dumps(prefs)+';window.syntheticCollector='+json_module.dumps(collector)+''';
-          window.syntheticSaves=[];window.holdSharedReload=false;window.syntheticConflict=true;
+        recovery_page.add_init_script('window.syntheticSettings='+json_module.dumps({**prefs,'browser':{'visible':False},'classes':{'mode':'all'}})+';window.syntheticCollector='+json_module.dumps(collector)+''';
+          window.syntheticSaves=[];window.syntheticConflict=true;
           window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),
             open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),
             get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
             discard_local_pending_collection:async()=>({ok:true,discarded:false}),
+            get_startup_snapshot:async()=>({paired:true,status:window.syntheticCollector,history:[],settings:window.syntheticSettings}),
             get_local_settings:async()=>({settings:window.syntheticSettings}),
-            get_collector_status:()=>window.holdSharedReload?new Promise(resolve=>window.finishReload=resolve):Promise.resolve(window.syntheticCollector),
+            get_collector_status:async()=>window.syntheticCollector,
+            get_collector_history:async()=>({entries:[]}),
+            get_desktop_status:async()=>({tray_available:true,automatic_collection:true,autostart:true}),
             activate_collector:async()=>window.syntheticCollector,collect_now:async()=>window.syntheticCollector,
             save_shared_schedule:async(revision,schedule)=>{if(window.syntheticConflict)return {error:'Conflito',code:'revision-conflict'};
               if(revision!==window.syntheticCollector.settings.revision)return {error:'Conflito',code:'revision-conflict'};
               window.syntheticSaves.push(schedule);window.syntheticCollector.settings={revision:revision+1,paused:false,schedule};return window.syntheticCollector;}}};''')
         recovery_page.goto(url)
-        recovery_page.get_by_role('button',name='Horários de coleta',exact=True).click()
-        recovery_page.get_by_text('Horários da escola carregados.',exact=True).wait_for()
-        recovery_page.evaluate('window.holdSharedReload=true')
-        recovery_page.get_by_role('button',name='Recarregar e descartar alterações').click()
-        field = recovery_page.get_by_label('Buscar frequência Segunda-feira Manhã',exact=True)
-        expect(field).to_be_disabled()
-        expect(recovery_page.get_by_role('button',name='Salvar horários')).to_be_disabled()
-        expect(recovery_page.get_by_label('Fuso horário da escola')).to_be_disabled()
-        expect(recovery_page.get_by_role('button',name='Usar sugestão')).to_be_disabled()
-        recovery_page.get_by_role('button',name='Salvar horários').evaluate('button=>button.click()')
-        assert recovery_page.evaluate('window.syntheticSaves.length')==0
-        recovery_page.evaluate('window.holdSharedReload=false;window.finishReload(window.syntheticCollector)')
-        expect(field).to_be_enabled()
-        field.fill('08:15, 09:00, 09:55, 11:05, 11:55')
-        recovery_page.get_by_role('button',name='Salvar horários').click()
-        expect(recovery_page.get_by_text('Os horários mudaram em outro computador. Recarregue e compare antes de salvar.',exact=True)).to_be_visible()
-        expect(field).to_have_value('08:15, 09:00, 09:55, 11:05, 11:55')
+        # Desktop shell: four sidebar pages, agenda edited by periods in Tarefas.
+        nav = recovery_page.get_by_role('navigation', name='Navegação principal')
+        for label in ('Histórico', 'Registros', 'Ajustes', 'Tarefas'):
+            nav.get_by_role('button', name=label, exact=True).click()
+            expect(nav.get_by_role('button', name=label, exact=True)).to_have_attribute('aria-current', 'page')
+        recovery_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        recovery_page.get_by_role('heading', name='Agenda de coleta').wait_for()
+        recovery_page.get_by_label('Quando coletar').click()
+        recovery_page.get_by_role('option', name='Em horários fixos').click()
+        recovery_page.get_by_label('Horários', exact=True).fill('08:15, 09:00, 09:55')
+        # An agenda that differs per day/shift needs consent before it is unified.
+        consent = recovery_page.get_by_text('Entendi, usar os mesmos horários em todos os dias e turnos')
+        if consent.count():
+            expect(recovery_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+            consent.click()
+        save = recovery_page.get_by_role('button', name='Salvar', exact=True)
+        if save.is_disabled():
+            raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog').inner_text()[-300:])
+        recovery_page.get_by_role('button', name='Salvar', exact=True).click()
+        expect(recovery_page.get_by_text('A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.', exact=True)).to_be_visible()
+        expect(recovery_page.get_by_label('Horários', exact=True)).to_have_value('08:15, 09:00, 09:55')
         recovery_page.evaluate('window.syntheticConflict=false')
-        recovery_page.get_by_role('button',name='Salvar horários').click()
-        expect(recovery_page.get_by_text('Horários compartilhados com os computadores da escola.',exact=True)).to_be_visible()
-        assert recovery_page.evaluate('window.syntheticSaves[0].rules[0].times[0]')=='08:15'
+        recovery_page.get_by_role('button', name='Salvar', exact=True).click()
+        recovery_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
+        assert recovery_page.evaluate('window.syntheticSaves.length') == 1
+        assert recovery_page.evaluate("window.syntheticSaves[0].rules.filter(r=>r.enabled).every(r=>r.times.join()==='08:15,09:00,09:55')")
         recovery_page.screenshot(path=str(out/'schedule-recovery-after-save.png'),full_page=True,animations='disabled')
         recovery_page.close()
         assert not errors,errors
-        print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion; schedule reload preserves recovery notice and blocks editing/saving until completion.')
+        print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion; desktop shell navigates its four pages; agenda conflict keeps the draft and saves once resolved.')
         print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','view return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox always shown','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))
         browser.close()
 finally:

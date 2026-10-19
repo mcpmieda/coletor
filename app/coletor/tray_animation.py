@@ -41,13 +41,14 @@ class AnimationPolicy:
         return self.enabled and not self.reduced_motion
 
 
-# A long resting beat between gestures keeps the tiny notification icon unobtrusive:
-# a blink, an ear twitch (up, down, up) and a double blink over about 25 seconds.
-# Only head frames exist at icon size; the tail lives on the full-body sprite.
+# A lively but calm fox beside the clock: a gesture every ~3 s over a 22 s loop
+# (blink, a three-beat ear wag, a double blink and a short wag). Only head
+# frames exist at icon size; the tail lives on the full-body sprite.
 IDLE_SEQUENCE = (
-    *("fox-idle",) * 10, "fox-blink", *("fox-idle",) * 9,
-    "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 10,
-    "fox-blink", "fox-idle", "fox-blink", *("fox-idle",) * 8,
+    *("fox-idle",) * 5, "fox-blink", *("fox-idle",) * 5,
+    "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 5,
+    "fox-blink", "fox-idle", "fox-blink", *("fox-idle",) * 4,
+    "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 5,
 )
 WORKING_SEQUENCE = tuple(f"fox-working-{index}" for index in range(1, 5))
 STATIC_FRAMES = {

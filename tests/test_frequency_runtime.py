@@ -72,7 +72,7 @@ class Provider:
         if operation == 'lease':
             if self.fail_lease: raise FrequencyError('lease-busy')
             self.fence += 1
-            result.update(fencingToken=self.fence, expiresAt=stamp(self.now + 120), settingsRevision=0)
+            result.update(fencingToken=self.fence, expiresAt=stamp(self.now + payload['durationSeconds']), settingsRevision=0)
         elif operation == 'heartbeat': result.update(fencingToken=payload['fencingToken'], expiresAt=stamp(self.now + 100))
         elif operation == 'collect':
             if payload['fencingToken'] != self.fence: raise FrequencyError('lease-fenced')
@@ -474,7 +474,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.source.reads, 0)
 
     def test_expired_capture_gets_new_lease_before_first_attempt(self):
-        self.source.on_capture = lambda: setattr(self.provider, 'now', NOW + 130)
+        self.source.on_capture = lambda: setattr(self.provider, 'now', NOW + frequency_runtime.LEASE_SECONDS + 10)
         self.assertEqual(self.runtime.collect()['state'], 'ready')
         payload = next(p for p in self.provider.requests if p['operation'] == 'collect')
         self.assertEqual(payload['fencingToken'], 3)
@@ -484,7 +484,7 @@ class RuntimeTests(unittest.TestCase):
             def wait(self, timeout=None): return super().wait(None if timeout is None else min(timeout, 0.02))
 
         def slow_capture():
-            self.provider.now = NOW + 130  # The 120-second grant lapses mid-capture.
+            self.provider.now = NOW + frequency_runtime.LEASE_SECONDS + 10  # The grant lapses mid-capture.
             time.sleep(0.3)                # Heartbeat thread runs several times.
         self.source.on_capture = slow_capture
         with patch.object(frequency_runtime.threading, 'Event', QuickEvent):
@@ -510,7 +510,7 @@ class RuntimeTests(unittest.TestCase):
         lease_request_started = self.provider.now
         self.runtime._acquire(status)
         self.assertEqual(self.runtime._lease['fencingToken'], 1)
-        self.assertEqual(self.runtime._lease['deadline'], lease_request_started + 118)
+        self.assertEqual(self.runtime._lease['deadline'], lease_request_started + frequency_runtime.LEASE_SECONDS - 2)
         self.assertGreater(self.runtime._lease['deadline'], self.provider.now)
 
     def test_stale_status_must_not_reuse_an_expired_own_lease(self):
@@ -536,19 +536,94 @@ class RuntimeTests(unittest.TestCase):
         self.runtime._heartbeat(self.runtime._epoch)
         self.assertLessEqual(self.runtime._lease['deadline'], old_deadline)
 
-    def test_old_pending_fence_queries_receipt_then_requires_recapture(self):
+    def test_old_uncommitted_fence_is_superseded_by_a_fresh_read_without_anyone(self):
         payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
                                      {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
         self.storage.enqueue(payload)
         result = self.runtime.collect()
-        self.assertEqual(result['code'], 'lease-fenced')
-        self.assertEqual(self.source.reads, 0)
-        self.assertEqual(self.storage.queue()[0]['payload'], payload)
+        self.assertEqual(result['state'], 'ready')
+        self.assertIsNone(result['code'])
+        # The server was asked for a receipt first; nothing re-signed or resent.
+        self.assertTrue(any(p['operation'] == 'receipt' and p['requestId'] == payload['requestId'] for p in self.provider.requests))
+        self.assertFalse(any(p['operation'] == 'collect' and p['requestId'] == payload['requestId'] for p in self.provider.requests))
+        self.assertEqual(self.source.reads, 1)  # The class was read again from Smecel.
+        self.assertEqual(self.storage.queue(), [])
+        self.assertTrue(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
+
+    def test_old_uncommitted_fence_of_a_class_not_read_now_is_kept(self):
+        other = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                   {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
+        other.update(sourceClassId='99999', sourceClassLabel='TURMA SINTÉTICA B')  # A class not read in this run.
+        self.storage.enqueue(other)
+        result = self.runtime.collect()  # Only class A is selected in this run.
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual([e['payload']['requestId'] for e in self.storage.queue()], [other['requestId']])
+        self.assertFalse(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
+
+    def test_old_uncommitted_fence_survives_a_failed_re_read(self):
+        payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                     {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
+        self.storage.enqueue(payload)
+        self.source.operational_capture = Mock(side_effect=SessionError('expired'))
+        result = self.runtime.collect()
+        self.assertEqual(result['state'], 'error')
+        # Without a confirmed replacement the previous observation stays protected.
+        self.assertEqual([e['payload']['requestId'] for e in self.storage.queue()], [payload['requestId']])
+        self.assertFalse(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
+
+    def test_all_classes_with_a_filtered_smecel_list_is_reported_not_called_complete(self):
+        self.source.operational_catalog = lambda storage: {
+            'selected_class_ids': ['13331'], 'unavailable_class_ids': [], 'all_classes': True,
+            'catalog': {'filtered': True, 'classes': [{'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'}]}}
+        result = self.runtime.collect()
+        self.assertEqual(self.source.reads, 1)  # The visible class was still sent.
+        self.assertEqual(result['code'], 'SOURCE_LIST_FILTERED')
 
     def test_settings_conflict_preserves_shared_schedule(self):
         before = copy.deepcopy(self.provider.shared_schedule)
         with self.assertRaises(FrequencyError): self.runtime.save_settings(99, schedule())
         self.assertEqual(self.provider.shared_schedule, before)
+
+    def test_fenced_or_conflicting_run_does_not_stop_the_schedule(self):
+        for code in ('lease-fenced', 'revision-conflict'):
+            self.runtime._code, self.runtime._state = code, 'error'
+            zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+            now = datetime.fromtimestamp(self.provider.now, timezone.utc).astimezone(zone)
+            value = schedule()
+            rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+            rule.update(enabled=True, times=[now.strftime('%H:%M')])
+            self.provider.shared_schedule = value
+            self.runtime.collect = Mock()
+            self.runtime._minute = None
+            self.runtime._fired.clear()
+            self.runtime.tick()
+            import time
+            time.sleep(.02)
+            self.assertEqual(self.runtime.collect.call_count, 1, code)
+            self.provider.now += 3600
+
+    def test_unlinked_class_in_a_shift_alerts_without_blocking(self):
+        self.source.operational_catalog = lambda storage: {
+            'selected_class_ids': ['13331', '99'], 'unavailable_class_ids': [], 'all_classes': True,
+            'catalog': {'classes': [{'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'},
+                                    {'class_id': '99', 'name': 'AEE SEM LIGACAO', 'shift': 'vespertino'}]}}
+        result = self.runtime.collect({'vespertino'})  # No linked class in this shift.
+        self.assertEqual(result['code'], 'CLASS_RECONCILIATION_REQUIRED')
+        self.assertEqual(self.source.reads, 0)
+        result = self.runtime.collect({'matutino'})  # The next slot still collects.
+        self.assertEqual(self.source.reads, 1)
+
+    def test_shift_without_classes_is_a_quiet_wait(self):
+        result = self.runtime.collect({'vespertino'})  # The synthetic class is matutino.
+        self.assertEqual((result['code'], result['state']), ('NO_CLASSES_IN_SHIFT', 'reserve'))
+        self.assertFalse(any(e['kind'] == 'failure' for e in self.runtime.recent_history(20)))
+
+    def test_paused_run_gets_a_closing_fact(self):
+        self.source.on_capture = lambda: self.runtime.local_pause(True)
+        self.runtime.collect()
+        kinds = [e['kind'] for e in self.runtime.recent_history(20)]
+        self.assertIn('collection-started', kinds)
+        self.assertIn('collection-stopped', kinds)
 
     def test_expired_source_login_does_not_loop_or_launch(self):
         self.source.operational_catalog = Mock(side_effect=SessionError('expired'))
@@ -632,6 +707,60 @@ class RuntimeTests(unittest.TestCase):
         self.provider.now += 120
         self.runtime.tick()
         self.assertEqual(self.runtime.collect.call_count, 1)
+
+    def test_slot_reached_during_a_long_collection_runs_once_right_after(self):
+        zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+        now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(zone)
+        later = datetime.fromtimestamp(NOW + 900, timezone.utc).astimezone(zone)
+        value = schedule()
+        for r in value['rules']: r.update(enabled=False, times=[], recheck=None)
+        rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=sorted({now.strftime('%H:%M'), later.strftime('%H:%M')}))
+        self.provider.shared_schedule = value
+        self.runtime.collect = Mock()
+        self.runtime.tick()  # First slot: learns the agenda and starts.
+        import time
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 1)
+        self.provider.now += 900
+        self.runtime._operation.acquire()  # The first collection is still running.
+        self.runtime.tick()
+        self.assertEqual(self.runtime.collect.call_count, 1)  # Never in parallel.
+        self.runtime._operation.release()
+        self.provider.now += 120  # It ends two minutes later: one coalesced run.
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 2)
+        self.provider.now += 60
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 2)
+        self.assertTrue(any(e['kind'] == 'late-start' for e in self.runtime.recent_history(20)))
+
+    def test_delayed_slot_removed_from_the_agenda_meanwhile_is_cancelled(self):
+        zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+        now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(zone)
+        later = datetime.fromtimestamp(NOW + 900, timezone.utc).astimezone(zone)
+        value = schedule()
+        for r in value['rules']: r.update(enabled=False, times=[], recheck=None)
+        rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=sorted({now.strftime('%H:%M'), later.strftime('%H:%M')}))
+        self.provider.shared_schedule = value
+        self.runtime.collect = Mock()
+        self.runtime.tick()
+        import time
+        time.sleep(.02)
+        self.provider.now += 900
+        self.runtime._operation.acquire()
+        self.runtime.tick()  # The second slot arrives while busy.
+        self.runtime._operation.release()
+        rule['times'] = [now.strftime('%H:%M')]  # The school removes it meanwhile.
+        self.provider.shared_schedule = copy.deepcopy(value)
+        self.provider.now += 120
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 1)
+        self.assertTrue(any(e['kind'] == 'late-cancelled' for e in self.runtime.recent_history(20)))
 
     def test_preview_or_different_header_cannot_be_promoted(self):
         value = preview(); value['mode'] = 'demo'
@@ -770,4 +899,9 @@ class StorageTests(unittest.TestCase):
         invalid = schedule(); invalid['timezone'] = 'invalid/zone'
         with self.assertRaises(FrequencyError): validate_schedule(invalid)
         invalid = schedule(); invalid['rules'][0]['times'] = ['08:00'] * 17
+        with self.assertRaises(FrequencyError): validate_schedule(invalid)
+        every_quarter = [f'{7 + i // 4:02d}:{i % 4 * 15:02d}' for i in range(48)]
+        full = schedule(); full['rules'][0]['times'] = every_quarter
+        self.assertEqual(len(validate_schedule(full)['rules'][0]['times']), 48)
+        invalid = schedule(); invalid['rules'][0]['times'] = every_quarter[:48]; invalid['rules'][0]['recheck'] = '23:30'
         with self.assertRaises(FrequencyError): validate_schedule(invalid)

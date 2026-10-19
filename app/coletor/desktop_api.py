@@ -20,6 +20,7 @@ ALERTS = {
     'SOURCE_LOGIN_REQUIRED': ('Smecel desconectado', 'Abra o Coletor e entre no Smecel para continuar a coleta.'),
     'SOURCE_LOGIN_FAILED': ('Smecel recusou o acesso', 'Confira o e-mail e a senha do Smecel salvos no Coletor.'),
     'CLASS_RECONCILIATION_REQUIRED': ('Turma sem ligação no Centro', 'Há turma do Smecel que o Centro não reconheceu. Confira a Importação.'),
+    'SOURCE_LIST_FILTERED': ('Lista de turmas incompleta', 'O Smecel mostrou a lista filtrada; só as turmas visíveis foram enviadas.'),
     'CENTER_CLASSES_REQUIRED': ('Turmas ainda não importadas', 'Importe a Relação e o Relatório no Centro de Administração.'),
     'NO_SELECTED_CLASSES': ('Nenhuma turma escolhida', 'Abra o Coletor, entre no Smecel e marque as turmas.'),
     'SOURCE_CLASS_UNAVAILABLE': ('Turma fora da lista do Smecel', 'Uma turma escolhida não apareceu na lista do Smecel.'),
@@ -32,6 +33,14 @@ ALERTS = {
     'ACCESS_REQUIRED': ('Entre no Ecossistema', 'A coleta automática precisa do acesso deste computador.'),
     'CLOCK_OUT_OF_SYNC': ('Horário do Windows incorreto', 'Sincronize data e hora do Windows para retomar a coleta.'),
 }
+
+
+def starts_with_windows():
+    """The installer's Startup shortcut opens the Coletor beside the clock at logon."""
+    base = os.environ.get('APPDATA')
+    if not base: return False
+    from pathlib import Path
+    return (Path(base) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup' / 'Coletor de Frequência.lnk').is_file()
 
 
 def native_local_recovery_confirmation(summary):
@@ -58,6 +67,8 @@ def native_local_recovery_confirmation(summary):
 class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
+        self._paused_for_choice = False
+        self._resume_stop = threading.Event()  # Set on exit or logout.
         # The fox is part of the program's identity: always shown, animated unless the
         # system asks for reduced motion.
         self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True})
@@ -76,6 +87,7 @@ class DesktopApi(PreviewApi):
     def _alert(self, code):
         message = ALERTS.get(code)
         if message is None: return
+        if not self._notifications_on(): return  # The operator turned balloons off.
         tray = self._tray
         if tray is None:
             self._pending_alert = message
@@ -86,15 +98,30 @@ class DesktopApi(PreviewApi):
         """Python-only: the tray shows the collector state and pending balloons."""
         self._tray = tray
         tray.status_provider = self._collector.public_status
+        tray.collect_action = self.collect_now
+        tray.pause_action = self.pause_collector
+        tray.theme_provider = self._tray_theme
+        tray.notifications_provider = self._notifications_on
+        tray.notifications_action = self._set_notifications
+        tray.logs_action = self._open_logs_folder
         message, self._pending_alert = self._pending_alert, None
         if message: tray.notify(*message)
 
-    def _resume_collection(self, attempts=30, interval=60):
+    def _tray_theme(self):
+        try: return self._settings.read()["settings"].get("theme", "system")
+        except (OSError, ValueError, TypeError): return "system"
+
+    def _resume_collection(self, attempts=None, interval=60, max_interval=900):
         """Python-only. Reopening the program (or Windows) keeps collecting when the
         operator left collection active; it stops only by an explicit pause or logout.
-        A boot without network yet is retried for about half an hour."""
-        if not self._resume.active(): return False
-        for attempt in range(attempts):
+        Without network it keeps trying (every minute, then backing off to 15
+        minutes) for as long as the operator's intention stays "active"."""
+        attempt = 0
+        while self._resume.active() and (attempts is None or attempt < attempts):
+            if attempt:
+                wait = min(max_interval, interval * (1 if attempt < 30 else 2 ** min(4, (attempt - 30) // 10 + 1)))
+                if self._resume_stop.wait(wait): return False
+            attempt += 1
             status = self._access.status()
             if status.get('authenticated') and status.get('authorized'):
                 result = self._operational(self._collector.activate)
@@ -102,7 +129,6 @@ class DesktopApi(PreviewApi):
             elif status.get('code') not in {'ACCESS_UNAVAILABLE', 'LOGIN_UNAVAILABLE'}:
                 self._alert('ACCESS_REQUIRED')
                 return False
-            if attempt + 1 < attempts: time.sleep(interval)
         return False
 
     def _start_resume(self):
@@ -123,7 +149,69 @@ class DesktopApi(PreviewApi):
             return {'error': 'Não foi possível concluir. Confira o estado do coletor e a conexão.', 'code': 'unavailable'}
 
     def get_collector_status(self):
-        return self._operational(self._collector.refresh)
+        result = self._operational(self._collector.refresh)
+        if 'error' not in result: self._remember_status(result)
+        return result
+
+    # ---- Instant opening: a non-secret summary of the last verified status.
+    _SNAPSHOT_FIELDS = ('state', 'code', 'active', 'localPaused', 'persistent', 'credential', 'selectedClasses',
+                        'classesMode', 'settings', 'lastReceipt')
+
+    def _snapshot_path(self):
+        return self._settings._directory / 'ui-snapshot.json'
+
+    def _remember_status(self, status):
+        """Masked account, counts, schedule and last receipt only; never the
+        password, tokens, students or diary content."""
+        import json, tempfile
+        try:
+            clean = {k: status.get(k) for k in self._SNAPSHOT_FIELDS}
+            # A saved "collecting" is stale by the next opening: show it as ready.
+            if clean.get('state') == 'collecting': clean['state'] = 'ready'
+            # Read before the live access check: only whether an access exists,
+            # never the (masked) account.
+            clean['credential'] = {'saved': bool((clean.get('credential') or {}).get('saved'))}
+            payload = json.dumps({'version': 1, 'savedAt': time.time(), 'status': clean}, ensure_ascii=False)
+            if len(payload) > 64_000: return
+            directory = self._snapshot_path().parent
+            directory.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(prefix='.ui-snapshot-', suffix='.tmp', dir=directory)
+            try:
+                with os.fdopen(descriptor, 'w', encoding='utf-8') as file: file.write(payload)
+                os.replace(temporary, self._snapshot_path())
+            finally:
+                if os.path.exists(temporary): os.unlink(temporary)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def _forget_status(self):
+        try: self._snapshot_path().unlink(missing_ok=True)
+        except OSError: pass
+
+    def get_startup_snapshot(self):
+        """Read locally, without the network, so the window opens ready. The
+        live status replaces it moments later; nothing here authorizes work."""
+        import json
+        paired = False
+        try:
+            device = json.loads((self._settings._directory / 'device.json').read_text(encoding='utf-8'))
+            paired = isinstance(device, dict) and device.get('state') == 'active'
+        except (OSError, ValueError):
+            pass
+        status = None
+        if paired:
+            try:
+                cached = json.loads(self._snapshot_path().read_text(encoding='utf-8'))
+                if isinstance(cached, dict) and cached.get('version') == 1 and isinstance(cached.get('status'), dict):
+                    status = {k: cached['status'].get(k) for k in self._SNAPSHOT_FIELDS}
+                    if status.get('state') == 'collecting': status['state'] = 'ready'
+                    status['progress'] = {'completed': 0, 'total': 0, 'classLabel': None}
+                    status['savedAt'] = cached.get('savedAt')
+            except (OSError, ValueError):
+                pass
+        # History (class names, counts) waits for the verified access: the
+        # protected get_collector_history fills it a moment later.
+        return {'paired': paired, 'status': status, 'history': [], 'settings': self._read_settings()['settings']}
 
     def activate_collector(self):
         result = self._operational(self._collector.activate)
@@ -134,13 +222,17 @@ class DesktopApi(PreviewApi):
         return self._operational(self._collector.collect)
 
     def pause_collector(self, paused):
+        self._paused_for_choice = False  # The operator's explicit decision wins.
         result = self._operational(lambda: self._collector.local_pause(paused))
         if 'error' not in result: self._resume.set(not paused)
         return result
 
     def save_source_credential(self, email, password):
         # Write-only: the window never receives the saved password back.
-        try: return self._collector.save_credential(email, password)
+        try:
+            result = self._collector.save_credential(email, password)
+            self._remember_status(result)
+            return result
         except StorageError as error:
             if error.code == 'SOURCE_CREDENTIAL_INVALID':
                 return {'error': 'Confira o e-mail e a senha do Smecel.', 'code': error.code}
@@ -149,10 +241,18 @@ class DesktopApi(PreviewApi):
             return {'error': 'Não foi possível salvar o acesso do Smecel.', 'code': 'unavailable'}
 
     def forget_source_credential(self):
-        return self._operational(self._collector.forget_credential)
+        result = self._operational(self._collector.forget_credential)
+        if 'error' not in result: self._remember_status(result)
+        return result
 
-    def get_collector_history(self):
-        return {'entries': self._collector.recent_history(50)}
+    def get_collector_history(self, after=None):
+        # Everything the log keeps (2000 events, 30 days at most), so the 24 h
+        # indicators and Registros never miss an older failure. Polls pass the
+        # newest 'at' they have and receive only what came after it.
+        entries = self._collector.recent_history(2000)
+        if type(after) in {int, float}:
+            entries = [e for e in entries if e['at'] > after]
+        return {'entries': entries}
 
     def save_shared_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_settings(revision, schedule))
@@ -259,6 +359,9 @@ class DesktopApi(PreviewApi):
             if blocked is not None: return blocked
             try:
                 self._access.logout()
+                self._resume_stop.set()  # A completed logout ends any offline retry.
+                self._paused_for_choice = False
+                self._forget_status()
                 self._resume.set(False)
                 self._collector.cancel(purge=True)
                 self._manual_session.close()
@@ -271,8 +374,21 @@ class DesktopApi(PreviewApi):
             self._collector._operation.release()
 
     def prepare_manual_login(self, year):
-        if self._collector.public_status()['active']: self._collector.local_pause(True)
-        return self._manual(lambda: self._manual_session.prepare_login(year))
+        status = self._collector.public_status()
+        if status['active'] and not status['localPaused']:
+            # Choosing classes borrows the Smecel session: pause only for the
+            # choice and resume when it closes. A pause the operator made stays.
+            self._collector.local_pause(True)
+            self._paused_for_choice = True
+        result = self._manual(lambda: self._manual_session.prepare_login(year))
+        if 'error' in result: self._resume_after_choice()  # Nothing opened: nothing to wait for.
+        return result
+
+    def _resume_after_choice(self):
+        if not self._paused_for_choice: return
+        self._paused_for_choice = False
+        resumed = self._operational(lambda: self._collector.local_pause(False))
+        if 'error' not in resumed: self._remember_status(resumed)
 
     def get_manual_class_selection_preferences(self):
         saved = self._manual_session._selections.read()
@@ -316,7 +432,11 @@ class DesktopApi(PreviewApi):
             return {"error": "Confira a etapa, a turma e o ano. Se a sessão não responder, feche-a e prepare novamente."}
 
     def open_manual_session(self, generation, confirmed):
-        return self._manual(lambda: self._manual_session.open(generation, confirmed))
+        # With a saved Smecel access the Coletor signs in itself, so the window
+        # can stay hidden (Ajustes); otherwise the person signs in in Edge.
+        refused = self._collector.public_status().get('code') in {'SOURCE_LOGIN_FAILED', 'SOURCE_LOGIN_REQUIRED'}
+        can_sign_in = bool(self._collector.saved_credential()) and not refused
+        return self._manual(lambda: self._manual_session.open(generation, confirmed, can_sign_in))
 
     def close_manual_session(self):
         if self._collector.public_status()['active']:
@@ -325,8 +445,12 @@ class DesktopApi(PreviewApi):
             result = self._operational(lambda: self._collector.local_pause(True))
             if 'error' in result:
                 return result
-            return self._manual_session.status()
-        return self._manual(self._manual_session.close)
+            closed = self._manual_session.status()
+        else:
+            closed = self._manual(self._manual_session.close)
+        if 'error' not in closed and not closed.get('cleanup_pending'):
+            self._resume_after_choice()
+        return closed
 
     def get_manual_session_status(self):
         return self._manual_session.status()
@@ -349,7 +473,8 @@ class DesktopApi(PreviewApi):
 
     def get_desktop_status(self):
         return {"tray_available": self._tray is not None and self._tray.available(),
-                "automatic_collection": self._collector.public_status()['active']}
+                "automatic_collection": self._collector.public_status()['active'],
+                "autostart": starts_with_windows()}
 
     def hide_window(self):
         if self._tray is None:
@@ -387,6 +512,35 @@ class DesktopApi(PreviewApi):
     def save_theme(self, theme):
         return self._save("theme", theme)
 
+    def save_notifications(self, show):
+        if type(show) is not bool: return {"error": "Preferência inválida."}
+        return self._save("notifications", {"show": show})
+
+    def _notifications_on(self):
+        try: return self._settings.read()["settings"]["notifications"]["show"] is True
+        except (OSError, ValueError, TypeError, KeyError): return True
+
+    def _set_notifications(self, show):
+        """Tray menu switch (native, trusted): same local preference as in
+        Ajustes, saved without the online check so it also works offline."""
+        if type(show) is bool: self._save("notifications", {"show": show})
+
+    def _open_logs_folder(self):
+        """Tray menu: the folder with the collector's log (no secrets there)."""
+        os.startfile(str(self._settings._directory))  # nosec B606 - fixed local folder
+
+    def save_browser_preference(self, visible):
+        if type(visible) is not bool: return {"error": "Preferência inválida."}
+        return self._save("browser", {"visible": visible})
+
+    def save_classes_mode(self, mode):
+        result = self._save("classes", {"mode": mode})
+        if "error" not in result:
+            # The count shown in Tarefas follows the new mode at once.
+            status = self._operational(self._collector.public_status)
+            if "error" not in status: self._remember_status(status)
+        return result
+
 
 
 def _protected(method):
@@ -405,7 +559,7 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_manual_class_selection", "clear_manual_class_selection", "capture_selected_class",
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
-              "save_schedule", "save_theme", "get_collector_history"):
+              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
 for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',
