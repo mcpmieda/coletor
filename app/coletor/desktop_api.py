@@ -34,6 +34,14 @@ ALERTS = {
 }
 
 
+def starts_with_windows():
+    """The installer's Startup shortcut opens the Coletor beside the clock at logon."""
+    base = os.environ.get('APPDATA')
+    if not base: return False
+    from pathlib import Path
+    return (Path(base) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup' / 'Coletor de Frequência.lnk').is_file()
+
+
 def native_local_recovery_confirmation(summary):
     """A webview click is never authorization to erase academic batches."""
     if os.name!='nt': return False
@@ -412,7 +420,8 @@ class DesktopApi(PreviewApi):
 
     def get_desktop_status(self):
         return {"tray_available": self._tray is not None and self._tray.available(),
-                "automatic_collection": self._collector.public_status()['active']}
+                "automatic_collection": self._collector.public_status()['active'],
+                "autostart": starts_with_windows()}
 
     def hide_window(self):
         if self._tray is None:

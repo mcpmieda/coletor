@@ -69,7 +69,7 @@ export const COLLECTOR_STATES = { connect: 'Desligada', ready: 'Ativa neste comp
   collecting: 'Coletando', paused: 'Pausada', 'login-required': 'Entrar no Smecel', error: 'Precisa de atenção' };
 export const COLLECTOR_CODES: Record<string, string> = {
   'lease-busy': 'Outro computador está coletando. Este fica de reserva.',
-  'lease-fenced': 'O computador ativo mudou. Descarte o lote pendente para coletar de novo.',
+  'lease-fenced': 'A coleta foi interrompida no meio (conexão lenta ou outro computador). A próxima continua sozinha.',
   'revision-conflict': 'Os dados mudaram no Ecossistema. Descarte o lote pendente para coletar de novo.',
   'SOURCE_LOGIN_REQUIRED': 'Entre no Smecel e carregue as turmas.',
   'SOURCE_LOGIN_FAILED': 'O Smecel recusou o e-mail ou a senha salvos. Confira o acesso salvo.',

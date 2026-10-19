@@ -3,7 +3,7 @@ import { INITIAL_FOX, POSE_POSITION, beginAction, foxPose, nextFox, type FoxActi
 
 const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para ajudar.', reading:'Lendo o diário…', review:'Há pontos para conferir.', error:'O arquivo precisa de atenção.' };
 /** Always present; it moves only while visible and when the system allows motion. */
-export default function FoxCompanion({ activity }: Readonly<{ activity: FoxActivity }>) {
+export default function FoxCompanion({ activity, caption: showCaption = true, onPet }: Readonly<{ activity: FoxActivity; caption?: boolean; onPet?: () => void }>) {
   const [animation, setAnimation] = useState(INITIAL_FOX);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || (!document.hidden && window.__coletorWindowVisible !== false));
   const [reduced, setReduced] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -35,6 +35,7 @@ export default function FoxCompanion({ activity }: Readonly<{ activity: FoxActiv
   }, [animation, activity, inLayout, visible, reduced]);
   function pet() {
     lastInput.current = performance.now();
+    onPet?.();
     if (inLayout && visible && !reduced) setAnimation(beginAction('pet',activity));
   }
   const still = !inLayout || !visible || reduced;
@@ -49,7 +50,7 @@ export default function FoxCompanion({ activity }: Readonly<{ activity: FoxActiv
       <button className="fox-button" onClick={pet} aria-label="Fazer carinho na raposa" title="Fazer carinho na raposa"><span className="fox-frame"><img className="fox-sprite" src="./mascot/atlas.png" alt="Raposa vermelha, mascote do coletor" width="512" height="256" style={{ translate:`${-column * 128}px ${-row * 128}px` }} draggable={false} /></span></button>
       {action === 'sleep' && <span className="fox-zzz" aria-hidden="true">z z</span>}
       {action === 'pet' && <span className="fox-heart" aria-hidden="true">♥</span>}
-      <p>{caption}</p>
+      {showCaption && <p>{caption}</p>}
     </div>
   </section>;
 }

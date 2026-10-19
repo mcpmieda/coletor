@@ -1,0 +1,54 @@
+import { expect, test } from 'vitest';
+import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, scheduleText, toShared, type PeriodDraft } from './periods';
+
+const draft = (patch: Partial<PeriodDraft> = {}): PeriodDraft => ({ ...DEFAULT_DRAFT, ...patch });
+
+test('an interval period becomes the same times on every chosen day and both shifts', () => {
+  const shared = toShared(draft({ every: 60, from: '07:00', to: '10:00', weekdays: [0, 4], finalCheck: '18:00' }));
+  expect(shared.rules).toHaveLength(14);
+  const monday = shared.rules.filter(r => r.weekday === 1);
+  expect(monday.map(r => r.shift)).toEqual(['matutino', 'vespertino']);
+  expect(monday.every(r => r.enabled && r.times.join() === '07:00,08:00,09:00,10:00' && r.recheck === '18:00')).toBe(true);
+  expect(shared.rules.filter(r => r.weekday === 5).every(r => r.enabled)).toBe(true); // Friday
+  expect(shared.rules.filter(r => r.weekday === 0 || r.weekday === 2).every(r => !r.enabled && r.times.length === 0 && r.recheck === null)).toBe(true);
+});
+
+test('round trip: interval, fixed times and off', () => {
+  for (const d of [draft({ every: 45, from: '07:15', to: '16:15' }), draft({ mode: 'times', times: ['08:00', '13:30'] }), draft({ mode: 'off' })]) {
+    const back = fromShared(toShared(d));
+    expect(back.mode).toBe(d.mode);
+    expect(dayTimes(back)).toEqual(dayTimes(d));
+    if (d.mode !== 'off') expect(back.weekdays).toEqual(d.weekdays);
+  }
+});
+
+test('a schedule made per shift in the Ecossistema is shown as custom', () => {
+  const shared = toShared(draft({ every: 60, from: '07:00', to: '09:00' }));
+  shared.rules[2] = { ...shared.rules[2], times: ['13:00'] };
+  expect(fromShared(shared).custom).toBe(true);
+  expect(fromShared(null)).toEqual(DEFAULT_DRAFT);
+});
+
+test('problems are explained before saving', () => {
+  expect(draftProblem(draft())).toBeNull();
+  expect(draftProblem(draft({ weekdays: [] }))).toMatch(/dia/);
+  expect(draftProblem(draft({ from: '18:00', to: '07:00' }))).toMatch(/depois do início/);
+  expect(draftProblem(draft({ every: 5, from: '00:00', to: '23:55' }))).toMatch(new RegExp(`limite é ${MAX_PER_DAY}`));
+  expect(draftProblem(draft({ finalCheck: '12:00' }))).toMatch(/conferência final/);
+  expect(draftProblem(draft({ mode: 'times', times: [] }))).toMatch(/horário/);
+});
+
+test('plain sentence for the task card', () => {
+  expect(scheduleText(draft())).toBe('A cada 30 min, das 07:00 às 17:30 · seg a sex');
+  expect(scheduleText(draft({ mode: 'times', times: ['13:00', '08:00'], weekdays: [0, 2] }))).toBe('Às 08:00, 13:00 · seg, qua');
+  expect(scheduleText(draft({ mode: 'off' }))).toBe('Sem coletas automáticas');
+});
+
+test('next collection in the school time zone', () => {
+  // Monday 2026-10-19 10:10 in Bahia (UTC-3) = 13:10Z.
+  const next = nextRun(draft({ every: 30, from: '07:00', to: '17:30' }), new Date('2026-10-19T13:10:00Z'));
+  expect(next?.toISOString()).toBe('2026-10-19T13:30:00.000Z');
+  // Friday after the last time goes to Monday 07:00.
+  expect(nextRun(draft(), new Date('2026-10-23T21:00:00Z'))?.toISOString()).toBe('2026-10-26T10:00:00.000Z');
+  expect(nextRun(draft({ mode: 'off' }))).toBeNull();
+});
