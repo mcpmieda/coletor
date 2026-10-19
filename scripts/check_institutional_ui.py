@@ -21,7 +21,7 @@ try:
         browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH", p.chromium.executable_path), headless=True)
         page = browser.new_page(viewport={"width": 1240, "height": 900}, locale="pt-BR", reduced_motion="reduce")
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.add_init_script("""window.__fixture={authorized:false,statusCalls:0,settingsCalls:0,logoutCalls:0,loginCalls:0,loginErrorCode:null,defer:false,pending:[]};
+        page.add_init_script("""window.__fixture={authorized:false,statusCalls:0,settingsCalls:0,snapshotCalls:0,logoutCalls:Number(sessionStorage.getItem('logoutCalls')||0),loginCalls:0,loginErrorCode:null,defer:false,pending:[]};
           window.pywebview={api:{
             get_institutional_access_status:async()=>{const f=window.__fixture;f.statusCalls++;
               if(f.defer) return new Promise(resolve=>f.pending.push(resolve));
@@ -29,11 +29,16 @@ try:
             open_institutional_login:async()=>{const f=window.__fixture;f.loginCalls++;
               if(f.loginErrorCode) return {error:'Autorização não disponível.',code:f.loginErrorCode};
               f.pairingCode='654321';return {ok:true};},
-            logout_institutional_access:async()=>{window.__fixture.logoutCalls++;window.__fixture.authorized=false;return {ok:true};},
+            logout_institutional_access:async()=>{const f=window.__fixture;f.logoutCalls++;sessionStorage.setItem('logoutCalls',String(f.logoutCalls));f.authorized=false;return {ok:true};},
             get_local_recovery_status:async()=>({pending:false,count:0,oldest:null,newest:null,unreadable:false}),
             discard_local_pending_collection:async()=>({ok:true,discarded:false}),
-            get_local_settings:async()=>{window.__fixture.settingsCalls++;return {settings:{schemaVersion:1,schedule:null,theme:'system',fox:{version:1,show:true,animate:true}}};},
-            get_desktop_status:async()=>({version:1,sourceState:'idle',canHide:true}),
+            get_startup_snapshot:async()=>{window.__fixture.snapshotCalls++;return {paired:false,status:null,history:[],settings:{schemaVersion:1,schedule:null,theme:'system',fox:{version:1,show:true,animate:true},browser:{visible:false},classes:{mode:'all'}}};},
+            get_local_settings:async()=>{window.__fixture.settingsCalls++;return {settings:{schemaVersion:1,schedule:null,theme:'system',fox:{version:1,show:true,animate:true},browser:{visible:false},classes:{mode:'all'}}};},
+            // Protected operational reads: counted as settings reads, never before authorization.
+            get_collector_status:async()=>{window.__fixture.settingsCalls++;return {state:'connect',code:null,active:false,localPaused:false,persistent:false,
+              progress:{completed:0,total:0,classLabel:null},lastReceipt:null,settings:null};},
+            get_collector_history:async()=>({entries:[]}),
+            get_desktop_status:async()=>({tray_available:true,automatic_collection:true,autostart:true}),
             set_tray_context:async()=>({ok:true}),
             get_manual_class_selection_preferences:async()=>({version:1,classes:[]}),
             get_manual_session_status:async()=>({state:'closed'})}};
@@ -75,7 +80,7 @@ try:
         page.screenshot(path=str(out / 'revocation-pending.png'), full_page=True)
         page.evaluate("window.__fixture.code=undefined")
         page.evaluate("window.__fixture.authorized=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
-        expect(page.get_by_role("heading", name="Coleta da frequência")).to_be_visible()
+        expect(page.get_by_role("heading", name="Tarefas", level=1)).to_be_visible()
         assert page.evaluate("window.__fixture.settingsCalls") > 0
         settings_calls = page.evaluate("window.__fixture.settingsCalls")
         status_calls = page.evaluate("window.__fixture.statusCalls")
@@ -85,8 +90,12 @@ try:
         page.screenshot(path=str(out / "synthetic-authorized.png"), full_page=True)
         page.evaluate("window.__fixture.defer=true;window.dispatchEvent(new Event('coletoraccesschanged'))")
         page.wait_for_function("window.__fixture.pending.length>0")
+        page.get_by_role("navigation", name="Navegação principal").get_by_role("button", name="Ajustes", exact=True).click()
         page.get_by_role("button", name="Sair da conta").click()
+        page.get_by_role("dialog").get_by_role("button", name="Sair", exact=True).click()
         expect(page.get_by_role("heading", name="Entrar no Ecossistema")).to_be_visible()
+        # Logout reloads the window: the late answer belongs to a page that no longer exists.
+        page.evaluate("(window.__fixture.pending||[]).splice(0).forEach(resolve=>resolve({authenticated:true,authorized:true}))")
         page.evaluate("window.__fixture.pending.splice(0).forEach(resolve=>resolve({authenticated:true,authorized:true}))")
         expect(page.get_by_role("button", name="Usar dados de exemplo")).to_have_count(0)
         assert page.evaluate("window.__fixture.logoutCalls") == 1
