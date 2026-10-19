@@ -161,8 +161,29 @@ class UpgradeKeepsChosenClassesTests(unittest.TestCase):
             (folder / "settings.json").write_text(json.dumps(
                 {"schemaVersion": 1, "schedule": None, "theme": "dark", "fox": {"version": 1, "show": True, "animate": True}}), encoding="utf-8")
             (folder / "class-selection.json").write_text(json.dumps(
-                {"schemaVersion": 1, "localRevision": 1, "profiles": [{"selected_class_ids": ["11"]}]}), encoding="utf-8")
+                {"schemaVersion": 2, "localRevision": 1, "profiles": [{"selected_class_ids": ["11"], "scope": {"origin": "https://www.smecel.com.br", "list_path": "/sistema/escola/turmaListar.php", "year": 2026, "context_key": "synthetic"}}]}), encoding="utf-8")
             self.assertEqual(LocalSettings(folder).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_real_v1_selection_file_keeps_its_choice(self):
+        import json, tempfile
+        from coletor.class_selection import validate_selection
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "settings.json").write_text(json.dumps(
+                {"schemaVersion": 1, "schedule": None, "theme": "system", "fox": {"version": 1, "show": True, "animate": True}}), encoding="utf-8")
+            v1 = validate_selection({"schemaVersion": 1, "localRevision": 3, "selected_class_ids": ["11", "12"],
+                "scope": {"origin": "https://www.smecel.com.br", "list_path": "/sistema/escola/turmaListar.php",
+                          "year": 2026, "context_key": "synthetic"}})
+            (folder / "class-selection.json").write_text(json.dumps(v1), encoding="utf-8")
+            self.assertEqual(LocalSettings(folder).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_unreadable_selection_file_never_widens_to_every_class(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "class-selection.json").write_text("{broken", encoding="utf-8")
+            self.assertEqual(LocalSettings(directory).read()["settings"]["classes"], {"mode": "chosen"})
 
     def test_new_install_defaults_to_every_class(self):
         import tempfile

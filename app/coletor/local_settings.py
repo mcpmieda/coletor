@@ -161,12 +161,16 @@ class LocalSettings:
 
     def _had_chosen_classes(self):
         """Installations from before 'Todas as turmas' chose classes by hand:
-        an upgrade keeps that choice instead of silently collecting every class."""
-        try:
-            saved = json.loads((self._directory / "class-selection.json").read_text(encoding="utf-8"))
-            return any(isinstance(p, dict) and p.get("selected_class_ids") for p in saved.get("profiles", []))
-        except (OSError, ValueError, AttributeError, TypeError):
+        an upgrade keeps that choice instead of silently collecting every class.
+        Uses the selection store's own reader (V1 and V2 files). A selection file
+        that exists but cannot be read keeps 'chosen' too: never widen by error."""
+        if not (self._directory / "class-selection.json").exists():
             return False
+        from .class_selection import ClassSelectionStore  # Imports this module.
+        data, notice = ClassSelectionStore(self._directory)._read()
+        if notice or data is None:
+            return True
+        return any(profile["selected_class_ids"] for profile in data["profiles"])
 
     def _upgrade(self, value):
         if isinstance(value, dict) and "classes" not in value and self._had_chosen_classes():
