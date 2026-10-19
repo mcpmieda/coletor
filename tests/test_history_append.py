@@ -34,3 +34,26 @@ class HistoryAppendTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HistoryCursorAndRetentionTests(unittest.TestCase):
+    def test_same_millisecond_events_get_distinct_increasing_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = CollectorHistory(directory, clock=lambda: 1_800_000_000.0)
+            log.record('collection-started')
+            newest = log.recent(1)[0]['at']
+            log.record('collection-finished')  # Same millisecond.
+            after = [e for e in log.recent(10) if e['at'] > newest]
+            self.assertEqual([e['kind'] for e in after], ['collection-finished'])
+
+    def test_facts_older_than_30_days_leave_the_file_itself(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1_800_000_000.0]
+            log = CollectorHistory(directory, clock=lambda: now[0])
+            for kind in ('started', 'activated', 'collection-started'):
+                log.record(kind)
+            now[0] += module.RETENTION_SECONDS + 86_400
+            CollectorHistory(directory, clock=lambda: now[0]).record('resumed')  # After a restart.
+            physical = log.path.read_text(encoding='utf-8')
+            self.assertNotIn('collection-started', physical)
+            self.assertIn('resumed', physical)

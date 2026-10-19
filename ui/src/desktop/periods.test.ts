@@ -93,3 +93,32 @@ test('fixed times closer than 5 minutes are refused before reaching the Ecossist
   expect(draftProblem({ ...DEFAULT_DRAFT, mode: 'times', times: ['08:00', '08:05'] })).toBeNull();
   expect(draftProblem({ ...DEFAULT_DRAFT, mode: 'times', times: ['08:00'], finalCheck: '08:02' })).toMatch(/5 minutos/);
 });
+
+test('next run is right across daylight saving changes', () => {
+  const sunday8 = (from: string, zone: string) => nextFrom8(zone, new Date(from));
+  function nextFrom8(timezone: string, now: Date) {
+    const rules = Array.from({ length: 14 }, (_, i) => ({
+      weekday: Math.floor(i / 2), shift: (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino',
+      enabled: Math.floor(i / 2) === 0 && i % 2 === 0, times: Math.floor(i / 2) === 0 && i % 2 === 0 ? ['08:00'] : [], recheck: null,
+    }));
+    return nextSharedRun({ timezone, rules }, now)?.toISOString();
+  }
+  // New York springs forward on 2026-03-08: Saturday 20:00 EST -> Sunday 08:00 EDT.
+  expect(sunday8('2026-03-08T01:00:00Z', 'America/New_York')).toBe('2026-03-08T12:00:00.000Z');
+  // Falls back on 2026-11-01: Saturday 20:00 EDT -> Sunday 08:00 EST.
+  expect(sunday8('2026-11-01T00:00:00Z', 'America/New_York')).toBe('2026-11-01T13:00:00.000Z');
+  // Bahia has no DST: control.
+  expect(sunday8('2026-10-17T23:00:00Z', 'America/Bahia')).toBe('2026-10-18T11:00:00.000Z');
+});
+
+test('an agenda with only the final check is kept by the editor', () => {
+  const rules = Array.from({ length: 14 }, (_, i) => {
+    const on = Math.floor(i / 2) >= 1 && Math.floor(i / 2) <= 5;
+    return { weekday: Math.floor(i / 2), shift: (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino', enabled: on, times: [], recheck: on ? '18:30' : null };
+  });
+  const draft = fromShared({ timezone: 'America/Bahia', rules });
+  expect(draftProblem(draft)).toBeNull();
+  const back = toShared(draft);
+  expect(back.rules.filter(r => r.enabled).every(r => r.times.length === 0 && r.recheck === '18:30')).toBe(true);
+  expect(back.rules.filter(r => r.enabled)).toHaveLength(10);
+});

@@ -77,6 +77,7 @@ class ProtectedStorage:
         self._crypto = crypto or Dpapi()
         self._consent, self._clock = consent, clock
         self.expired = 0  # Unreceipted batches dropped by retention, not yet logged.
+        self.restored = 0  # Batches brought back from a set-aside queue, not yet logged.
         self._credential_summary = None
         self._unreadable_since = None
         self._binding = None
@@ -134,9 +135,9 @@ class ProtectedStorage:
         if self._binding is None or purpose not in PURPOSES: raise StorageError()
         return ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + self._binding).encode('utf-8')
 
-    def _read(self, purpose):
-        if purpose in self._memory: return self._memory[purpose]
-        path = self.directory / (purpose + '.dpapi')
+    def _read(self, purpose, path=None):
+        if path is None and purpose in self._memory: return self._memory[purpose]
+        path = path or self.directory / (purpose + '.dpapi')
         limit = self._limit(purpose)
         try:
             if path.is_symlink(): raise StorageError()
@@ -242,6 +243,7 @@ class ProtectedStorage:
         own retention and by clear() (logout, safe removal)."""
         with self._lock:
             self._purge_quarantine(older_than=RETENTION_SECONDS)
+            self.restored += self._reintegrate_quarantine()
             path = self.directory / 'queue.dpapi'
             if self._binding is None or 'queue' in self._memory or not path.exists() or path.is_symlink():
                 self._unreadable_since = None
@@ -255,7 +257,8 @@ class ProtectedStorage:
                 if self._unreadable_since is None: self._unreadable_since = now
                 if now - self._unreadable_since < UNREADABLE_GRACE_SECONDS: return False
                 try:
-                    path.replace(self.directory / f'queue-unreadable-{time.strftime("%Y%m%d-%H%M%S")}.dpapi')
+                    # The name carries when it was set aside (the collector's clock).
+                    path.replace(self.directory / f'queue-unreadable-{int(now)}.dpapi')
                 except OSError:
                     return False  # Held by another process: try again later.
                 self._unreadable_since = None
@@ -263,12 +266,49 @@ class ProtectedStorage:
             except OSError:
                 return False
 
-    def _purge_quarantine(self, older_than=None):
-        now = self._clock()
-        for item in self.directory.glob('queue-unreadable-*.dpapi'):
+    def _quarantine_files(self):
+        try: return [p for p in sorted(self.directory.glob('queue-unreadable-*.dpapi')) if not p.is_symlink()]
+        except OSError: return []
+
+    def quarantined(self):
+        """Set-aside queues still waiting (safe removal treats them as pending)."""
+        with self._lock: return len(self._quarantine_files())
+
+    def _reintegrate_quarantine(self):
+        """A set-aside queue that decrypts again with the live binding belongs
+        to this device after all (DPAPI recovered): its batches go back to the
+        queue for the normal receipt check. Returns how many came back."""
+        if self._binding is None: return 0
+        restored = 0
+        for item in self._quarantine_files():
+            try: rows = self._read('queue', path=item)
+            except (StorageError, OSError): continue
+            if not isinstance(rows, list): continue
             try:
-                if item.is_symlink(): continue
-                if older_than is None or now - item.stat().st_mtime > older_than: item.unlink()
+                current = self._read('queue') or []
+            except StorageError:
+                continue  # The live queue itself is unreadable: retry later.
+            known = {v['payload'].get('requestId') for v in current}
+            back = [v for v in rows if isinstance(v, dict) and isinstance(v.get('payload'), dict)
+                    and v['payload'].get('requestId') not in known]
+            if len(current) + len(back) > MAX_QUEUE_ITEMS: continue
+            if back: self._write('queue', [*current, *back])
+            try: item.unlink()
+            except OSError: continue
+            restored += len(back)
+        return restored
+
+    def _purge_quarantine(self, older_than=None):
+        """Retention (7 days, like the queue) or an explicit decision (clear,
+        confirmed discard). Expired set-aside files are counted and logged."""
+        now = self._clock()
+        for item in self._quarantine_files():
+            try:
+                stamp = item.stem.rsplit('-', 1)[-1]
+                since = int(stamp) if stamp.isdigit() and len(stamp) >= 9 else item.stat().st_mtime
+                if older_than is None or now - since > older_than:
+                    item.unlink()
+                    if older_than is not None: self.expired += 1
             except OSError:
                 pass
 
@@ -317,6 +357,7 @@ class ProtectedStorage:
             # as success. Keep other protected purposes intact.
             path.unlink(missing_ok=True)
             self._memory.pop('queue',None)
+            self._purge_quarantine()  # The same explicit decision covers set-aside queues.
 
     def enqueue(self, payload):
         with self._lock:
@@ -391,4 +432,5 @@ class ProtectedStorage:
             # Only the owned files; no recursive deletion or other app paths.
             for purpose in PURPOSES:
                 (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)
-            self._purge_quarantine()  # Set-aside queues are this collector's data too.
+            # Set-aside queues are NOT removed here: logout is no proof they were
+            # receipted. They come back if readable, or expire with the retention.

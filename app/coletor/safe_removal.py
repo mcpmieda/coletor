@@ -26,8 +26,9 @@ def run(*, provider=None, output=None):
             # This is a separate process from the collector, so even an
             # unreadable/old-generation DPAPI queue must be treated as pending.
             # Never revoke the device key before receipts can be reconciled.
-            queue = ProtectedStorage(metadata.directory).recovery_status()
-            if queue['pending'] or queue['unreadable']:
+            storage = ProtectedStorage(metadata.directory)
+            queue = storage.recovery_status()
+            if queue['pending'] or queue['unreadable'] or storage.quarantined():
                 print('Remoção bloqueada: há lotes sem recibo ou uma fila cifrada que não pode ser conferida.', file=output)
                 print('Abra o Coletor para reconciliar os recibos; o descarte definitivo exige confirmação nativa separada.', file=output)
                 return 1

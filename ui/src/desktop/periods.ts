@@ -74,10 +74,11 @@ export function draftProblem(draft: PeriodDraft): string | null {
     if (!(draft.every >= 5 && draft.every <= 720)) return 'O intervalo deve ficar entre 5 e 720 minutos.';
   }
   const times = dayTimes(draft);
-  if (!times.length) return 'Informe pelo menos um horário.';
+  const finalOnly = !times.length && isTime(draft.finalCheck);
+  if (!times.length && !finalOnly) return 'Informe pelo menos um horário.';
   const total = times.length + (draft.finalCheck ? 1 : 0);
   if (total > MAX_PER_DAY) return `São ${total} coletas por dia; o limite é ${MAX_PER_DAY}. Aumente o intervalo ou encurte o período.`;
-  if (draft.finalCheck && (!isTime(draft.finalCheck) || draft.finalCheck <= times[times.length - 1]))
+  if (draft.finalCheck && (!isTime(draft.finalCheck) || (times.length > 0 && draft.finalCheck <= times[times.length - 1])))
     return 'A conferência final deve ser depois da última coleta do dia.';
   // Same rule as the Ecossistema's agenda: two moments of a day 5+ minutes apart.
   const moments = [...times, ...(draft.finalCheck ? [draft.finalCheck] : [])].map(toMinutes);
@@ -90,7 +91,8 @@ export function toShared(draft: PeriodDraft): SharedSchedule {
   const times = dayTimes(draft);
   const rules: SharedSchedule['rules'] = [];
   for (let day = 0; day < 7; day++) {
-    const enabled = draft.mode !== 'off' && draft.weekdays.includes(editorDay(day)) && times.length > 0;
+    // A day with only the final check stays enabled with that single moment.
+    const enabled = draft.mode !== 'off' && draft.weekdays.includes(editorDay(day)) && (times.length > 0 || isTime(draft.finalCheck));
     for (const shift of SHIFTS)
       rules.push({ weekday: day, shift, enabled, times: enabled ? times : [], recheck: enabled && draft.finalCheck ? draft.finalCheck : null });
   }
@@ -131,15 +133,36 @@ export function parseTimesText(text: string): { times: string[]; invalid: string
 }
 
 /** Next moment from `now` among per-day minutes (index 0 = Monday), in a time zone. */
+/** Civil date and time of an instant in a time zone. */
+function civil(at: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? NaN);
+  const weekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.find(p => p.type === 'weekday')?.value ?? '');
+  return { year: get('year'), month: get('month'), day: get('day'), minute: get('hour') * 60 + get('minute'), weekday };
+}
+
+/** The instant of a civil date + minute of day in a zone, across DST changes
+ *  (two passes over the zone offset; a skipped hour lands just after the jump). */
+function instant(year: number, month: number, day: number, minute: number, timezone: string): Date {
+  const wanted = Date.UTC(year, month - 1, day, 0, minute);
+  let guess = wanted;
+  for (let pass = 0; pass < 2; pass++) {
+    const seen = civil(new Date(guess), timezone);
+    const shown = Date.UTC(seen.year, seen.month - 1, seen.day, 0, seen.minute);
+    guess += wanted - shown;
+  }
+  return new Date(guess);
+}
+
 function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: Date): Date | null {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-    .formatToParts(now);
-  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
-  const weekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday'));
-  const minute = Number(get('hour')) * 60 + Number(get('minute'));
+  const today = civil(now, timezone);
   for (let offset = 0; offset < 8; offset++) {
-    const next = dayMinutes((weekday + offset) % 7).sort((a, b) => a - b).find(m => offset > 0 || m > minute);
-    if (next !== undefined) return new Date(now.getTime() + ((offset * 1440 + next - minute) * 60 - now.getSeconds()) * 1000);
+    const next = dayMinutes((today.weekday + offset) % 7).sort((a, b) => a - b).find(m => offset > 0 || m > today.minute);
+    if (next === undefined) continue;
+    // Civil day arithmetic on the calendar, never as 1440 real minutes per day.
+    const date = new Date(Date.UTC(today.year, today.month - 1, today.day + offset));
+    return instant(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), next, timezone);
   }
   return null;
 }

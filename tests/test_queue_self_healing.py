@@ -1,5 +1,6 @@
 """The local queue heals itself while the computer is authorized."""
 from pathlib import Path
+import os
 import sys
 import tempfile
 import unittest
@@ -51,11 +52,33 @@ class QueueSelfHealingTests(unittest.TestCase):
         self.assertFalse(self.storage.quarantine_unreadable_queue())
         self.assertEqual(len(self.storage.queue()), 1)
 
-    def test_logout_clear_removes_set_aside_queues(self):
+    def test_logout_keeps_set_aside_queues_until_retention(self):
         self.storage.directory.mkdir(parents=True, exist_ok=True)
-        (self.storage.directory / 'queue-unreadable-20261019-080000.dpapi').write_bytes(b'CFV2-old')
-        self.storage.clear()
-        self.assertEqual(list(self.storage.directory.glob('queue-unreadable-*.dpapi')), [])
+        kept = self.storage.directory / f'queue-unreadable-{int(self.now)}.dpapi'
+        kept.write_bytes(b'CFV2-old')
+        self.storage.clear()  # Logout is no proof the batches were receipted.
+        self.assertTrue(kept.exists())
+        self.assertEqual(self.storage.quarantined(), 1)
+        self.now += RETENTION_SECONDS + 10
+        self.storage.bind('device', 1)
+        self.storage.quarantine_unreadable_queue()  # Retention: removed and counted.
+        self.assertFalse(kept.exists())
+        self.assertEqual(self.storage.take_expired(), 1)
+
+    def test_set_aside_queue_comes_back_when_it_decrypts_again(self):
+        self.storage.bind('device', 1); self.storage._enabled = True
+        self.storage.enqueue({'requestId': 'SAME_DEVICE'})
+        crypto = self.storage._crypto
+        self.storage._crypto = type('Failing', (), {'protect': crypto.protect,
+            'unprotect': lambda *_: (_ for _ in ()).throw(OSError('DPAPI down'))})()
+        self.assertFalse(self.storage.quarantine_unreadable_queue())
+        self.now += 601  # DPAPI down for more than ten minutes: set aside.
+        self.assertTrue(self.storage.quarantine_unreadable_queue())
+        self.storage._crypto = crypto  # DPAPI recovers.
+        self.storage.quarantine_unreadable_queue()
+        self.assertEqual(self.storage.restored, 1)
+        self.assertEqual([v['payload']['requestId'] for v in self.storage.queue()], ['SAME_DEVICE'])
+        self.assertEqual(self.storage.quarantined(), 0)
 
     def test_readable_queue_is_never_set_aside(self):
         self.storage.bind('device', 1); self.storage._enabled = True

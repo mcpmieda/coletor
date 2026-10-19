@@ -63,6 +63,7 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   started: ['info', 'Programa iniciado.'],
   superseded: ['warn', 'Lote interrompido substituído por uma nova leitura.'],
   'queue-quarantined': ['warn', 'Fila cifrada de um acesso anterior separada; ela não podia mais ser lida nem conferida.'],
+  'queue-restored': ['info', 'Lote(s) separado(s) voltaram a ser lidos e foram devolvidos à fila para conferência.'],
   'queue-expired': ['warn', 'Lote(s) sem recibo com mais de 7 dias descartado(s) da fila local.'],
   'late-cancelled': ['info', 'Horário atrasado cancelado: ele saiu da agenda enquanto a coleta anterior rodava.'],
   'collection-stopped': ['info', 'Coleta interrompida (pausa ou outro computador assumiu).'],

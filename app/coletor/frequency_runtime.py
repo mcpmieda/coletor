@@ -335,6 +335,8 @@ class FrequencyRuntime:
         # so collection continues without anyone discarding it by hand.
         if self._storage.quarantine_unreadable_queue():
             self._history.record('queue-quarantined')
+        restored, self._storage.restored = self._storage.restored, 0
+        if restored: self._history.record('queue-restored', sent=restored)
 
     def save_credential(self, email, password):
         self._storage.bind(*self._provider.storage_binding())
