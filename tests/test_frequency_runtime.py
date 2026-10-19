@@ -72,7 +72,7 @@ class Provider:
         if operation == 'lease':
             if self.fail_lease: raise FrequencyError('lease-busy')
             self.fence += 1
-            result.update(fencingToken=self.fence, expiresAt=stamp(self.now + 120), settingsRevision=0)
+            result.update(fencingToken=self.fence, expiresAt=stamp(self.now + payload['durationSeconds']), settingsRevision=0)
         elif operation == 'heartbeat': result.update(fencingToken=payload['fencingToken'], expiresAt=stamp(self.now + 100))
         elif operation == 'collect':
             if payload['fencingToken'] != self.fence: raise FrequencyError('lease-fenced')
@@ -474,7 +474,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.source.reads, 0)
 
     def test_expired_capture_gets_new_lease_before_first_attempt(self):
-        self.source.on_capture = lambda: setattr(self.provider, 'now', NOW + 130)
+        self.source.on_capture = lambda: setattr(self.provider, 'now', NOW + frequency_runtime.LEASE_SECONDS + 10)
         self.assertEqual(self.runtime.collect()['state'], 'ready')
         payload = next(p for p in self.provider.requests if p['operation'] == 'collect')
         self.assertEqual(payload['fencingToken'], 3)
@@ -484,7 +484,7 @@ class RuntimeTests(unittest.TestCase):
             def wait(self, timeout=None): return super().wait(None if timeout is None else min(timeout, 0.02))
 
         def slow_capture():
-            self.provider.now = NOW + 130  # The 120-second grant lapses mid-capture.
+            self.provider.now = NOW + frequency_runtime.LEASE_SECONDS + 10  # The grant lapses mid-capture.
             time.sleep(0.3)                # Heartbeat thread runs several times.
         self.source.on_capture = slow_capture
         with patch.object(frequency_runtime.threading, 'Event', QuickEvent):
@@ -510,7 +510,7 @@ class RuntimeTests(unittest.TestCase):
         lease_request_started = self.provider.now
         self.runtime._acquire(status)
         self.assertEqual(self.runtime._lease['fencingToken'], 1)
-        self.assertEqual(self.runtime._lease['deadline'], lease_request_started + 118)
+        self.assertEqual(self.runtime._lease['deadline'], lease_request_started + frequency_runtime.LEASE_SECONDS - 2)
         self.assertGreater(self.runtime._lease['deadline'], self.provider.now)
 
     def test_stale_status_must_not_reuse_an_expired_own_lease(self):

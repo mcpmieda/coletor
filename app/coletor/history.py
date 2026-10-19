@@ -40,13 +40,15 @@ class CollectorHistory:
                 entries.append(value)
         return entries
 
-    def record(self, kind, *, code=None, label=None, sent=None, unresolved=None, conflicts=None):
+    def record(self, kind, *, code=None, label=None, sent=None, unresolved=None, conflicts=None,
+               read_ms=None, send_ms=None):
         """Append one fact; a failure to write never interrupts collection."""
         if kind not in KINDS: return
         entry = {'at': round(self._clock(), 3), 'kind': kind}
         if isinstance(code, str) and code: entry['code'] = code[:60]
         if isinstance(label, str) and label: entry['label'] = ' '.join(label.split())[:120]
-        for key, value in (('sent', sent), ('unresolved', unresolved), ('conflicts', conflicts)):
+        for key, value in (('sent', sent), ('unresolved', unresolved), ('conflicts', conflicts),
+                           ('readMs', read_ms), ('sendMs', send_ms)):
             if type(value) is int and value >= 0: entry[key] = value
         with self._lock:
             try:

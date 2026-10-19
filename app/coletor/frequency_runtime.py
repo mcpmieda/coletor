@@ -34,6 +34,7 @@ ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIA
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
                'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
                'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
+LEASE_SECONDS = 300
 # Routine waits are not failures: a reserve computer or a school pause.
 QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
 
@@ -352,16 +353,18 @@ class FrequencyRuntime:
                 with self._lock:
                     self._lease = {**existing, 'deadline': deadline}
                 return
-        request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': 120}
+        # The server's maximum: a slow network (several seconds per request) must
+        # not let one class outlive its concession and fence the whole run.
+        request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': LEASE_SECONDS}
         requested_at = self._clock()
         reply = self._committed(self._request(request), request)
         if type(reply.get('fencingToken')) is not int or reply['fencingToken'] < 1: raise FrequencyError('unavailable')
-        # The database issues exactly the requested 120-second lease *after*
+        # The database issues exactly the requested lease *after*
         # this request begins. A deadline based on the request start is a safe
         # lower bound even when the preceding status or network is slow. Do not
-        # infer 120 seconds of freshness from the time the reply arrived.
+        # infer the full lease of freshness from the time the reply arrived.
         if stamp(reply['expiresAt']) <= stamp(status['serverTime']): raise FrequencyError('lease-fenced')
-        deadline = requested_at + 120 - 2
+        deadline = requested_at + LEASE_SECONDS - 2
         if deadline <= self._clock(): raise FrequencyError('lease-fenced')
         with self._lock:
             self._lease = {**reply, 'deadline': deadline}
@@ -584,7 +587,9 @@ class FrequencyRuntime:
                     return current, preview, after_capture
                 # Status, concession, source read and the post-read status share
                 # one verified bracket; the transmission below opens its own.
+                read_started = time.monotonic()
                 current, preview, after_capture = self._verified(read_class)
+                send_started = time.monotonic()
                 school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
                 del preview
@@ -596,7 +601,9 @@ class FrequencyRuntime:
                     self._progress['completed'] += 1
                     receipt = dict(self._last_receipt or {})
                 self._history.record('class-sent', label=source['name'], sent=receipt.get('resolvedRecords'),
-                                     unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'))
+                                     unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'),
+                                     read_ms=round((send_started - read_started) * 1000),
+                                     send_ms=round((time.monotonic() - send_started) * 1000))
             self._check(epoch)
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
