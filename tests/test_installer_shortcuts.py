@@ -16,7 +16,7 @@ class InstallerShortcutTests(unittest.TestCase):
         app_id = re.search(r'^APP_USER_MODEL_ID = "([^"]+)"', source, re.M).group(1)
         script = (ROOT / "installer/Coletor.iss").read_text(encoding="utf-8-sig")
         icons = script.split("[Icons]", 1)[1].split("\n[", 1)[0]
-        shortcuts = [line for line in icons.splitlines() if 'pythonw.exe' in line]
+        shortcuts = [line for line in icons.splitlines() if 'ColetorFrequencia.exe' in line]
         self.assertEqual(len(shortcuts), 3)
         for line in shortcuts:
             self.assertIn(f'AppUserModelID: "{app_id}"', line)

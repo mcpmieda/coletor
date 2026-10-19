@@ -130,7 +130,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1 pl-14 text-xs text-muted">
-              <span className="flex items-center gap-1.5"><CalendarDays size={14} /> {draft.custom ? 'Agenda personalizada no Ecossistema' : scheduleText(draft)}</span>
+              <span className="flex items-center gap-1.5"><CalendarDays size={14} /> {scheduleText(draft)}</span>
               <span>Próxima: <span className="tabular-nums text-foreground">{fmtCountdown(next, nowMs)}</span></span>
               <span className="flex min-w-0 items-center gap-2">
                 Última: <StatusChip status={last?.status} />

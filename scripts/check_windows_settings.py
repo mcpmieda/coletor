@@ -37,9 +37,6 @@ def open_agenda(window):
 
 
 def save_agenda(window):
-    # A schedule made in the Ecossistema with different shifts asks for an
-    # explicit confirmation before it is unified.
-    window.evaluate_js("""(() => {const n=document.querySelector('[role=dialog] input[type=checkbox]');if(n&&!n.checked)n.click();return true;})()""")
     smoke.wait_js(window,"[...document.querySelector('[role=dialog]').querySelectorAll('button')].some(n=>n.textContent.trim()==='Salvar'&&!n.disabled)")
     click(window,"Salvar","document.querySelector('[role=dialog]')")
     smoke.wait_js(window,"!document.querySelector('[role=dialog]')")

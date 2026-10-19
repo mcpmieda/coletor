@@ -122,3 +122,17 @@ test('an agenda with only the final check is kept by the editor', () => {
   expect(back.rules.filter(r => r.enabled).every(r => r.times.length === 0 && r.recheck === '18:30')).toBe(true);
   expect(back.rules.filter(r => r.enabled)).toHaveLength(10);
 });
+
+test('an agenda with different morning and afternoon times opens as one whole-day list', () => {
+  const morning = ['07:55', '08:40', '09:25'], afternoon = ['14:10', '14:55', '15:40'];
+  const rules = Array.from({ length: 14 }, (_, i) => {
+    const on = Math.floor(i / 2) >= 1 && Math.floor(i / 2) <= 5;
+    const shift = (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino';
+    return { weekday: Math.floor(i / 2), shift, enabled: on, times: on ? (i % 2 ? afternoon : morning) : [], recheck: on ? (i % 2 ? '18:30' : '12:15') : null };
+  });
+  const draft = fromShared({ timezone: 'America/Bahia', rules });
+  expect(draft.mode).toBe('times');
+  expect(draft.times).toEqual([...morning, '12:15', ...afternoon]);
+  expect(draft.finalCheck).toBe('18:30');
+  expect(draftProblem(draft)).toBeNull();
+});

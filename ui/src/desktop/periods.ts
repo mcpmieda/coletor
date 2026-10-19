@@ -107,12 +107,17 @@ export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   const days = new Set(enabled.map(r => r.weekday));
   const oneShiftOnly = [...days].some(d => enabled.filter(r => r.weekday === d).length !== SHIFTS.length);
   const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly;
-  const sample = enabled.reduce((a, b) => (b.times.length > a.times.length ? b : a));
-  const times = [...sample.times].sort();
+  // The whole day in one list (both shifts): every time of the enabled rules;
+  // the last recheck of the day, when after every time, is the final check.
+  const rechecks = [...new Set(enabled.map(r => r.recheck).filter((t): t is string => !!t))].sort();
+  const regular = [...new Set(enabled.flatMap(r => r.times))].sort();
+  const last = rechecks.at(-1);
+  const finalCheck = last && (!regular.length || last > regular[regular.length - 1]) ? last : '';
+  const times = [...new Set([...regular, ...rechecks.filter(t => t !== finalCheck)])].sort();
   const weekdays = [...new Set(enabled.map(r => editorDay(r.weekday)))].sort();
   // The saved times travel in every mode, so switching to fixed times never
   // shows (and saves) the defaults instead of the school's agenda.
-  const base = { ...DEFAULT_DRAFT, times, weekdays, finalCheck: sample.recheck ?? '', timezone: schedule.timezone, custom };
+  const base = { ...DEFAULT_DRAFT, times, weekdays, finalCheck, timezone: schedule.timezone, custom };
   const steps = times.slice(1).map((t, i) => toMinutes(t) - toMinutes(times[i]));
   if (times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= 5)
     return { ...base, mode: 'interval', every: steps[0], from: times[0], to: times[times.length - 1] };

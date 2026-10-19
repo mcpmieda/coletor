@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
-import { Save } from 'lucide-react';
+import { Alert, Button, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
+import { Plus, Save, X } from 'lucide-react';
 import type { SharedSchedule } from '../collector';
 import { call, type Status } from './bridge';
-import { DAY_LETTERS, DAY_NAMES, dayTimes, draftProblem, fromShared, parseTimesText, toShared, type PeriodDraft } from './periods';
-import { NumberInput, Section, TextInput, TimeInput } from './ui';
+import { DAY_LETTERS, DAY_NAMES, dayTimes, draftProblem, fromShared, toShared, type PeriodDraft } from './periods';
+import { IconButton, NumberInput, Section, TimeInput } from './ui';
 
 const MODES: { id: PeriodDraft['mode']; label: string; hint: string }[] = [
   { id: 'interval', label: 'Em intervalos', hint: 'A cada X minutos, dentro do período do dia' },
@@ -17,24 +17,27 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
   open: boolean; status: Status | null; onClose: () => void; onSaved: (status: Status) => void;
 }>) {
   const [draft, setDraft] = useState<PeriodDraft>(() => fromShared(status?.settings?.schedule ?? null));
-  const [timesText, setTimesText] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
-  const [unify, setUnify] = useState(false);
   // The revision the draft was loaded from: saving with a newer polled one
   // would hide an edit made meanwhile on another computer.
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   useEffect(() => {
     if (!open) return;
     const next = fromShared(status?.settings?.schedule ?? null);
-    setDraft(next); setTimesText(next.times.join(', ')); setError(''); setUnify(false);
+    setDraft(next); setError('');
     setBaseRevision(status?.settings?.revision ?? null);
   }, [open]); // Reload only when the dialog opens, not on every status poll.
   const set = (patch: Partial<PeriodDraft>) => setDraft(d => ({ ...d, ...patch }));
-  const typed = parseTimesText(timesText);
-  const problem = (draft.mode === 'times' && typed.invalid.length ? `Horário inválido: ${typed.invalid.join(', ')}. Use o formato 08:30.` : null)
-    ?? (draft.mode === 'times' && typed.repeated.length ? `Horário repetido: ${typed.repeated.join(', ')}.` : null)
-    ?? draftProblem(draft)
-    ?? (draft.custom && !unify ? 'Confirme acima que todos os dias e turnos passam a usar os mesmos horários.' : null);
+  const filled = draft.times.filter(Boolean);
+  const repeated = [...new Set(filled.filter((t, i) => filled.indexOf(t) !== i))];
+  const problem = (draft.mode === 'times' && repeated.length ? `Horário repetido: ${repeated.join(', ')}.` : null) ?? draftProblem(draft);
+  const setTime = (index: number, value: string) => set({ times: draft.times.map((t, i) => (i === index ? value : t)) });
+  // A new field starts 30 minutes after the latest time (or at 07:00).
+  const addTime = () => {
+    const latest = [...filled].sort().at(-1);
+    const minutes = latest ? Math.min(23 * 60 + 59, Number(latest.slice(0, 2)) * 60 + Number(latest.slice(3)) + 30) : 7 * 60;
+    set({ times: [...draft.times, `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`] });
+  };
   const perDay = dayTimes(draft).length + (draft.finalCheck ? 1 : 0);
 
   async function save() {
@@ -60,19 +63,6 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
             <p className="text-sm text-muted">Vale para todos os computadores da escola. Cada coleta lê todas as turmas.</p>
           </Modal.Header>
           <Modal.Body className="flex flex-col gap-6 pb-2">
-            {draft.custom && (
-              <Alert status="warning">
-                <Alert.Indicator />
-                <Alert.Content>
-                  <Alert.Title>A agenda atual tem horários diferentes por turno ou dia</Alert.Title>
-                  <Alert.Description>Ela foi feita no Ecossistema. Ao salvar aqui, todos os dias escolhidos passam a usar os mesmos horários, nos dois turnos.</Alert.Description>
-                  <Checkbox className="mt-2" isSelected={unify} onChange={setUnify}>
-                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                    <Checkbox.Content><Label>Entendi, usar os mesmos horários em todos os dias e turnos</Label></Checkbox.Content>
-                  </Checkbox>
-                </Alert.Content>
-              </Alert>
-            )}
             <Section title="Repetição">
               <Select value={draft.mode} onChange={k => k != null && set({ mode: k as PeriodDraft['mode'] })} fullWidth>
                 <Label>Quando coletar</Label>
@@ -96,8 +86,18 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
                 </div>
               )}
               {draft.mode === 'times' && (
-                <TextInput label="Horários" value={timesText} placeholder="07:30, 12:00, 17:30" hint="Separe por vírgula"
-                  onChange={v => { setTimesText(v); set({ times: parseTimesText(v).times }); }} />
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm">Horários do dia</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {draft.times.map((time, index) => (
+                      <div key={index} className="flex items-end gap-1">
+                        <TimeInput label={`Horário ${index + 1}`} value={time} onChange={v => setTime(index, v)} />
+                        <IconButton label={`Remover horário ${index + 1}`} onPress={() => set({ times: draft.times.filter((_, i) => i !== index) })}><X size={14} /></IconButton>
+                      </div>
+                    ))}
+                  </div>
+                  <Button size="sm" variant="secondary" className="self-start" isDisabled={draft.times.length >= 48} onPress={addTime}><Plus size={14} /> Adicionar horário</Button>
+                </div>
               )}
               {draft.mode !== 'off' && (
                 <div className="flex flex-col gap-2">

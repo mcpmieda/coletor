@@ -227,23 +227,24 @@ try:
         recovery_page.get_by_role('heading', name='Agenda de coleta').wait_for()
         recovery_page.get_by_label('Quando coletar').click()
         recovery_page.get_by_role('option', name='Em horários fixos').click()
-        recovery_page.get_by_label('Horários', exact=True).fill('08:15, 09:00, 09:55')
-        # An agenda that differs per day/shift needs consent before it is unified.
-        consent = recovery_page.get_by_text('Entendi, usar os mesmos horários em todos os dias e turnos')
-        if consent.count():
-            expect(recovery_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
-            consent.click()
+        # Fixed times are time fields for the whole day: clear them, then add three.
+        remove = recovery_page.locator('[role=dialog] button[aria-label^="Remover horário"]')
+        while remove.count():
+            remove.first.click()
+        for _ in range(3):
+            recovery_page.get_by_role('button', name='Adicionar horário').click()
+        expect(remove).to_have_count(3)
         save = recovery_page.get_by_role('button', name='Salvar', exact=True)
         if save.is_disabled():
             raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog').inner_text()[-300:])
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
         expect(recovery_page.get_by_text('A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.', exact=True)).to_be_visible()
-        expect(recovery_page.get_by_label('Horários', exact=True)).to_have_value('08:15, 09:00, 09:55')
+        expect(remove).to_have_count(3)  # The draft survives the conflict.
         recovery_page.evaluate('window.syntheticConflict=false')
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
         recovery_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
         assert recovery_page.evaluate('window.syntheticSaves.length') == 1
-        assert recovery_page.evaluate("window.syntheticSaves[0].rules.filter(r=>r.enabled).every(r=>r.times.join()==='08:15,09:00,09:55')")
+        assert recovery_page.evaluate("window.syntheticSaves[0].rules.filter(r=>r.enabled).every(r=>r.times.join()==='07:00,07:30,08:00')")
         recovery_page.screenshot(path=str(out/'schedule-recovery-after-save.png'),full_page=True,animations='disabled')
         recovery_page.close()
         assert not errors,errors
