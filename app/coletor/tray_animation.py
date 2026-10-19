@@ -42,11 +42,11 @@ class AnimationPolicy:
 
 
 # A long resting beat between gestures keeps the tiny notification icon unobtrusive:
-# a blink, an ear twitch (up, down, up) and a double blink over about 25 seconds.
+# a blink, an ear wag (the left ear flops sideways three times) and a double blink.
 # Only head frames exist at icon size; the tail lives on the full-body sprite.
 IDLE_SEQUENCE = (
     *("fox-idle",) * 10, "fox-blink", *("fox-idle",) * 9,
-    "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 10,
+    "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 8,
     "fox-blink", "fox-idle", "fox-blink", *("fox-idle",) * 8,
 )
 WORKING_SEQUENCE = tuple(f"fox-working-{index}" for index in range(1, 5))
