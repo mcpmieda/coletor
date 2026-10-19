@@ -6,6 +6,7 @@ export interface Preferences {
   fox: { version: 1; show: boolean; animate: boolean };
   browser: { visible: boolean };
   classes: { mode: 'all' | 'chosen' };
+  notifications: { show: boolean };
 }
 export interface StartupSnapshot {
   paired: boolean;
@@ -29,6 +30,7 @@ interface Native {
   forget_source_credential(): Promise<Status | Failure>;
   save_browser_preference(visible: boolean): Promise<{ settings: Preferences } | Failure>;
   save_classes_mode(mode: 'all' | 'chosen'): Promise<{ settings: Preferences } | Failure>;
+  save_notifications(show: boolean): Promise<{ settings: Preferences } | Failure>;
   save_theme(theme: ThemeMode): Promise<{ settings: Preferences } | Failure>;
   save_fox_preference?(show: boolean): Promise<{ settings: Preferences } | Failure>;
   get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean; autostart?: boolean }>;

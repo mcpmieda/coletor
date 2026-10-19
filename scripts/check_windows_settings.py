@@ -168,7 +168,7 @@ def orchestrator(args):
                     if process.returncode!=0 or result["status"]!="passed": smoke.fail("settings_scenario_failed")
                     if sentinel.read_bytes()!=b"UNRELATED_APP_SENTINEL": smoke.fail("other_application_modified")
                     data=json.loads((isolated/"settings.json").read_text(encoding="utf-8"))
-                    if set(data)!={"schemaVersion","schedule","theme","fox","browser","classes"}: smoke.fail("unexpected_persistent_data")
+                    if set(data)!={"schemaVersion","schedule","theme","fox","browser","classes","notifications"}: smoke.fail("unexpected_persistent_data")
                     if sorted(p.name for p in isolated.iterdir()) not in (["collector-instance.lock", "settings.json", "settings.lock"],["collector-instance.lock", "settings.json", "settings.lock", "ui-snapshot.json"]): smoke.fail("unexpected_settings_file")
                     snapshot=isolated/"ui-snapshot.json"
                     # The instant-open summary is display data only: never a secret.

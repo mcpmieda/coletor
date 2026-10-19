@@ -14,8 +14,9 @@ PALETTES = {
              "line": "#503B44", "ok": "#5CC48A", "danger": "#FF6B5E"},
 }
 # Segoe Fluent Icons (Windows 11) / Segoe MDL2 Assets (Windows 10): same code points.
-GLYPHS = {"open": "", "hide": "", "sync": "", "pause": "", "play": "", "power": ""}
-ITEM_HEIGHT, HEADER_HEIGHT, SEPARATOR_HEIGHT, WIDTH = 36, 52, 9, 260
+GLYPHS = {"open": "", "hide": "", "sync": "", "pause": "", "play": "", "power": "",
+          "bell": "", "folder": ""}
+ITEM_HEIGHT, HEADER_HEIGHT, SEPARATOR_HEIGHT, WIDTH = 40, 58, 11, 300
 
 
 def windows_is_dark():
@@ -50,10 +51,13 @@ class FoxMenu:
         menu.ShowImageMargin = False
         menu.ShowCheckMargin = False
         menu.Padding = Padding(0, int(4 * self.s), 0, int(4 * self.s))
+        # Windows sizes a drop-down from its text; keep the Atualizador's width.
+        from System.Drawing import Size
+        menu.MinimumSize = Size(int(WIDTH * self.s), 0)
         menu.Paint += self._paint_border
 
     def add(self, item, kind, icon=""):
-        """kind: header | item | danger | separator."""
+        """kind: header | item | toggle | danger | separator (toggle draws a switch from item.Checked)."""
         from System.Drawing import Size
         item.AutoSize = False
         height = {"header": HEADER_HEIGHT, "separator": SEPARATOR_HEIGHT}.get(kind, ITEM_HEIGHT)
@@ -92,7 +96,7 @@ class FoxMenu:
     def _paint_item(self, item, event, kind, icon):
         # Every GDI+ object is released at once (no reliance on finalizers):
         # the menu repaints on each hover.
-        from System.Drawing import Rectangle, RectangleF, SolidBrush, StringAlignment, StringFormat
+        from System.Drawing import Color, Rectangle, RectangleF, SolidBrush, StringAlignment, StringFormat
         from System.Drawing.Drawing2D import GraphicsPath, SmoothingMode
         from System.Drawing.Text import TextRenderingHint
         g, w, h, s = event.Graphics, item.Width, item.Height, self.s
@@ -128,5 +132,14 @@ class FoxMenu:
             text_colour = self.c["danger"] if danger else (self.c["text"] if item.Enabled else self.c["muted"])
             g.DrawString(GLYPHS.get(icon, ""), self.fonts["icon"], brush(icon_colour), RectangleF(10.0 * s, 0.0, 28.0 * s, float(h)), centre)
             g.DrawString(item.Text, self.fonts["text"], brush(text_colour), RectangleF(44.0 * s, 0.0, float(w) - 50.0 * s, float(h)), middle)
+            if kind == "toggle":
+                # Switch like the Atualizador's: a pill on the right with a white knob.
+                tw, th = int(40 * s), int(22 * s)
+                tx, ty = w - tw - int(14 * s), (h - th) // 2
+                pill = GraphicsPath(); others.append(pill)
+                pill.AddArc(tx, ty, th, th, 90, 180); pill.AddArc(tx + tw - th, ty, th, th, 270, 180); pill.CloseFigure()
+                g.FillPath(brush(self.c["accent"] if item.Checked else self.c["line"]), pill)
+                knob = int(16 * s); kx = tx + tw - knob - int(3 * s) if item.Checked else tx + int(3 * s)
+                g.FillEllipse(brush(self.c["bg"] if not item.Checked else Color.White), Rectangle(kx, ty + (th - knob) // 2, knob, knob))
         finally:
             self._release(*brushes, *others)

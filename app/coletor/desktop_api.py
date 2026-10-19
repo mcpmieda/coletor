@@ -87,6 +87,7 @@ class DesktopApi(PreviewApi):
     def _alert(self, code):
         message = ALERTS.get(code)
         if message is None: return
+        if not self._notifications_on(): return  # The operator turned balloons off.
         tray = self._tray
         if tray is None:
             self._pending_alert = message
@@ -100,6 +101,9 @@ class DesktopApi(PreviewApi):
         tray.collect_action = self.collect_now
         tray.pause_action = self.pause_collector
         tray.theme_provider = self._tray_theme
+        tray.notifications_provider = self._notifications_on
+        tray.notifications_action = self._set_notifications
+        tray.logs_action = self._open_logs_folder
         message, self._pending_alert = self._pending_alert, None
         if message: tray.notify(*message)
 
@@ -492,6 +496,22 @@ class DesktopApi(PreviewApi):
     def save_theme(self, theme):
         return self._save("theme", theme)
 
+    def save_notifications(self, show):
+        if type(show) is not bool: return {"error": "Preferência inválida."}
+        return self._save("notifications", {"show": show})
+
+    def _notifications_on(self):
+        try: return self._settings.read()["settings"]["notifications"]["show"] is True
+        except (OSError, ValueError, TypeError, KeyError): return True
+
+    def _set_notifications(self, show):
+        """Tray menu switch: same preference as in Ajustes."""
+        self.save_notifications(show)
+
+    def _open_logs_folder(self):
+        """Tray menu: the folder with the collector's log (no secrets there)."""
+        os.startfile(str(self._settings._directory))  # nosec B606 - fixed local folder
+
     def save_browser_preference(self, visible):
         if type(visible) is not bool: return {"error": "Preferência inválida."}
         return self._save("browser", {"visible": visible})
@@ -522,7 +542,7 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_manual_class_selection", "clear_manual_class_selection", "capture_selected_class",
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
-              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode"):
+              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
 for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',

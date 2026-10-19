@@ -46,6 +46,7 @@ class WindowsFormsTray:
         # Set by the desktop bridge: actions run off the UI thread.
         self.collect_action = self.pause_action = None
         self.theme_provider = None
+        self.notifications_provider = self.notifications_action = self.logs_action = None
         self._current_activity = "idle"
         self._disposed = False
         self._last_icon = self._window_icon = None
@@ -87,15 +88,21 @@ class WindowsFormsTray:
             self._hide_item = ToolStripMenuItem("Ocultar painel")
             self._collect_item = ToolStripMenuItem("Coletar agora")
             self._pause_item = ToolStripMenuItem("Pausar a coleta")
-            self._quit_item = ToolStripMenuItem("Sair do Coletor")
+            self._notify_item = ToolStripMenuItem("Mostrar notificações")
+            self._logs_item = ToolStripMenuItem("Abrir pasta de logs")
+            self._quit_item = ToolStripMenuItem("Encerrar coletor")
             self._open_item.Click += self._open
-            self._hide_item.Click += self._hide
+            self._hide_item.Click += self._hide  # Kept for the window's own hide; not in the menu.
             self._collect_item.Click += self._collect
             self._pause_item.Click += self._toggle_pause
+            self._notify_item.Click += self._toggle_notifications
+            self._logs_item.Click += self._open_logs
             self._quit_item.Click += self._quit
+            # Same composition as the Atualizador's menu.
             for item, kind, icon in ((self._status_item, "header", ""), (ToolStripSeparator(), "separator", ""),
-                                     (self._open_item, "item", "open"), (self._hide_item, "item", "hide"),
-                                     (self._collect_item, "item", "sync"), (self._pause_item, "item", "pause"),
+                                     (self._open_item, "item", "open"), (self._collect_item, "item", "sync"),
+                                     (self._pause_item, "item", "pause"), (self._notify_item, "toggle", "bell"),
+                                     (self._logs_item, "item", "folder"),
                                      (ToolStripSeparator(), "separator", ""), (self._quit_item, "danger", "power")):
                 self._fox_menu.add(item, kind, icon)
             self._menu.Opening += self._menu_opening
@@ -163,11 +170,28 @@ class WindowsFormsTray:
         if active and paused: text = "Pausada neste computador"
         if active and offline(status): text = "Sem conexão, tentando de novo"
         trouble = (not active) or (status.get("state") in {"error", "login-required"} and not offline(status))
+        if active and not trouble and not paused:
+            # Like the Atualizador's "Ativo · 1 tarefa(s)": what this PC collects.
+            chosen = status.get("selectedClasses")
+            text += " · todas as turmas" if status.get("classesMode", "all") == "all" or chosen is None else f" · {chosen} turma(s)"
         self._status_item.Text = "Coletor de Frequência\n" +("!" if trouble else "") + text
         self._collect_item.Enabled = active and not paused and status.get("state") != "collecting" and self.collect_action is not None
         self._pause_item.Text = "Retomar a coleta" if paused else "Pausar a coleta"
         self._pause_item.Enabled = active and self.pause_action is not None
         self._fox_menu.set_icon(self._pause_item, "play" if paused else "pause")
+        self._notify_item.Checked = bool(self.notifications_provider()) if self.notifications_provider else True
+        self._logs_item.Enabled = self.logs_action is not None
+
+    def _toggle_notifications(self, *_):
+        show = not self._notify_item.Checked
+        self._notify_item.Checked = show
+        if self.notifications_action:
+            threading.Thread(target=self.notifications_action, args=(show,), daemon=True, name="tray-notifications").start()
+
+    def _open_logs(self, *_):
+        if self.logs_action:
+            try: self.logs_action()
+            except Exception: pass
 
     def _collect(self, *_):
         if self.collect_action: threading.Thread(target=self.collect_action, daemon=True, name="tray-collect").start()
@@ -301,6 +325,8 @@ class WindowsFormsTray:
             self._quit_item.Click -= self._quit
             self._collect_item.Click -= self._collect
             self._pause_item.Click -= self._toggle_pause
+            self._notify_item.Click -= self._toggle_notifications
+            self._logs_item.Click -= self._open_logs
             self._menu.Opening -= self._menu_opening
         if self._notify is not None and self._timer is not None: resources.append(detach_events)
         if self._timer: resources += [self._timer.Stop, self._timer.Dispose]

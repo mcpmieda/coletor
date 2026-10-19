@@ -29,7 +29,7 @@ REQUIRED_CHECKS = {
 EXTENDED_CHECKS = {
     "menu_header_shows_live_status", "menu_collect_and_pause_reach_collector", "actual_collection_state",
     "collect_disabled_while_collecting", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-    "error_state_static_and_generic", "menu_header_flags_error",
+    "error_state_static_and_generic", "menu_header_flags_error", "menu_notifications_and_logs",
 }
 # The window's X keeps an active collection beside the clock instead of quitting.
 CLOSE_CHECKS = {"active_collection_close_hides"}
@@ -151,10 +151,21 @@ def exercise(window,args,result):
             try:
                 tray.status_provider=lambda:{"active":True,"state":"ready","localPaused":False}
                 tray._invoke(lambda:tray._menu_opening())
-                require("menu_header_shows_live_status",tray._status_item.Text.endswith("\nColeta ativa") and tray._collect_item.Enabled)
+                require("menu_header_shows_live_status","\nColeta ativa" in tray._status_item.Text and tray._collect_item.Enabled)
                 menu(tray._collect_item); menu(tray._pause_item)
                 wait(lambda:calls==["collect",("pause",True)])
                 require("menu_collect_and_pause_reach_collector")
+                tray.notifications_provider=lambda:True
+                tray.notifications_action=lambda show:calls.append(("notifications",show))
+                tray.logs_action=lambda:calls.append("logs")
+                tray._invoke(lambda:tray._menu_opening())
+                checked_before=bool(tray._notify_item.Checked)
+                menu(tray._notify_item); menu(tray._logs_item)
+                wait(lambda:("notifications",False) in calls and "logs" in calls)
+                require("menu_notifications_and_logs",checked_before and not tray._notify_item.Checked
+                        # Same composition as the Atualizador: header, then these items in order.
+                        and [i.Text for i in tray._menu.Items if i.Text][1:]==["Abrir painel","Coletar agora","Pausar a coleta",
+                            "Mostrar notificações","Abrir pasta de logs","Encerrar coletor"])
                 media(window,tray,False)
                 tray.status_provider=lambda:{"active":True,"state":"collecting","localPaused":False}
                 tray._invoke(tray._refresh)

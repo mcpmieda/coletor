@@ -33,7 +33,7 @@ class PortableBuildTests(unittest.TestCase):
                   "idle_motion_gentle", "window_icon_follows_fox", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
                   "menu_header_shows_live_status", "menu_collect_and_pause_reach_collector", "actual_collection_state",
                   "collect_disabled_while_collecting", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-                  "error_state_static_and_generic", "menu_header_flags_error", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops",
+                  "error_state_static_and_generic", "menu_header_flags_error", "menu_notifications_and_logs", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops",
                   "active_collection_close_hides"}
         report = {"test":"portable_windows_tray", "status":"passed", "cleanup":{"verified":True,"remaining_processes":0},
                   "only_nonsecret_settings_retained":True, "workers":[{"scenario":s,"status":"passed","cleanup":{"verified":True,"remaining_processes":0},"checks":{k:True for k in checks}} for s in ("quit","close")]}

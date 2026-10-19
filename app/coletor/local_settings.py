@@ -20,7 +20,9 @@ def default_settings():
     return {"schemaVersion": 1, "schedule": None, "theme": "system", "fox": {"version": 1, "show": True, "animate": True},
             # Minimal intervention: collect every class of the school (new ones
             # included) with the isolated Edge hidden, unless the operator opts out.
-            "browser": {"visible": False}, "classes": {"mode": "all"}}
+            "browser": {"visible": False}, "classes": {"mode": "all"},
+            # Balloons beside the clock for problems that need a person.
+            "notifications": {"show": True}}
 
 
 def exact_fields(value, fields):
@@ -86,16 +88,24 @@ def validate_classes(value):
     return dict(value)
 
 
+def validate_notifications(value):
+    exact_fields(value, {"show"})
+    if type(value["show"]) is not bool:
+        raise ValueError("Invalid notification preference")
+    return dict(value)
+
+
 def validate_settings(value):
-    # Files written before browser/classes existed stay valid with the defaults.
+    # Files written before browser/classes/notifications existed stay valid with the defaults.
     if type(value) is dict and {"schemaVersion", "schedule", "theme", "fox"} <= set(value):
         value = {**default_settings(), **value}
-    exact_fields(value, {"schemaVersion", "schedule", "theme", "fox", "browser", "classes"})
+    exact_fields(value, {"schemaVersion", "schedule", "theme", "fox", "browser", "classes", "notifications"})
     if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["theme"] not in ("system", "light", "dark"):
         raise ValueError("Invalid preferences")
     return {"schemaVersion": 1, "schedule": None if value["schedule"] is None else validate_schedule(value["schedule"]),
             "theme": value["theme"], "fox": validate_fox(value["fox"]),
-            "browser": validate_browser(value["browser"]), "classes": validate_classes(value["classes"])}
+            "browser": validate_browser(value["browser"]), "classes": validate_classes(value["classes"]),
+            "notifications": validate_notifications(value["notifications"])}
 
 
 def user_settings_directory():
@@ -163,7 +173,7 @@ class LocalSettings:
             return {"settings": settings, "notice": notice}
 
     def update(self, field, value):
-        if field not in {"schedule", "theme", "fox", "browser", "classes"}:
+        if field not in {"schedule", "theme", "fox", "browser", "classes", "notifications"}:
             raise ValueError("Unknown preference")
         with self._lock, self._process_lock():
             settings, _ = self._read()  # Preserve unrelated allowed preferences.

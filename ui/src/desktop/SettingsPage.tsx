@@ -119,6 +119,8 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
           <div className="mt-2 flex flex-col divide-y divide-separator border-t border-separator pt-1">
             <SwitchRow label="Mostrar o navegador durante a coleta" hint="Desligado, o Smecel é lido sem abrir janelas. Sem acesso salvo, a janela aparece para você entrar."
               value={prefs?.browser.visible ?? false} isDisabled={!prefs} onChange={v => { void pref(api => api.save_browser_preference(v)); }} />
+            <SwitchRow label="Mostrar notificações" hint="Avisos ao lado do relógio quando algo precisa de você"
+              value={prefs?.notifications?.show ?? true} isDisabled={!prefs} onChange={v => { void pref(api => api.save_notifications(v)); }} />
             <SwitchRow label="Pausar a coleta neste computador" hint="Os outros computadores da escola continuam coletando"
               value={!!status?.localPaused} isDisabled={!status?.active} onChange={v => { void run(api => api.pause_collector(v), setStatus); }} />
           </div>
