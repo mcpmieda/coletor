@@ -22,7 +22,7 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
   const [desktop, setDesktop] = useState<{ tray_available: boolean; autostart?: boolean } | null>(null);
   const [email, setEmail] = useState(''), [password, setPassword] = useState('');
   const [changing, setChanging] = useState(false), [busy, setBusy] = useState(false);
-  const [choosing, setChoosing] = useState(false), [leaving, setLeaving] = useState(false);
+  const [choosing, setChoosing] = useState(false), [leaving, setLeaving] = useState(false), [closing, setClosing] = useState(false);
   useEffect(() => {
     // Protected call: retried until the live access check has finished.
     const read = () => { void native()?.get_desktop_status().then(r => { if (r && !('error' in r)) setDesktop(r); }).catch(() => undefined); };
@@ -39,6 +39,13 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
     try { const value = await call(work); done?.(value); if (message) toast.success(message); }
     catch (e) { toast.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { setBusy(false); }
+  }
+  // Closing the choice always ends the Smecel session it opened (and resumes collection).
+  async function finishChoosing() {
+    const api = window.pywebview?.api as { close_manual_session?: () => Promise<unknown> } | undefined;
+    setClosing(true);
+    try { await api?.close_manual_session?.(); } catch { /* status refresh below shows any problem */ }
+    finally { setClosing(false); setChoosing(false); void refresh(); }
   }
   const pref = (work: Parameters<typeof call<{ settings: Preferences }>>[0], message?: string) =>
     run(work, (r: { settings: Preferences }) => { setPrefs(r.settings); void refresh(); }, message);
@@ -143,12 +150,12 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
         </Card.Content>
       </Card>
 
-      <Modal.Backdrop isOpen={choosing} onOpenChange={setChoosing} variant="blur">
+      <Modal.Backdrop isOpen={choosing} onOpenChange={open => { if (!open) void finishChoosing(); }} variant="blur">
         <Modal.Container size="lg" scroll="inside">
           <Modal.Dialog className="max-h-[88vh]">
             <Modal.Header><Modal.Heading>Escolher turmas</Modal.Heading></Modal.Header>
             <Modal.Body><ManualSource onChanged={() => { void refresh(); }} /></Modal.Body>
-            <Modal.Footer><Button variant="primary" onPress={() => setChoosing(false)}>Concluir</Button></Modal.Footer>
+            <Modal.Footer><Button variant="primary" isPending={closing} onPress={() => { void finishChoosing(); }}>Concluir</Button></Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

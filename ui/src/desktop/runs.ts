@@ -2,7 +2,7 @@ import { COLLECTOR_CODES, type HistoryEntry } from '../collector';
 
 export interface ClassResult { label: string; sent: number; unresolved: number; conflicts: number; readMs?: number; sendMs?: number }
 export interface Run {
-  id: string; started: number; finished: number | null; status: 'ok' | 'partial' | 'error' | 'running';
+  id: string; started: number; finished: number | null; status: 'ok' | 'review' | 'partial' | 'error' | 'running';
   total: number; classes: ClassResult[]; resolved: number; unresolved: number; conflicts: number; problem: string | null;
 }
 
@@ -14,7 +14,9 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
   const close = (finished: number, status: Run['status'], problem: string | null) => {
     if (!current) return;
     current.finished = finished; current.problem = problem;
-    current.status = status === 'ok' && current.classes.length < current.total ? 'partial' : status;
+    // Sent but with students to reconcile is not the same as clean.
+    current.status = status === 'ok' && current.classes.length < current.total ? 'partial'
+      : status === 'ok' && (current.unresolved || current.conflicts) ? 'review' : status;
     runs.push(current); current = null;
   };
   for (const e of sorted) {
@@ -58,6 +60,7 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   'access-required': ['error', 'O computador precisa entrar no Ecossistema.'],
   started: ['info', 'Programa iniciado.'],
   superseded: ['warn', 'Lote interrompido substituído por uma nova leitura.'],
+  'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
 };
 const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED']);
 

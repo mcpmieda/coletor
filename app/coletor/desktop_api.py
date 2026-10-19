@@ -20,6 +20,7 @@ ALERTS = {
     'SOURCE_LOGIN_REQUIRED': ('Smecel desconectado', 'Abra o Coletor e entre no Smecel para continuar a coleta.'),
     'SOURCE_LOGIN_FAILED': ('Smecel recusou o acesso', 'Confira o e-mail e a senha do Smecel salvos no Coletor.'),
     'CLASS_RECONCILIATION_REQUIRED': ('Turma sem ligação no Centro', 'Há turma do Smecel que o Centro não reconheceu. Confira a Importação.'),
+    'SOURCE_LIST_FILTERED': ('Lista de turmas incompleta', 'O Smecel mostrou a lista filtrada; só as turmas visíveis foram enviadas.'),
     'CENTER_CLASSES_REQUIRED': ('Turmas ainda não importadas', 'Importe a Relação e o Relatório no Centro de Administração.'),
     'NO_SELECTED_CLASSES': ('Nenhuma turma escolhida', 'Abra o Coletor, entre no Smecel e marque as turmas.'),
     'SOURCE_CLASS_UNAVAILABLE': ('Turma fora da lista do Smecel', 'Uma turma escolhida não apareceu na lista do Smecel.'),
@@ -66,6 +67,7 @@ def native_local_recovery_confirmation(summary):
 class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
+        self._paused_for_choice = False
         # The fox is part of the program's identity: always shown, animated unless the
         # system asks for reduced motion.
         self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True})
@@ -101,7 +103,7 @@ class DesktopApi(PreviewApi):
         if message: tray.notify(*message)
 
     def _tray_theme(self):
-        try: return self._settings.read().get("theme", "system")
+        try: return self._settings.read()["settings"].get("theme", "system")
         except (OSError, ValueError, TypeError): return "system"
 
     def _resume_collection(self, attempts=30, interval=60):
@@ -155,6 +157,8 @@ class DesktopApi(PreviewApi):
         import json, tempfile
         try:
             clean = {k: status.get(k) for k in self._SNAPSHOT_FIELDS}
+            # A saved "collecting" is stale by the next opening: show it as ready.
+            if clean.get('state') == 'collecting': clean['state'] = 'ready'
             payload = json.dumps({'version': 1, 'savedAt': time.time(), 'status': clean}, ensure_ascii=False)
             if len(payload) > 64_000: return
             directory = self._snapshot_path().parent
@@ -188,11 +192,14 @@ class DesktopApi(PreviewApi):
                 cached = json.loads(self._snapshot_path().read_text(encoding='utf-8'))
                 if isinstance(cached, dict) and cached.get('version') == 1 and isinstance(cached.get('status'), dict):
                     status = {k: cached['status'].get(k) for k in self._SNAPSHOT_FIELDS}
+                    if status.get('state') == 'collecting': status['state'] = 'ready'
+                    status['progress'] = {'completed': 0, 'total': 0, 'classLabel': None}
+                    status['savedAt'] = cached.get('savedAt')
             except (OSError, ValueError):
                 pass
-        try: history = self._collector.recent_history(200) if paired else []
-        except Exception: history = []
-        return {'paired': paired, 'status': status, 'history': history, 'settings': self._read_settings()['settings']}
+        # History (class names, counts) waits for the verified access: the
+        # protected get_collector_history fills it a moment later.
+        return {'paired': paired, 'status': status, 'history': [], 'settings': self._read_settings()['settings']}
 
     def activate_collector(self):
         result = self._operational(self._collector.activate)
@@ -346,7 +353,12 @@ class DesktopApi(PreviewApi):
             self._collector._operation.release()
 
     def prepare_manual_login(self, year):
-        if self._collector.public_status()['active']: self._collector.local_pause(True)
+        status = self._collector.public_status()
+        if status['active'] and not status['localPaused']:
+            # Choosing classes borrows the Smecel session: pause only for the
+            # choice and resume when it closes. A pause the operator made stays.
+            self._collector.local_pause(True)
+            self._paused_for_choice = True
         return self._manual(lambda: self._manual_session.prepare_login(year))
 
     def get_manual_class_selection_preferences(self):
@@ -403,8 +415,14 @@ class DesktopApi(PreviewApi):
             result = self._operational(lambda: self._collector.local_pause(True))
             if 'error' in result:
                 return result
-            return self._manual_session.status()
-        return self._manual(self._manual_session.close)
+            closed = self._manual_session.status()
+        else:
+            closed = self._manual(self._manual_session.close)
+        if self._paused_for_choice and 'error' not in closed and not closed.get('cleanup_pending'):
+            self._paused_for_choice = False
+            resumed = self._operational(lambda: self._collector.local_pause(False))
+            if 'error' not in resumed: self._remember_status(resumed)
+        return closed
 
     def get_manual_session_status(self):
         return self._manual_session.status()

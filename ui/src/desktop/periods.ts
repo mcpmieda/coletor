@@ -16,7 +16,8 @@ export interface PeriodDraft {
   weekdays: number[];
   finalCheck: string;
   timezone: string;
-  /** The saved schedule had different times per day/shift (made in the Ecossistema). */
+  /** The saved schedule had different times per day or shift, or a day with only one
+   *  shift enabled (made in the Ecossistema): saving here makes them all equal. */
   custom: boolean;
 }
 
@@ -95,7 +96,9 @@ export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   const enabled = schedule.rules.filter(r => r.enabled && (r.times.length || r.recheck));
   if (!enabled.length) return { ...DEFAULT_DRAFT, mode: 'off', timezone: schedule.timezone };
   const signature = (r: SharedSchedule['rules'][number]) => `${[...r.times].sort().join(',')}|${r.recheck ?? ''}`;
-  const custom = new Set(enabled.map(signature)).size > 1;
+  const days = new Set(enabled.map(r => r.weekday));
+  const oneShiftOnly = [...days].some(d => enabled.filter(r => r.weekday === d).length !== SHIFTS.length);
+  const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly;
   const sample = enabled.reduce((a, b) => (b.times.length > a.times.length ? b : a));
   const times = [...sample.times].sort();
   const weekdays = [...new Set(enabled.map(r => editorDay(r.weekday)))].sort();
@@ -104,6 +107,19 @@ export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   if (times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= 5)
     return { ...base, mode: 'interval', every: steps[0], from: times[0], to: times[times.length - 1] };
   return { ...base, mode: 'times', times };
+}
+
+/** Reads the typed list of fixed times; anything unreadable or repeated is reported, never dropped. */
+export function parseTimesText(text: string): { times: string[]; invalid: string[]; repeated: string[] } {
+  const tokens = text.split(/[,;\s]+/).map(t => t.trim()).filter(Boolean);
+  const times: string[] = [], invalid: string[] = [], repeated: string[] = [];
+  for (const token of tokens) {
+    const value = /^\d:\d{2}$/.test(token) ? `0${token}` : token;
+    if (!isTime(value)) invalid.push(token);
+    else if (times.includes(value)) repeated.push(token);
+    else times.push(value);
+  }
+  return { times: times.sort(), invalid, repeated };
 }
 
 /** Next collection time from now, in the school's time zone; null when none. */

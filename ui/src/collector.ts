@@ -60,8 +60,8 @@ export function sharedDraft(schedule: SharedSchedule | null): ScheduleDraft {
 }
 export function sharedFromDraft(draft: ScheduleDraft): SharedSchedule {
   const value = fromDraft(draft, 0);
-  if (value.rules.some(r => r.times.length + (r.reconciliation ? 1 : 0) > 16))
-    throw new Error('Use até 16 coletas por dia e turno, incluindo a conferência final.');
+  if (value.rules.some(r => r.times.length + (r.reconciliation ? 1 : 0) > 48))
+    throw new Error('Use até 48 coletas por dia e turno, incluindo a conferência final.');
   return { timezone: value.timezone, rules: value.rules.map(r => ({ weekday: r.weekday % 7, shift: r.shift,
     enabled: r.selected, times: r.times, recheck: r.reconciliation || null })) };
 }
@@ -77,6 +77,7 @@ export const COLLECTOR_CODES: Record<string, string> = {
   'SOURCE_CLASS_UNAVAILABLE': 'Há turma escolhida fora da lista do Smecel. Carregue as turmas de novo.',
   'SOURCE_CLASS_AMBIGUOUS': 'Há turma sem ligação no Centro. Confira na Importação do Ecossistema.',
   'CLASS_RECONCILIATION_REQUIRED': 'As demais turmas foram enviadas. Há turma do Smecel sem ligação no Centro; confira a Importação.',
+  'SOURCE_LIST_FILTERED': 'O Smecel mostrou a lista de turmas filtrada. As turmas visíveis foram enviadas; confira se há pesquisa ativa na lista do Smecel.',
   'CENTER_CLASSES_REQUIRED': 'Importe a Relação e o Relatório no Centro de Administração.',
   'NO_SELECTED_CLASSES': 'Entre no Smecel e marque as turmas deste computador.',
   'PROTECTED_STORAGE_UNAVAILABLE': 'O Windows não conseguiu proteger os dados. Tente novamente.',

@@ -46,7 +46,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
             <Modal.Body className="flex flex-col gap-1">
               {(open?.classes ?? []).map((c, i) => (
                 <div key={`${c.label}-${i}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-default">
-                  <StatusChip status={c.unresolved || c.conflicts ? 'partial' : 'ok'} />
+                  <StatusChip status={c.unresolved || c.conflicts ? 'review' : 'ok'} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{c.label}</div>
                     <div className="text-xs text-muted">

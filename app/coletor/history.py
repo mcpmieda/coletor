@@ -17,7 +17,7 @@ RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_ENTRIES = 2000
 MAX_READ_BYTES = 2 * 1024 * 1024
 KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', 'collection-finished',
-         'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded'}
+         'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start'}
 
 
 class CollectorHistory:

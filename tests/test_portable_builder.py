@@ -13,8 +13,8 @@ spec.loader.exec_module(builder)
 class PortableBuildTests(unittest.TestCase):
     def test_manual_distribution_gate_rejects_missing_consent_isolation_and_cleanup(self):
         native = {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                  "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "reading_requires_consent", "manual_preview_rendered", "transmission_blocked",
-                  "cancelled_result_hidden", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"}
+                  "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened",
+                  "closing_choice_ends_session", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"}
         report = {"status": "passed", "cleanup": {"verified": True, "remaining_processes": 0},
                   "real_network": False, "real_credentials": False, "checks": {key: True for key in native}}
         builder.validate_manual_evidence(report)
@@ -31,9 +31,9 @@ class PortableBuildTests(unittest.TestCase):
         checks = {"native_window_visible", "native_tray_registered", "native_menu_visible",
                   "same_window_after_repeated_show_hide", "left_click_and_double_click_restore_same_window",
                   "idle_motion_gentle", "window_icon_follows_fox", "fox_icon_shown", "native_exit_removed_icon_and_timer", "window_closed",
-                  "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-                  "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
-                  "error_state_static_and_generic", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops",
+                  "menu_header_shows_live_status", "menu_collect_and_pause_reach_collector", "actual_collection_state",
+                  "collect_disabled_while_collecting", "reading_animation_bounded", "reduced_motion_stops_native_timer",
+                  "error_state_static_and_generic", "menu_header_flags_error", "visible_ui_healthy", "unregistered_tray_cannot_hide", "hidden_and_minimized_panel_motion_stops",
                   "active_collection_close_hides"}
         report = {"test":"portable_windows_tray", "status":"passed", "cleanup":{"verified":True,"remaining_processes":0},
                   "only_nonsecret_settings_retained":True, "workers":[{"scenario":s,"status":"passed","cleanup":{"verified":True,"remaining_processes":0},"checks":{k:True for k in checks}} for s in ("quit","close")]}

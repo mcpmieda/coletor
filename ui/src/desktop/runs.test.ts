@@ -16,7 +16,7 @@ const history: HistoryEntry[] = [
 
 test('history becomes runs, newest first, with partial and running states', () => {
   const runs = groupRuns([...history].reverse());
-  expect(runs.map(r => r.status)).toEqual(['running', 'ok', 'partial']);
+  expect(runs.map(r => r.status)).toEqual(['running', 'review', 'partial']);
   expect(runs[1]).toMatchObject({ resolved: 55, unresolved: 1, conflicts: 2, finished: 230 });
   expect(runSummary(runs[1])).toBe('2 de 2 turma(s) · 55 aluno(s) · 1 não reconhecido(s) · 2 conflito(s)');
   expect(runSummary(runs[2])).toContain('1 de 3 turma(s)');

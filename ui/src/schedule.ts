@@ -25,10 +25,10 @@ export function toDraft(config: SchoolSchedule): ScheduleDraft {
   return { timezone: config.timezone, rules: config.rules.map(({ times, ...rule }) => ({ ...rule, timesText: times.join(', ') })) };
 }
 export function parseTimes(text: string): string[] {
-  if (text.length > 150) return fail('Use até 16 horários por dia e turno.');
+  if (text.length > 400) return fail('Use até 48 horários por dia e turno.');
   if (!text.trim()) return [];
   const times = text.split(',').map(t => t.trim());
-  if (times.length > 16 || times.some(t => !TIME.test(t))) return fail('Use horários de 00:00 a 23:59, separados por vírgulas.');
+  if (times.length > 48 || times.some(t => !TIME.test(t))) return fail('Use horários de 00:00 a 23:59, separados por vírgulas.');
   if (new Set(times).size !== times.length) return fail('Remova os horários repetidos no mesmo dia e turno.');
   return times.sort();
 }
@@ -46,7 +46,7 @@ export function validateSchedule(value: unknown): SchoolSchedule {
     if (keys.has(key)) return fail('Dia e turno duplicados. Confira os horários salvos.');
     keys.add(key);
     const label = `${DAYS[r.weekday - 1]} / ${SHIFTS[r.shift]}`;
-    if (!Array.isArray(r.times) || r.times.length > 16 || r.times.some(t => typeof t !== 'string' || !TIME.test(t))) return fail(`${label}: horário inválido.`);
+    if (!Array.isArray(r.times) || r.times.length > 48 || r.times.some(t => typeof t !== 'string' || !TIME.test(t))) return fail(`${label}: horário inválido.`);
     if (new Set(r.times).size !== r.times.length) return fail(`${label}: remova horários repetidos.`);
     if (typeof r.reconciliation !== 'string' || (r.reconciliation !== '' && !TIME.test(r.reconciliation))) return fail(`${label}: confira o horário da conferência final.`);
     if (r.selected && !r.times.length) return fail(`${label}: inclua ao menos um horário de coleta.`);

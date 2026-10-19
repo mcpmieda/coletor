@@ -119,7 +119,7 @@ class ManualSession:
         available = [c["class_id"] for c in self._catalog["classes"]]
         choices = revalidate_choices(saved["selection"], self._catalog["scope"], available)
         if self._all_classes():
-            choices = {"selected_class_ids": available, "unavailable_class_ids": [], "context_matches": True}
+            choices = {"selected_class_ids": available, "unavailable_class_ids": [], "context_matches": True, "all_classes": True}
         return {"session": self._status(), "catalog": self._catalog, **choices,
                 "selection_revision": saved["local_revision"], "notice": saved["notice"]}
 

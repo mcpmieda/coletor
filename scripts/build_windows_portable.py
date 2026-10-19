@@ -165,7 +165,7 @@ def validate_manual_evidence(report, browser=False):
                  "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
                  "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored'} if browser else
                 {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
-                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
+                 "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "closing_choice_ends_session", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
     if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True
             or report.get("cleanup", {}).get("remaining_processes") != 0
             or report.get("real_network") is not False or report.get("real_credentials") is not False

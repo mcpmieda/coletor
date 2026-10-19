@@ -18,7 +18,7 @@ controls = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controls)
 CHECKS = ['bundled_application', 'native_window_visible', 'prepared_without_browser', 'opening_requires_consent',
           'separate_edge_started', 'post_open_synthetic_login_navigation', 'classes_discovered_without_ct', 'selection_persisted_and_revalidated', 'no_student_link_opened',
-          'session_scope_cleared', 'browser_processes_stopped', 'owned_temporaries_removed', 'window_closed']
+          'closing_choice_ends_session', 'session_scope_cleared', 'browser_processes_stopped', 'owned_temporaries_removed', 'window_closed']
 
 
 def synthetic_browser(progress):
@@ -153,8 +153,12 @@ def worker(args):
             stored=json.loads((args.output.parent/'settings/class-selection.json').read_text(encoding='utf-8'))
             checks['selection_persisted_and_revalidated']=stored['profiles'][0]['selected_class_ids']==['11'] and set(stored)=={'schemaVersion','localRevision','profiles'}
             checks['no_student_link_opened']=not (args.output.parent/'unexpected-student-navigation.json').exists()
-            controls.click(window, 'Fechar o Smecel')
-            smoke.wait_js(window, year_ready)
+            # Concluir (not "Fechar o Smecel") must end the Edge session it opened.
+            controls.click(window, 'Concluir')
+            smoke.wait_js(window, "!document.querySelector('[role=dialog]')")
+            window.evaluate_js("window.__manualStatus=null;window.pywebview.api.get_manual_session_status().then(r=>window.__manualStatus=r);true")
+            smoke.wait_js(window, '!!window.__manualStatus')
+            checks['closing_choice_ends_session']=window.evaluate_js("window.__manualStatus.state==='closed'") and all(d._process is None for d in drivers)
             window.evaluate_js("window.__manualStatus=null;window.pywebview.api.get_manual_session_status().then(r=>window.__manualStatus=r);true")
             smoke.wait_js(window, '!!window.__manualStatus')
             checks['session_scope_cleared'] = window.evaluate_js("window.__manualStatus.state==='closed' && window.__manualStatus.scope===null")

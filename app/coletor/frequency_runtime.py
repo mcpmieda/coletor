@@ -27,10 +27,10 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
-              'CLASS_RECONCILIATION_REQUIRED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
+              'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
               'PENDING_BATCHES', 'SOURCE_READ_FAILED'}
 # Problems an operator must see even with the window hidden in the tray.
-ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED',
+ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
                'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
                'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
@@ -163,6 +163,7 @@ class FrequencyRuntime:
         self._progress = {'completed': 0, 'total': 0, 'classLabel': None}
         self._minute = None
         self._fired = set()
+        self._pending_slots, self._last_schedule = set(), None
         self._source_blocked = False
         self._last_tick = 0
         self._thread = None
@@ -427,7 +428,9 @@ class FrequencyRuntime:
         with self._lock:
             if self._closed or not self._active or self._paused: return
             epoch = self._epoch
-        if self._operation.locked(): return
+        if self._operation.locked():
+            self._note_busy_slot()
+            return
         status = self._fresh()
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
@@ -435,6 +438,7 @@ class FrequencyRuntime:
         if self._code == 'CENTER_CLASSES_REQUIRED' and status['classes']:
             with self._lock: self._code, self._state = None, 'reserve'
         schedule = status['settings']['schedule']
+        self._last_schedule = schedule
         # A device with no executable agenda or a known source blocker must
         # not monopolise the school lease. Eligible leaders still heartbeat
         # every 30 s so that the admin sees connected/standby computers.
@@ -474,12 +478,20 @@ class FrequencyRuntime:
         self._fired = {key for key in self._fired if key[0] >= oldest}
         shifts = {r['shift'] for r in schedule['rules'] if r['enabled'] and r['weekday'] == (now.weekday() + 1) % 7
                   and wall_time in [*r['times'], r['recheck']] and (civil_day, r['shift'], wall_time) not in self._fired}
+        keys = {(civil_day, shift, wall_time) for shift in shifts}
+        # Slots that came while a long collection was still running run once,
+        # coalesced, right after it ends (never in parallel, never after sleep).
+        late = {k for k in self._pending_slots if k[0] == civil_day and k not in self._fired}
+        self._pending_slots = set()
+        if late:
+            shifts |= {k[1] for k in late}; keys |= late
+            self._history.record('late-start', label=', '.join(sorted({k[2] for k in late})))
         if shifts:
             if self._source_blocked or self._code in {'lease-fenced', 'revision-conflict', 'source-invalid',
                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'SOURCE_CLASS_UNAVAILABLE',
                    'SOURCE_CLASS_AMBIGUOUS', 'identity-review'}: return
-            keys = {(civil_day, shift, wall_time) for shift in shifts}
             if not self._operation.acquire(blocking=False):
+                self._pending_slots |= late
                 self._minute = None  # A concurrent command may finish within this minute.
                 return
             try:
@@ -495,6 +507,17 @@ class FrequencyRuntime:
                 self._minute = None
                 self._operation.release()
                 raise
+
+    def _note_busy_slot(self):
+        """Remember a scheduled minute that found the previous collection busy."""
+        schedule = self._last_schedule
+        if not schedule: return
+        now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
+        civil_day, wall_time = now.date().isoformat(), now.strftime('%H:%M')
+        for r in schedule['rules']:
+            if (r['enabled'] and r['weekday'] == (now.weekday() + 1) % 7 and wall_time in [*r['times'], r['recheck']]
+                    and (civil_day, r['shift'], wall_time) not in self._fired):
+                self._pending_slots.add((civil_day, r['shift'], wall_time))
 
     def collect(self, shifts=None, *, _claimed=False):
         # A scheduled invocation already owns the operation lock so its minute
@@ -599,6 +622,7 @@ class FrequencyRuntime:
                     self._check(epoch)
                     self._storage.enqueue(payload)
                 self._send(payload, epoch)
+                self._supersede(source['class_id'])
                 with self._lock:
                     self._progress['completed'] += 1
                     receipt = dict(self._last_receipt or {})
@@ -612,9 +636,14 @@ class FrequencyRuntime:
                 self._state, self._class = 'ready', None
                 self._progress['classLabel'] = None
             self._history.record('collection-finished', sent=len(pairs))
+            self._supersede(everything=True)
             if unmatched:
                 # The classes the Centro recognizes were sent; the others need a link there.
                 self._error(FrequencyError('CLASS_RECONCILIATION_REQUIRED'), label=', '.join(unmatched))
+            elif catalog.get('all_classes') and catalog['catalog'].get('filtered'):
+                # "Todas" promises the whole school: the visible classes were sent,
+                # but a filtered or partial Smecel list must not look complete.
+                self._error(FrequencyError('SOURCE_LIST_FILTERED'))
             return self.public_status()
         except Exception as error:
             self._error(error)
@@ -704,6 +733,11 @@ class FrequencyRuntime:
             self._last_receipt = {k: result[k] for k in ('receivedAt', 'resolvedRecords', 'unresolvedRecords', 'conflicts')}
 
     def _drain(self, epoch):
+        """Send what the current grant can still deliver. A batch from an older
+        concession that the server confirms it never committed (no receipt)
+        stays protected until a fresh read of the same class is confirmed, so a
+        failed re-read never loses the previous observation."""
+        self._stale = {}
         for entry in self._storage.queue():
             self._check(epoch)
             payload = entry['payload']
@@ -711,15 +745,23 @@ class FrequencyRuntime:
             if receipt is not None:
                 self._storage.acknowledge(payload['requestId'])
                 continue
-            # A batch from an older concession that the server confirms it never
-            # committed (no receipt) is superseded, not lost: Smecel is the
-            # source and this run re-reads the class. It is dropped, never
-            # rewritten or re-signed, so nobody has to discard it by hand.
+            # Never rewritten or re-signed: it is superseded by this run's
+            # confirmed re-read (see _supersede), so nobody discards it by hand.
             if payload.get('fencingToken') != self._lease['fencingToken']:
-                self._storage.acknowledge(payload['requestId'])
-                self._history.record('superseded', label=payload.get('sourceClassLabel'))
+                self._stale.setdefault(payload.get('sourceClassId'), []).append(payload)
                 continue
             self._send(payload, epoch)
+
+    def _supersede(self, source_class_id=None, everything=False):
+        """Drop stale batches only after the replacement has a server receipt.
+        everything=True at the end of a complete run covers classes no longer
+        listed in the Smecel (nothing would ever replace them)."""
+        stale = getattr(self, '_stale', None) or {}
+        keys = list(stale) if everything else [source_class_id]
+        for key in keys:
+            for payload in stale.pop(key, []):
+                self._storage.acknowledge(payload['requestId'])
+                self._history.record('superseded', label=payload.get('sourceClassLabel'))
 
     def save_settings(self, expected_revision, schedule):
         validate_schedule(schedule)

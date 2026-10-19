@@ -7,6 +7,7 @@ import { parseTime } from '@internationalized/date';
 type Tone = 'default' | 'success' | 'warning' | 'danger' | 'accent';
 const RUN_STATUS: Record<string, { label: string; color: Tone }> = {
   ok: { label: 'Concluída', color: 'success' },
+  review: { label: 'Com pendências', color: 'warning' },
   partial: { label: 'Parcial', color: 'warning' },
   error: { label: 'Falhou', color: 'danger' },
   running: { label: 'Coletando', color: 'accent' },

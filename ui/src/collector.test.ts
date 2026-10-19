@@ -13,10 +13,10 @@ describe('Shared school agenda V2 bridge', () => {
   it('never overwrites a shared revision conflict or reports false saved state', () => {
     expect(() => checkedCollector({ error: 'hidden backend data', code: 'revision-conflict' })).toThrow('Recarregue');
   });
-  it('counts final recheck in the maximum sixteen slots per day/shift', () => {
+  it('counts final recheck in the maximum 48 slots per day/shift', () => {
     const draft = sharedDraft(null);
-    draft.rules[0].timesText = Array.from({ length: 16 }, (_, i) => `08:${String(i).padStart(2, '0')}`).join(',');
+    draft.rules[0].timesText = Array.from({ length: 48 }, (_, i) => `08:${String(i).padStart(2, '0')}`).join(',');
     draft.rules[0].reconciliation = '09:00';
-    expect(() => sharedFromDraft(draft)).toThrow('16');
+    expect(() => sharedFromDraft(draft)).toThrow('48');
   });
 });

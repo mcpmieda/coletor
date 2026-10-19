@@ -550,6 +550,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         self.assertTrue(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
 
+    def test_old_uncommitted_fence_survives_a_failed_re_read(self):
+        payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                     {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
+        self.storage.enqueue(payload)
+        self.source.operational_capture = Mock(side_effect=SessionError('expired'))
+        result = self.runtime.collect()
+        self.assertEqual(result['state'], 'error')
+        # Without a confirmed replacement the previous observation stays protected.
+        self.assertEqual([e['payload']['requestId'] for e in self.storage.queue()], [payload['requestId']])
+        self.assertFalse(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
+
+    def test_all_classes_with_a_filtered_smecel_list_is_reported_not_called_complete(self):
+        self.source.operational_catalog = lambda storage: {
+            'selected_class_ids': ['13331'], 'unavailable_class_ids': [], 'all_classes': True,
+            'catalog': {'filtered': True, 'classes': [{'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'}]}}
+        result = self.runtime.collect()
+        self.assertEqual(self.source.reads, 1)  # The visible class was still sent.
+        self.assertEqual(result['code'], 'SOURCE_LIST_FILTERED')
+
     def test_settings_conflict_preserves_shared_schedule(self):
         before = copy.deepcopy(self.provider.shared_schedule)
         with self.assertRaises(FrequencyError): self.runtime.save_settings(99, schedule())
@@ -637,6 +656,35 @@ class RuntimeTests(unittest.TestCase):
         self.provider.now += 120
         self.runtime.tick()
         self.assertEqual(self.runtime.collect.call_count, 1)
+
+    def test_slot_reached_during_a_long_collection_runs_once_right_after(self):
+        zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+        now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(zone)
+        later = datetime.fromtimestamp(NOW + 900, timezone.utc).astimezone(zone)
+        value = schedule()
+        for r in value['rules']: r.update(enabled=False, times=[], recheck=None)
+        rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=sorted({now.strftime('%H:%M'), later.strftime('%H:%M')}))
+        self.provider.shared_schedule = value
+        self.runtime.collect = Mock()
+        self.runtime.tick()  # First slot: learns the agenda and starts.
+        import time
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 1)
+        self.provider.now += 900
+        self.runtime._operation.acquire()  # The first collection is still running.
+        self.runtime.tick()
+        self.assertEqual(self.runtime.collect.call_count, 1)  # Never in parallel.
+        self.runtime._operation.release()
+        self.provider.now += 120  # It ends two minutes later: one coalesced run.
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 2)
+        self.provider.now += 60
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 2)
+        self.assertTrue(any(e['kind'] == 'late-start' for e in self.runtime.recent_history(20)))
 
     def test_preview_or_different_header_cannot_be_promoted(self):
         value = preview(); value['mode'] = 'demo'

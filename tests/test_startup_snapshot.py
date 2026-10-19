@@ -36,6 +36,16 @@ class StartupSnapshotTests(unittest.TestCase):
         self.assertNotIn('never', raw); self.assertNotIn('token', raw); self.assertNotIn('progress', raw)
         self.assertIn('browser', snapshot['settings'])
 
+    def test_snapshot_saved_while_collecting_reopens_safe_and_without_history(self):
+        (self.path / 'device.json').write_text(json.dumps({'state': 'active'}), encoding='utf-8')
+        self.api._remember_status(self.status(state='collecting'))
+        snapshot = self.api.get_startup_snapshot()
+        # Never a stale "collecting", always a renderable progress, and the
+        # history waits for the verified access (protected endpoint).
+        self.assertEqual(snapshot['status']['state'], 'ready')
+        self.assertEqual(snapshot['status']['progress'], {'completed': 0, 'total': 0, 'classLabel': None})
+        self.assertEqual(snapshot['history'], [])
+
     def test_logout_forgets_the_summary(self):
         (self.path / 'device.json').write_text(json.dumps({'state': 'active'}), encoding='utf-8')
         self.api._remember_status(self.status())

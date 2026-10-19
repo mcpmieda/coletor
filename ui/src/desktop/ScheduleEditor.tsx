@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
+import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
 import { Save } from 'lucide-react';
 import type { SharedSchedule } from '../collector';
 import { call, type Status } from './bridge';
-import { DAY_LETTERS, DAY_NAMES, dayTimes, draftProblem, fromShared, toShared, type PeriodDraft } from './periods';
+import { DAY_LETTERS, DAY_NAMES, dayTimes, draftProblem, fromShared, parseTimesText, toShared, type PeriodDraft } from './periods';
 import { NumberInput, Section, TextInput, TimeInput } from './ui';
 
 const MODES: { id: PeriodDraft['mode']; label: string; hint: string }[] = [
@@ -19,13 +19,18 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
   const [draft, setDraft] = useState<PeriodDraft>(() => fromShared(status?.settings?.schedule ?? null));
   const [timesText, setTimesText] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
+  const [unify, setUnify] = useState(false);
   useEffect(() => {
     if (!open) return;
     const next = fromShared(status?.settings?.schedule ?? null);
-    setDraft(next); setTimesText(next.times.join(', ')); setError('');
+    setDraft(next); setTimesText(next.times.join(', ')); setError(''); setUnify(false);
   }, [open]); // Reload only when the dialog opens, not on every status poll.
   const set = (patch: Partial<PeriodDraft>) => setDraft(d => ({ ...d, ...patch }));
-  const problem = draftProblem(draft);
+  const typed = parseTimesText(timesText);
+  const problem = (draft.mode === 'times' && typed.invalid.length ? `Horário inválido: ${typed.invalid.join(', ')}. Use o formato 08:30.` : null)
+    ?? (draft.mode === 'times' && typed.repeated.length ? `Horário repetido: ${typed.repeated.join(', ')}.` : null)
+    ?? draftProblem(draft)
+    ?? (draft.custom && !unify ? 'Confirme acima que todos os dias e turnos passam a usar os mesmos horários.' : null);
   const perDay = dayTimes(draft).length + (draft.finalCheck ? 1 : 0);
 
   async function save() {
@@ -56,7 +61,11 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
                 <Alert.Indicator />
                 <Alert.Content>
                   <Alert.Title>A agenda atual tem horários diferentes por turno ou dia</Alert.Title>
-                  <Alert.Description>Ela foi feita no Ecossistema. Ao salvar aqui, todos os dias escolhidos passam a usar os mesmos horários.</Alert.Description>
+                  <Alert.Description>Ela foi feita no Ecossistema. Ao salvar aqui, todos os dias escolhidos passam a usar os mesmos horários, nos dois turnos.</Alert.Description>
+                  <Checkbox className="mt-2" isSelected={unify} onChange={setUnify}>
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                    <Checkbox.Content><Label>Entendi, usar os mesmos horários em todos os dias e turnos</Label></Checkbox.Content>
+                  </Checkbox>
                 </Alert.Content>
               </Alert>
             )}
@@ -84,7 +93,7 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
               )}
               {draft.mode === 'times' && (
                 <TextInput label="Horários" value={timesText} placeholder="07:30, 12:00, 17:30" hint="Separe por vírgula"
-                  onChange={v => { setTimesText(v); set({ times: v.split(/[,; ]+/).filter(x => /^\d{1,2}:\d{2}$/.test(x)).map(x => x.padStart(5, '0')) }); }} />
+                  onChange={v => { setTimesText(v); set({ times: parseTimesText(v).times }); }} />
               )}
               {draft.mode !== 'off' && (
                 <div className="flex flex-col gap-2">
@@ -106,6 +115,15 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
               </Section>
             )}
             {draft.mode !== 'off' && !problem && <p className="text-xs text-muted">{perDay} coleta(s) por dia escolhido.</p>}
+            {draft.mode !== 'off' && perDay > 16 && (
+              <Alert status="warning">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Title>Mais de 16 coletas por dia</Alert.Title>
+                  <Alert.Description>Coletores de versão anterior param de coletar com esta agenda. Antes de salvar, atualize o Coletor em todos os computadores da escola.</Alert.Description>
+                </Alert.Content>
+              </Alert>
+            )}
             {(problem || error) && (
               <Alert status="danger"><Alert.Indicator /><Alert.Content><Alert.Title>{error || problem}</Alert.Title></Alert.Content></Alert>
             )}

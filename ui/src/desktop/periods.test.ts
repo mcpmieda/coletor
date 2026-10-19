@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, scheduleText, toShared, type PeriodDraft } from './periods';
+import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, parseTimesText, scheduleText, toShared, type PeriodDraft } from './periods';
 
 const draft = (patch: Partial<PeriodDraft> = {}): PeriodDraft => ({ ...DEFAULT_DRAFT, ...patch });
 
@@ -51,4 +51,16 @@ test('next collection in the school time zone', () => {
   // Friday after the last time goes to Monday 07:00.
   expect(nextRun(draft(), new Date('2026-10-23T21:00:00Z'))?.toISOString()).toBe('2026-10-26T10:00:00.000Z');
   expect(nextRun(draft({ mode: 'off' }))).toBeNull();
+});
+
+test('a day with only one shift enabled is not silently widened', () => {
+  const rules = Array.from({ length: 14 }, (_, i) => ({
+    weekday: Math.floor(i / 2), shift: (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino',
+    enabled: Math.floor(i / 2) === 1 && i % 2 === 0, times: Math.floor(i / 2) === 1 && i % 2 === 0 ? ['07:00'] : [], recheck: null,
+  }));
+  expect(fromShared({ timezone: 'America/Bahia', rules }).custom).toBe(true);
+});
+
+test('typed fixed times report invalid and repeated entries instead of dropping them', () => {
+  expect(parseTimesText('08:00, 09:xx, 12:00, 8:00, 7:30')).toEqual({ times: ['07:30', '08:00', '12:00'], invalid: ['09:xx'], repeated: ['8:00'] });
 });

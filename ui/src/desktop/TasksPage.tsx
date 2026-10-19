@@ -10,7 +10,7 @@ import { IconButton, Stat, StatusChip } from './ui';
 import type { ColetorState } from './useColetor';
 
 export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: ColetorState; onOpenSettings: () => void }>) {
-  const { status, history, setStatus, refresh } = state;
+  const { status, history, setStatus, refresh, error, cached } = state;
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -36,6 +36,16 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
 
   return (
     <div className="flex flex-col gap-5">
+      {error && (
+        <Alert status="warning">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Não deu para confirmar o estado da coleta agora</Alert.Title>
+            <Alert.Description>{cached ? 'Os números abaixo são do último resumo salvo neste computador. ' : 'Os números abaixo são da última verificação. '}{error}</Alert.Description>
+          </Alert.Content>
+          <Button size="sm" variant="secondary" className="shrink-0 self-center" onPress={() => { void refresh(); }}><RefreshCw size={14} /> Tentar de novo</Button>
+        </Alert>
+      )}
       {status && !credential && (
         <Alert status="warning">
           <Alert.Indicator><KeyRound size={18} /></Alert.Indicator>
@@ -70,7 +80,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
 
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Turmas coletadas" value={classes} icon={<School size={20} />} />
-        <Stat label="Coletando agora" value={collecting ? `${status!.progress.completed}/${status!.progress.total}` : '—'} icon={<Activity size={20} />} />
+        <Stat label="Coletando agora" value={collecting ? `${status!.progress?.completed ?? 0}/${status!.progress?.total ?? 0}` : '—'} icon={<Activity size={20} />} />
         <Stat label="Próxima coleta" value={fmtCountdown(next, nowMs)} icon={<CalendarClock size={20} />} />
         <Stat label="Falhas nas últimas 24 h" value={errors24h} icon={<ShieldCheck size={20} />} />
       </div>
@@ -115,7 +125,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
                 <span className="truncate">Coletando {status!.progress.classLabel ?? '…'}</span>
                 <span className="text-muted">{status!.progress.completed}/{status!.progress.total}</span>
               </div>
-              <ProgressBar aria-label="Progresso" size="sm" value={status!.progress.total ? Math.round((status!.progress.completed / status!.progress.total) * 100) : 0}>
+              <ProgressBar aria-label="Progresso" size="sm" value={status!.progress?.total ? Math.round(((status!.progress.completed ?? 0) / status!.progress.total) * 100) : 0}>
                 <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
               </ProgressBar>
             </div>
