@@ -38,27 +38,25 @@ class PublishInstallerTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.root/'instalador'/'versoes.json').read_text(encoding='utf-8'))['versoes']
 
-    def test_protected_main_publishes_release_then_checked_archive_pr(self):
+    def test_instalador_folder_is_the_only_distribution_and_merges_itself(self):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/publish-installer.yml').read_text('utf8')
         checks = (Path(__file__).resolve().parents[1] / '.github/workflows/checks.yml').read_text('utf8')
-        for text in ('gh release create', 'gh release delete', 'gh pr create', 'gh workflow run checks.yml', 'gh pr merge'):
+        # Only instalador/ on main: no GitHub release, no chained workflow_run job.
+        for text in ('gh release', 'archive-merge', 'gh workflow run checks.yml', "automation/instalador-*'"):
+            self.assertNotIn(text, workflow)
+        for text in ('gh pr create', '/approve', 'gh run watch', 'gh pr merge'):
             self.assertIn(text, workflow)
         self.assertNotIn('git push origin HEAD:main', workflow)
         self.assertNotIn('[skip ci]', workflow)
-        self.assertIn('workflow_dispatch:', checks)
         self.assertIn("github.event_name != 'pull_request'", checks)
         self.assertIn('Installer archive-only merge', workflow)
         self.assertIn('Installer publisher maintenance only', workflow)
         self.assertIn('if ! pr_url="$(gh pr create', workflow)
-        # Release publication can succeed while the archive remains stale.
-        # Denied PR creation/merge must fail visibly instead of reporting green.
-        self.assertIn('ARCHIVE_PR_NOT_CREATED', workflow)
-        self.assertIn('ARCHIVE_PR_NOT_MERGED', workflow)
+        # Denied PR creation, missing checks or a blocked merge fail visibly.
+        for code in ('ARCHIVE_PR_NOT_CREATED', 'ARCHIVE_CHECKS_NOT_STARTED', 'ARCHIVE_PR_NOT_MERGED'):
+            self.assertIn(code, workflow)
         self.assertIn('exit 1\n          fi\n          echo "Created archive PR', workflow)
         self.assertIn('The installer is preserved in branch $branch', workflow)
-        self.assertNotIn('Actions cannot open archive PR.', workflow)
-        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", workflow)
-        self.assertIn("startsWith(github.event.workflow_run.head_branch, 'automation/instalador-run-')", workflow)
         self.assertIn('all(.[]; .path | startswith(', workflow)
 
     def test_publishes_one_real_pe_and_same_sha256(self):

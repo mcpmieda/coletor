@@ -9,7 +9,6 @@ on:
     types: [completed]
     branches:
       - main
-      - 'automation/instalador-*'
 
 permissions:
   contents: write
@@ -28,7 +27,7 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     env:
       GIT_LFS_SKIP_SMUDGE: '1'
       UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -56,7 +55,7 @@ jobs:
             # Archive-only merges do not create new application installers.
             changed="$(git diff --name-only HEAD^ HEAD)"
             if [[ -n "$changed" ]] && ! grep -qv '^instalador/' <<< "$changed"; then
-              echo 'Installer archive-only merge: skip to prevent release/PR loops.'
+              echo 'Installer archive-only merge: skip to prevent PR loops.'
               echo 'publish=false' >> "$GITHUB_OUTPUT"
             elif [[ -n "$changed" ]] && ! grep -qvE '^(instalador/|\.github/workflows/publish-installer\.yml$|tests/test_publish_windows_installer\.py$)' <<< "$changed"; then
               # These files govern distribution/reporting, not the Windows
@@ -88,42 +87,6 @@ jobs:
             --head-sha "$UPSTREAM_SHA" --run-id "$UPSTREAM_RUN_ID" \
             --run-number "$UPSTREAM_RUN_NUMBER"
 
-
-      - name: Publish permanent verified GitHub release and keep five
-        if: steps.current.outputs.publish == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          candidate="$(python3 -c 'import json,os; d=json.load(open("instalador/versoes.json")); print("instalador/"+next(x["arquivo"] for x in d["versoes"] if x["run_id"]==int(os.environ["UPSTREAM_RUN_ID"])))')"
-          test -f "$candidate"
-          test -f "$candidate.sha256"
-          (cd instalador && sha256sum --check --status "$(basename "$candidate.sha256")")
-          tag="coletor-installer-run-$UPSTREAM_RUN_ID"
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$tag" "$candidate" "$candidate.sha256" \
-              --repo "$GITHUB_REPOSITORY" --target "$UPSTREAM_SHA" \
-              --title "Coletor Frequência Windows build $UPSTREAM_RUN_NUMBER" \
-              --notes "Native-tested installer from successful CI run $UPSTREAM_RUN_ID, commit $UPSTREAM_SHA. SHA-256 attached."
-          else
-            echo 'Release for this exact CI run already exists.'
-          fi
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-            --json tagName,publishedAt > "$RUNNER_TEMP/instalador-releases.json"
-          python3 - "$RUNNER_TEMP/instalador-releases.json" "$RUNNER_TEMP/obsolete-installer-releases" <<'PY'
-          import json
-          import re
-          import sys
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              items = json.load(handle)
-          ours = [r for r in items if re.fullmatch(r"coletor-installer-run-[1-9][0-9]*", r["tagName"])]
-          ours.sort(key=lambda r: (r["publishedAt"] or "", int(r["tagName"].rsplit("-", 1)[1])), reverse=True)
-          with open(sys.argv[2], "w", encoding="utf-8") as output:
-              output.writelines(r["tagName"] + "\n" for r in ours[5:])
-          PY
-          while IFS= read -r obsolete; do
-            [[ -n "$obsolete" ]] || continue
-            gh release delete "$obsolete" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
-          done < "$RUNNER_TEMP/obsolete-installer-releases"
 
       - name: Prepare protected archive PR through Git LFS
         if: steps.current.outputs.publish == 'true'
@@ -161,54 +124,45 @@ jobs:
           git commit -m "chore(instalador): preserve tested Windows build $UPSTREAM_RUN_NUMBER"
           branch="automation/instalador-run-$UPSTREAM_RUN_ID"
           git push --set-upstream origin "$branch"
-          # A GitHub release can succeed while the protected main archive is
-          # stale. Never report the archive stage as successful when Actions
-          # cannot open a PR. The verified release and LFS branch remain intact.
+          # The only distribution is instalador/ on main: open the archive PR,
+          # let its protected checks run, then merge it here. A PR opened by the
+          # Actions bot gets its pull_request checks held as 'action_required':
+          # approve that exact run (this repository's own workflow, on the
+          # commit this job just made). No release, no chained workflow_run.
           if ! pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
             --title "chore(instalador): archive verified Windows build $UPSTREAM_RUN_NUMBER" \
-            --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Requires protected checks; release already available.")"; then
-            echo "::error::ARCHIVE_PR_NOT_CREATED: verified release is available, but main/instalador is STALE. The installer is preserved in branch $branch. Enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General, or open a PR manually; then validate the two required checks."
+            --body "Automated archive from successful Windows native CI run $UPSTREAM_RUN_ID. Only instalador/ changes; merged by the publisher after the protected checks pass.")"; then
+            echo "::error::ARCHIVE_PR_NOT_CREATED: main/instalador is STALE. The installer is preserved in branch $branch. Enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General, or open a PR manually."
             exit 1
           fi
           echo "Created archive PR: $pr_url"
-          # GITHUB_TOKEN PR creation does not trigger pull_request workflows.
-          # Explicit workflow_dispatch is exempt from this restriction.
-          gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          echo 'The separate workflow_run job will merge only after BOTH dispatched checks succeed.'
-
-
-  archive-merge:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
-      startsWith(github.event.workflow_run.head_branch, 'automation/instalador-run-') &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      GH_TOKEN: ${{ github.token }}
-      ARCHIVE_BRANCH: ${{ github.event.workflow_run.head_branch }}
-      CHECKED_SHA: ${{ github.event.workflow_run.head_sha }}
-    steps:
-      - name: Merge archive PR only after validated source and both required checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$ARCHIVE_BRANCH" \
-            --state open --json number,url,headRefOid,baseRefName,files --limit 5)"
-          if ! jq -e --arg sha "$CHECKED_SHA" \
-            'length == 1 and .[0].headRefOid == $sha and .[0].baseRefName == "main" and (.[0].files | length > 0) and (.[0].files | all(.[]; .path | startswith("instalador/")))' \
-            <<< "$pr" >/dev/null; then
+          head_sha="$(git rev-parse HEAD)"
+          run_id=''
+          for attempt in $(seq 1 30); do
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow checks.yml --branch "$branch" \
+              --event pull_request --limit 5 --json databaseId,headSha \
+              --jq ".[] | select(.headSha == \"$head_sha\") | .databaseId" | head -n 1)"
+            [[ -n "$run_id" ]] && break
+            sleep 10
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::error::ARCHIVE_CHECKS_NOT_STARTED: no checks run for $branch; the PR remains open."
+            exit 1
+          fi
+          if [[ "$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)" == 'action_required' ]]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve"
+          fi
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --interval 30 --exit-status > /dev/null
+          # Provenance before merging: still open, exact head, only instalador/.
+          pr="$(gh pr view "$pr_url" --repo "$GITHUB_REPOSITORY" --json state,headRefOid,baseRefName,files)"
+          if ! jq -e --arg sha "$head_sha" \
+            '.state == "OPEN" and .headRefOid == $sha and .baseRefName == "main" and (.files | length > 0) and (.files | all(.[]; .path | startswith("instalador/")))' \
+            <<< "$pr" > /dev/null; then
             echo '::error::Archive PR provenance or changed paths do not match the checked commit.'
             exit 1
           fi
-          run_id="$(printf '%s' "$ARCHIVE_BRANCH" | sed -n 's@^automation/instalador-run-\([1-9][0-9]*\)$@\1@p')"
-          test -n "$run_id"
-          gh release view "coletor-installer-run-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null
-          url="$(jq -r '.[0].url' <<< "$pr")"
-          if gh pr merge "$url" --repo "$GITHUB_REPOSITORY" --merge; then
-            echo 'Protected checks passed; archive merged into main.'
-          else
-            echo '::error::ARCHIVE_PR_NOT_MERGED: required checks passed, but branch protection or permissions blocked merging the archive PR. Release is available; main/instalador is STALE and the PR remains open for authorized review.'
+          if ! gh pr merge "$pr_url" --repo "$GITHUB_REPOSITORY" --merge --delete-branch; then
+            echo '::error::ARCHIVE_PR_NOT_MERGED: checks passed, but branch protection or permissions blocked the merge; main/instalador is STALE and the PR remains open.'
             exit 1
           fi
+          echo 'Protected checks passed; instalador/ updated on main.'
