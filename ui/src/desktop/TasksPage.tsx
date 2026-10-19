@@ -13,7 +13,7 @@ import type { ColetorState } from './useColetor';
 const QUIET_CODES = new Set(['lease-busy', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
 
 export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: ColetorState; onOpenSettings: () => void }>) {
-  const { status, history, setStatus, refresh, error, cached } = state;
+  const { status, history, setStatus, refresh } = state;
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false), [starting, setStarting] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -54,16 +54,6 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
 
   return (
     <div className="flex flex-col gap-5">
-      {error && (
-        <Alert status="warning">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>Não deu para confirmar o estado da coleta agora</Alert.Title>
-            <Alert.Description>{cached ? 'Os números abaixo são do último resumo salvo neste computador. ' : 'Os números abaixo são da última verificação. '}{error}</Alert.Description>
-          </Alert.Content>
-          <Button size="sm" variant="secondary" className="shrink-0 self-center" onPress={() => { void refresh(); }}><RefreshCw size={14} /> Tentar de novo</Button>
-        </Alert>
-      )}
       {status && !credential && (
         <Alert status="warning">
           <Alert.Indicator><KeyRound size={18} /></Alert.Indicator>
@@ -84,15 +74,6 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
           {(code === 'SOURCE_LOGIN_FAILED' || code === 'SOURCE_LOGIN_REQUIRED') && (
             <Button size="sm" variant="secondary" className="shrink-0 self-center" onPress={onOpenSettings}>Conferir acesso</Button>
           )}
-        </Alert>
-      )}
-      {(last?.unresolved ?? 0) > 0 && (
-        <Alert status="warning">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>{last!.unresolved} aluno(s) não reconhecido(s) na última coleta</Alert.Title>
-            <Alert.Description>O nome no Smecel combina com mais de um aluno, ou com nenhum, no Ecossistema. Confira na conciliação do Centro de Administração.</Alert.Description>
-          </Alert.Content>
         </Alert>
       )}
 

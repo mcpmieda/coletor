@@ -45,6 +45,7 @@ function ServiceLine({ state }: Readonly<{ state: ColetorState }>) {
       <span className={`size-2 rounded-full ${color}`} />
       {text}
       {state.cached && s && <span className="ml-auto flex items-center gap-1"><Spinner size="sm" /> verificando</span>}
+      {!state.cached && state.error && <span className="ml-auto text-warning" title="Veja Registros">não confirmado</span>}
     </div>
   );
 }
@@ -92,7 +93,7 @@ export default function DesktopApp() {
         <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
           {page === 'tasks' && <TasksPage state={state} onOpenSettings={() => setPage('settings')} />}
           {page === 'history' && <HistoryPage history={state.history} />}
-          {page === 'logs' && <LogsPage history={state.history} />}
+          {page === 'logs' && <LogsPage history={state.history} error={state.error} onRetry={() => { void state.refresh(); }} />}
           {page === 'settings' && <SettingsPage state={state} version={version} />}
         </div>
       </main>

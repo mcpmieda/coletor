@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Button, Modal, Table, ToggleButton, ToggleButtonGroup } from '@heroui/react';
-import { AlertTriangle, Info, XCircle } from 'lucide-react';
+import { Alert, Button, Modal, Table, ToggleButton, ToggleButtonGroup } from '@heroui/react';
+import { AlertTriangle, Info, RefreshCw, XCircle } from 'lucide-react';
 import type { HistoryEntry } from '../collector';
 import { fmtDate, fmtDuration, groupRuns, logEvents, runSummary, type Level, type Run } from './runs';
 import { StatusChip } from './ui';
@@ -12,8 +12,18 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
   const runs = useMemo(() => groupRuns(history), [history]);
   const [open, setOpen] = useState<Run | null>(null);
   if (!runs.length) return <p className="py-16 text-center text-muted">Nenhuma coleta ainda.</p>;
+  const last = runs.find(r => r.status !== 'running');
   return (
-    <>
+    <div className="flex flex-col gap-4">
+      {(last?.unresolved ?? 0) > 0 && (
+        <Alert status="warning">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>{last!.unresolved} aluno(s) não reconhecido(s) na última coleta</Alert.Title>
+            <Alert.Description>O nome no Smecel não foi ligado a um único aluno no Ecossistema (aguarda revisão, combina com mais de um, ou com nenhum). As faltas deles entram sozinhas assim que forem resolvidos na Conciliação do Centro de Administração.</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      )}
       <Table>
         <Table.ScrollContainer>
           <Table.Content aria-label="Coletas" onRowAction={k => setOpen(runs.find(r => r.id === String(k)) ?? null)}>
@@ -63,7 +73,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>
-    </>
+    </div>
   );
 }
 
@@ -74,11 +84,21 @@ const LEVEL_ICON: Record<Level, ReactNode> = {
   error: <XCircle size={15} className="text-danger" />,
 };
 
-export function LogsPage({ history }: Readonly<{ history: HistoryEntry[] }>) {
+export function LogsPage({ history, error, onRetry }: Readonly<{ history: HistoryEntry[]; error?: string; onRetry?: () => void }>) {
   const [level, setLevel] = useState<'all' | 'warn' | 'error'>('all');
   const events = useMemo(() => logEvents(history).filter(e => level === 'all' || (level === 'warn' ? e.level !== 'info' : e.level === 'error')), [history, level]);
   return (
     <div className="flex h-full flex-col gap-4">
+      {error && (
+        <Alert status="warning">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Não deu para confirmar o estado da coleta agora</Alert.Title>
+            <Alert.Description>O painel mostra a última verificação; o Coletor tenta de novo sozinho. Detalhe: {error}</Alert.Description>
+          </Alert.Content>
+          {onRetry && <Button size="sm" variant="secondary" className="shrink-0 self-center" onPress={onRetry}><RefreshCw size={14} /> Tentar de novo</Button>}
+        </Alert>
+      )}
       <div className="flex items-center justify-between">
         <ToggleButtonGroup size="sm" selectionMode="single" disallowEmptySelection selectedKeys={[level]} onSelectionChange={k => setLevel(String([...k][0]) as typeof level)}>
           <ToggleButton id="all">Todos</ToggleButton>
