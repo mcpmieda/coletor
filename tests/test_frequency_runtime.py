@@ -776,3 +776,8 @@ class StorageTests(unittest.TestCase):
         with self.assertRaises(FrequencyError): validate_schedule(invalid)
         invalid = schedule(); invalid['rules'][0]['times'] = ['08:00'] * 17
         with self.assertRaises(FrequencyError): validate_schedule(invalid)
+        every_quarter = [f'{7 + i // 4:02d}:{i % 4 * 15:02d}' for i in range(48)]
+        full = schedule(); full['rules'][0]['times'] = every_quarter
+        self.assertEqual(len(validate_schedule(full)['rules'][0]['times']), 48)
+        invalid = schedule(); invalid['rules'][0]['times'] = every_quarter[:48]; invalid['rules'][0]['recheck'] = '23:30'
+        with self.assertRaises(FrequencyError): validate_schedule(invalid)

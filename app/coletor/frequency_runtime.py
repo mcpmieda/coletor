@@ -35,6 +35,8 @@ ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIA
                'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
                'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
 LEASE_SECONDS = 300
+# Same limit as the Ecossistema's frequencyScheduleV2 (recheck included).
+MAX_DAILY_TIMES = 48
 # Routine waits are not failures: a reserve computer or a school pause.
 QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
 
@@ -79,7 +81,7 @@ def validate_schedule(schedule):
         if (not isinstance(rule, dict) or set(rule) != {'weekday', 'shift', 'enabled', 'times', 'recheck'}
                 or type(rule['weekday']) is not int or not 0 <= rule['weekday'] <= 6
                 or rule['shift'] not in {'matutino', 'vespertino'} or type(rule['enabled']) is not bool
-                or not isinstance(rule['times'], list) or len(rule['times']) > 16): raise FrequencyError('invalid-request')
+                or not isinstance(rule['times'], list) or len(rule['times']) > MAX_DAILY_TIMES): raise FrequencyError('invalid-request')
         key = (rule['weekday'], rule['shift'])
         if key in keys: raise FrequencyError('invalid-request')
         keys.add(key)
@@ -90,7 +92,7 @@ def validate_schedule(schedule):
         recheck = rule['recheck']
         if recheck is not None and (not isinstance(recheck, str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', recheck)
                                     or any(t >= recheck for t in times)): raise FrequencyError('invalid-request')
-        if len(times) + (1 if recheck is not None else 0) > 16: raise FrequencyError('invalid-request')
+        if len(times) + (1 if recheck is not None else 0) > MAX_DAILY_TIMES: raise FrequencyError('invalid-request')
     return copy.deepcopy(schedule)
 
 
