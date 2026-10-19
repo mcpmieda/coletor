@@ -213,8 +213,32 @@ class ProtectedStorage:
             # batch. Keep the encrypted queue intact until time is corrected.
             if any(v['createdAt'] > now for v in values): raise StorageError()
             fresh = [v for v in values if now - v['createdAt'] <= RETENTION_SECONDS]
-            if fresh != values: self._write('queue', fresh)
+            if fresh != values:
+                self._write('queue', fresh)
+                # Never silent: the runtime records how many expired unreceipted.
+                self.expired = getattr(self, 'expired', 0) + len(values) - len(fresh)
             return fresh
+
+    def take_expired(self):
+        with self._lock:
+            count, self.expired = getattr(self, 'expired', 0), 0
+            return count
+
+    def quarantine_unreadable_queue(self):
+        """With the current online binding in place, a queue that still cannot
+        be decrypted belongs to an older device generation: it can never be read
+        or receipted again. Move it aside (kept, encrypted) instead of blocking
+        collection or asking someone to discard it. Returns True if moved."""
+        with self._lock:
+            path = self.directory / 'queue.dpapi'
+            if self._binding is None or 'queue' in self._memory or not path.exists() or path.is_symlink(): return False
+            try:
+                self._read('queue')
+                return False
+            except StorageError:
+                stamp = time.strftime('%Y%m%d-%H%M%S')
+                path.replace(self.directory / f'queue-unreadable-{stamp}.dpapi')
+                return True
 
     def recovery_status(self):
         """Minimal LOCAL metadata, even if an old DPAPI generation is unreadable.
@@ -227,6 +251,11 @@ class ProtectedStorage:
             if self.directory.is_symlink(): raise StorageError()
             if path.is_symlink(): raise StorageError()
             on_disk=path.exists()
+            if on_disk and self._binding is None:
+                # Unreadable for now, because the live access has not opened it
+                # yet: an authorized window waits (bound=False); a revoked
+                # device can only recover it explicitly.
+                return {'pending':True,'count':None,'oldest':None,'newest':None,'unreadable':True,'bound':False}
             try:
                 rows=self._read('queue')
                 if rows is not None and (not isinstance(rows,list) or len(rows)>MAX_QUEUE_ITEMS

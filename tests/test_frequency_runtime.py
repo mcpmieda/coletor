@@ -550,6 +550,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         self.assertTrue(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
 
+    def test_old_uncommitted_fence_of_a_class_not_read_now_is_kept(self):
+        other = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                   {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
+        other.update(sourceClassId='99999', sourceClassLabel='TURMA SINTÉTICA B')  # A class not read in this run.
+        self.storage.enqueue(other)
+        result = self.runtime.collect()  # Only class A is selected in this run.
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual([e['payload']['requestId'] for e in self.storage.queue()], [other['requestId']])
+        self.assertFalse(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
+
     def test_old_uncommitted_fence_survives_a_failed_re_read(self):
         payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
                                      {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
@@ -685,6 +695,31 @@ class RuntimeTests(unittest.TestCase):
         time.sleep(.02)
         self.assertEqual(self.runtime.collect.call_count, 2)
         self.assertTrue(any(e['kind'] == 'late-start' for e in self.runtime.recent_history(20)))
+
+    def test_delayed_slot_removed_from_the_agenda_meanwhile_is_cancelled(self):
+        zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+        now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(zone)
+        later = datetime.fromtimestamp(NOW + 900, timezone.utc).astimezone(zone)
+        value = schedule()
+        for r in value['rules']: r.update(enabled=False, times=[], recheck=None)
+        rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=sorted({now.strftime('%H:%M'), later.strftime('%H:%M')}))
+        self.provider.shared_schedule = value
+        self.runtime.collect = Mock()
+        self.runtime.tick()
+        import time
+        time.sleep(.02)
+        self.provider.now += 900
+        self.runtime._operation.acquire()
+        self.runtime.tick()  # The second slot arrives while busy.
+        self.runtime._operation.release()
+        rule['times'] = [now.strftime('%H:%M')]  # The school removes it meanwhile.
+        self.provider.shared_schedule = copy.deepcopy(value)
+        self.provider.now += 120
+        self.runtime.tick()
+        time.sleep(.02)
+        self.assertEqual(self.runtime.collect.call_count, 1)
+        self.assertTrue(any(e['kind'] == 'late-cancelled' for e in self.runtime.recent_history(20)))
 
     def test_preview_or_different_header_cannot_be_promoted(self):
         value = preview(); value['mode'] = 'demo'

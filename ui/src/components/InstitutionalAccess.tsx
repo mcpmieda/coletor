@@ -9,6 +9,8 @@ import DesktopApp from '../desktop/DesktopApp';
 export interface LocalRecovery {
   pending: boolean; count: number | null; oldest: number | null;
   newest: number | null; unreadable: boolean;
+  /** False while the queue waits for the live access to be opened (not a problem). */
+  bound?: boolean;
 }
 export interface InstitutionalBridge {
   get_local_recovery_status(): Promise<LocalRecovery>;
@@ -200,7 +202,10 @@ export default function InstitutionalAccess() {
       </Button>
     </section>;
   }
-  if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}<DesktopApp /></>;
+  // Authorized: the collector reconciles, supersedes or sets aside the local
+  // queue by itself. Only a queue still unreadable after it was opened with
+  // the live access (bound) asks a person.
+  if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && recovery.bound !== false && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}<DesktopApp /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>

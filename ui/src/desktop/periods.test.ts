@@ -64,3 +64,11 @@ test('a day with only one shift enabled is not silently widened', () => {
 test('typed fixed times report invalid and repeated entries instead of dropping them', () => {
   expect(parseTimesText('08:00, 09:xx, 12:00, 8:00, 7:30')).toEqual({ times: ['07:30', '08:00', '12:00'], invalid: ['09:xx'], repeated: ['8:00'] });
 });
+
+test('an agenda read as intervals keeps its own times for the fixed-times mode', () => {
+  const interval: PeriodDraft = { ...DEFAULT_DRAFT, every: 30, from: '07:00', to: '08:00' };
+  const read = fromShared(toShared(interval));
+  expect(read.mode).toBe('interval');
+  expect(read.times).toEqual(dayTimes(interval));
+  expect(dayTimes({ ...read, mode: 'times' })).toEqual(['07:00', '07:30', '08:00']);
+});

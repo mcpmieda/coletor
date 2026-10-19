@@ -325,6 +325,11 @@ class FrequencyRuntime:
         except AccessDenied:
             return  # Not yet paired; no storage authority is available.
         self._storage.bind(*binding)  # Pending batches and corruption MUST propagate.
+        # Bound with the live generation and still undecryptable: an older
+        # generation's queue that nothing can receipt. Set aside, kept and logged,
+        # so collection continues without anyone discarding it by hand.
+        if self._storage.quarantine_unreadable_queue():
+            self._history.record('queue-quarantined')
 
     def save_credential(self, email, password):
         self._storage.bind(*self._provider.storage_binding())
@@ -445,6 +450,7 @@ class FrequencyRuntime:
         if schedule is None or not any(
             r['enabled'] and (r['times'] or r['recheck']) for r in schedule['rules']
         ):
+            self._pending_slots = set()  # An emptied agenda cancels delayed slots.
             self._release_if_ineligible(status)
             return
         if not status['classes']:
@@ -481,8 +487,17 @@ class FrequencyRuntime:
         keys = {(civil_day, shift, wall_time) for shift in shifts}
         # Slots that came while a long collection was still running run once,
         # coalesced, right after it ends (never in parallel, never after sleep).
-        late = {k for k in self._pending_slots if k[0] == civil_day and k not in self._fired}
+        # Each delayed slot must still exist in the agenda as it is now: an
+        # edited, removed or disabled time is cancelled, not run.
+        today = (now.weekday() + 1) % 7
+        live = {(r['shift'], t) for r in schedule['rules'] if r['enabled'] and r['weekday'] == today
+                for t in [*r['times'], *([r['recheck']] if r['recheck'] else [])]}
+        pending = {k for k in self._pending_slots if k not in self._fired}
+        late = {k for k in pending if k[0] == civil_day and (k[1], k[2]) in live}
+        cancelled = pending - late
         self._pending_slots = set()
+        if cancelled:
+            self._history.record('late-cancelled', label=', '.join(sorted({k[2] for k in cancelled})))
         if late:
             shifts |= {k[1] for k in late}; keys |= late
             self._history.record('late-start', label=', '.join(sorted({k[2] for k in late})))
@@ -635,15 +650,15 @@ class FrequencyRuntime:
             with self._lock:
                 self._state, self._class = 'ready', None
                 self._progress['classLabel'] = None
-            self._history.record('collection-finished', sent=len(pairs))
-            self._supersede(everything=True)
-            if unmatched:
-                # The classes the Centro recognizes were sent; the others need a link there.
-                self._error(FrequencyError('CLASS_RECONCILIATION_REQUIRED'), label=', '.join(unmatched))
-            elif catalog.get('all_classes') and catalog['catalog'].get('filtered'):
-                # "Todas" promises the whole school: the visible classes were sent,
-                # but a filtered or partial Smecel list must not look complete.
-                self._error(FrequencyError('SOURCE_LIST_FILTERED'))
+            # The outcome is decided before the closing fact, so the history shows
+            # a run with a pending alert as such, never as a clean success.
+            closing = ('CLASS_RECONCILIATION_REQUIRED' if unmatched else
+                       # "Todas" promises the whole school: a filtered or partial
+                       # Smecel list must not look complete.
+                       'SOURCE_LIST_FILTERED' if catalog.get('all_classes') and catalog['catalog'].get('filtered') else None)
+            self._history.record('collection-finished', sent=len(pairs), code=closing)
+            if closing:
+                self._error(FrequencyError(closing), label=', '.join(unmatched) if unmatched else None)
             return self.public_status()
         except Exception as error:
             self._error(error)
@@ -702,7 +717,10 @@ class FrequencyRuntime:
     def _reconcile_receipts(self, epoch):
         # Reopening with an uncertain queue consults the original receipt
         # BEFORE acquiring a fresh concession or doing any source work.
-        for entry in self._storage.queue():
+        entries = self._storage.queue()
+        expired = self._storage.take_expired() if hasattr(self._storage, 'take_expired') else 0
+        if expired: self._history.record('queue-expired', sent=expired)
+        for entry in entries:
             self._check(epoch, lease=False)
             payload = entry['payload']
             result = self._receipt(payload)
@@ -752,16 +770,14 @@ class FrequencyRuntime:
                 continue
             self._send(payload, epoch)
 
-    def _supersede(self, source_class_id=None, everything=False):
-        """Drop stale batches only after the replacement has a server receipt.
-        everything=True at the end of a complete run covers classes no longer
-        listed in the Smecel (nothing would ever replace them)."""
+    def _supersede(self, source_class_id):
+        """Drop a stale batch only after a fresh read of the same class has a
+        server receipt. Absence from this run (other shift, unselected,
+        unmatched or filtered list) proves nothing, so those stay protected."""
         stale = getattr(self, '_stale', None) or {}
-        keys = list(stale) if everything else [source_class_id]
-        for key in keys:
-            for payload in stale.pop(key, []):
-                self._storage.acknowledge(payload['requestId'])
-                self._history.record('superseded', label=payload.get('sourceClassLabel'))
+        for payload in stale.pop(source_class_id, []):
+            self._storage.acknowledge(payload['requestId'])
+            self._history.record('superseded', label=payload.get('sourceClassLabel'))
 
     def save_settings(self, expected_revision, schedule):
         validate_schedule(schedule)
@@ -799,6 +815,7 @@ class FrequencyRuntime:
             self._epoch += 1
             lease, self._lease = self._lease, None
             self._class = None
+            self._pending_slots = set()  # A pause never leaves a delayed run behind.
             self._state = 'paused' if pause or school_pause else 'connect'
             if pause: self._paused = True
             if school_pause: self._school_paused = True

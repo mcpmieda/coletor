@@ -47,7 +47,7 @@ export default function FoxCompanion({ activity, caption: showCaption = true, on
   else if (action === 'pet') caption = 'Oi! Vamos conferir juntos.';
   return <section className="fox-companion" aria-label="Mascote do coletor">
     <div className={`fox-stage fox-${action}`} data-action={action} data-pose={pose} data-motion={still ? 'off' : 'on'}>
-      <button className="fox-button" onClick={pet} aria-label="Fazer carinho na raposa" title="Fazer carinho na raposa"><span className="fox-frame"><img className="fox-sprite" src="./mascot/atlas.png" alt="Raposa vermelha, mascote do coletor" width="512" height="256" style={{ translate:`${-column * 128}px ${-row * 128}px` }} draggable={false} /></span></button>
+      <button className="fox-button" onClick={pet} aria-label="Fazer carinho na raposa"><span className="fox-frame"><img className="fox-sprite" src="./mascot/atlas.png" alt="Raposa vermelha, mascote do coletor" width="512" height="256" style={{ translate:`${-column * 128}px ${-row * 128}px` }} draggable={false} /></span></button>
       {action === 'sleep' && <span className="fox-zzz" aria-hidden="true">z z</span>}
       {action === 'pet' && <span className="fox-heart" aria-hidden="true">♥</span>}
       {showCaption && <p>{caption}</p>}

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Modal, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
 import { CheckCircle2, KeyRound, ListChecks, LogOut, Monitor, Moon, Sun, Trash2, XCircle } from 'lucide-react';
 import ManualSource from '../components/ManualSource';
 import { paintTheme, type ThemeMode } from '../theme';
 import { call, native, type Preferences, type Status } from './bridge';
+import { closeProblem, type ManualCloseResult } from './manualClose';
 import { SwitchRow, TextInput } from './ui';
 import type { ColetorState } from './useColetor';
 
@@ -23,6 +24,7 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
   const [email, setEmail] = useState(''), [password, setPassword] = useState('');
   const [changing, setChanging] = useState(false), [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState(false), [leaving, setLeaving] = useState(false), [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState(''), closingRef = useRef(false);
   useEffect(() => {
     // Protected call: retried until the live access check has finished.
     const read = () => { void native()?.get_desktop_status().then(r => { if (r && !('error' in r)) setDesktop(r); }).catch(() => undefined); };
@@ -40,12 +42,20 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
     catch (e) { toast.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { setBusy(false); }
   }
-  // Closing the choice always ends the Smecel session it opened (and resumes collection).
+  // Closing the choice ends the Smecel session it opened (and resumes collection).
+  // The dialog only goes away once the session is confirmed closed.
   async function finishChoosing() {
-    const api = window.pywebview?.api as { close_manual_session?: () => Promise<unknown> } | undefined;
-    setClosing(true);
-    try { await api?.close_manual_session?.(); } catch { /* status refresh below shows any problem */ }
-    finally { setClosing(false); setChoosing(false); void refresh(); }
+    if (closingRef.current) return;
+    closingRef.current = true; setClosing(true); setCloseError('');
+    try {
+      const api = window.pywebview?.api as { close_manual_session?: () => Promise<ManualCloseResult> } | undefined;
+      if (!api?.close_manual_session) throw new Error('O Coletor não está disponível nesta janela.');
+      const problem = closeProblem(await api.close_manual_session());
+      if (problem) throw new Error(problem);
+      setChoosing(false);
+    } catch (e) {
+      setCloseError(e instanceof Error ? e.message : 'Não foi possível fechar o Smecel.');
+    } finally { closingRef.current = false; setClosing(false); void refresh(); }
   }
   const pref = (work: Parameters<typeof call<{ settings: Preferences }>>[0], message?: string) =>
     run(work, (r: { settings: Preferences }) => { setPrefs(r.settings); void refresh(); }, message);
@@ -155,7 +165,10 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
           <Modal.Dialog className="max-h-[88vh]">
             <Modal.Header><Modal.Heading>Escolher turmas</Modal.Heading></Modal.Header>
             <Modal.Body><ManualSource onChanged={() => { void refresh(); }} /></Modal.Body>
-            <Modal.Footer><Button variant="primary" isPending={closing} onPress={() => { void finishChoosing(); }}>Concluir</Button></Modal.Footer>
+            <Modal.Footer className="flex items-center gap-3">
+              {closeError && <span role="alert" className="mr-auto text-sm text-danger">{closeError}</span>}
+              <Button variant="primary" isPending={closing} onPress={() => { void finishChoosing(); }}>{closeError ? 'Tentar fechar de novo' : 'Concluir'}</Button>
+            </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

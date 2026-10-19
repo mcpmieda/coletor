@@ -85,7 +85,7 @@ export function LogsPage({ history }: Readonly<{ history: HistoryEntry[] }>) {
           <ToggleButton id="warn">Avisos</ToggleButton>
           <ToggleButton id="error">Erros</ToggleButton>
         </ToggleButtonGroup>
-        <span className="text-xs text-muted">Últimos 30 dias deste computador</span>
+        <span className="text-xs text-muted">Até 2.000 eventos recentes deste computador (no máximo 30 dias)</span>
       </div>
       {events.length === 0 ? <p className="py-16 text-center text-muted">Nada por aqui.</p> : (
         <div className="flex flex-col divide-y divide-separator rounded-xl border border-separator bg-surface">

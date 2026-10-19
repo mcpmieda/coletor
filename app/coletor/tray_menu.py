@@ -72,38 +72,61 @@ class FoxMenu:
     def set_icon(self, item, icon):
         item.Tag = icon
 
+    def dispose(self):
+        """Release the fonts; call when the tray goes away."""
+        for font in self.fonts.values():
+            font.Dispose()
+        self.fonts = {}
+
+    @staticmethod
+    def _release(*objects):
+        for item in objects:
+            if item is not None: item.Dispose()
+
     def _paint_border(self, sender, event):
         from System.Drawing import Pen, Rectangle
-        event.Graphics.DrawRectangle(Pen(self.c["line"]), Rectangle(0, 0, sender.Width - 1, sender.Height - 1))
+        pen = Pen(self.c["line"])
+        try: event.Graphics.DrawRectangle(pen, Rectangle(0, 0, sender.Width - 1, sender.Height - 1))
+        finally: pen.Dispose()
 
     def _paint_item(self, item, event, kind, icon):
+        # Every GDI+ object is released at once (no reliance on finalizers):
+        # the menu repaints on each hover.
         from System.Drawing import Rectangle, RectangleF, SolidBrush, StringAlignment, StringFormat
         from System.Drawing.Drawing2D import GraphicsPath, SmoothingMode
         from System.Drawing.Text import TextRenderingHint
         g, w, h, s = event.Graphics, item.Width, item.Height, self.s
         g.SmoothingMode = SmoothingMode.AntiAlias
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit
-        g.FillRectangle(SolidBrush(self.c["bg"]), Rectangle(0, 0, w, h))
-        if kind == "separator":
-            g.FillRectangle(SolidBrush(self.c["line"]), Rectangle(int(12 * s), h // 2, w - int(24 * s), max(1, int(s))))
-            return
-        if kind == "header":
-            title, _, status = item.Text.partition("\n")
-            ok = not status.startswith("!")
-            g.DrawString(title, self.fonts["title"], SolidBrush(self.c["text"]), 14.0 * s, 8.0 * s)
-            g.FillEllipse(SolidBrush(self.c["ok"] if ok else self.c["danger"]), Rectangle(int(16 * s), int(34 * s), int(7 * s), int(7 * s)))
-            g.DrawString(status.lstrip("!"), self.fonts["small"], SolidBrush(self.c["muted"]), 27.0 * s, 29.0 * s)
-            return
-        if item.Selected and item.Enabled:
-            path, r, d = GraphicsPath(), Rectangle(int(5 * s), 1, w - int(10 * s), h - 2), int(14 * s)
-            path.AddArc(r.X, r.Y, d, d, 180, 90); path.AddArc(r.Right - d, r.Y, d, d, 270, 90)
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); path.AddArc(r.X, r.Bottom - d, d, d, 90, 90)
-            path.CloseFigure()
-            g.FillPath(SolidBrush(self.c["hover"]), path)
-        danger = kind == "danger"
-        centre = StringFormat(); centre.Alignment = StringAlignment.Center; centre.LineAlignment = StringAlignment.Center
-        middle = StringFormat(); middle.LineAlignment = StringAlignment.Center
-        icon_colour = self.c["danger"] if danger else (self.c["accent"] if item.Enabled else self.c["muted"])
-        text_colour = self.c["danger"] if danger else (self.c["text"] if item.Enabled else self.c["muted"])
-        g.DrawString(GLYPHS.get(icon, ""), self.fonts["icon"], SolidBrush(icon_colour), RectangleF(10.0 * s, 0.0, 28.0 * s, float(h)), centre)
-        g.DrawString(item.Text, self.fonts["text"], SolidBrush(text_colour), RectangleF(44.0 * s, 0.0, float(w) - 50.0 * s, float(h)), middle)
+        brushes, others = [], []
+        def brush(colour):
+            b = SolidBrush(colour); brushes.append(b); return b
+        try:
+            g.FillRectangle(brush(self.c["bg"]), Rectangle(0, 0, w, h))
+            if kind == "separator":
+                g.FillRectangle(brush(self.c["line"]), Rectangle(int(12 * s), h // 2, w - int(24 * s), max(1, int(s))))
+                return
+            if kind == "header":
+                title, _, status = item.Text.partition("\n")
+                ok = not status.startswith("!")
+                g.DrawString(title, self.fonts["title"], brush(self.c["text"]), 14.0 * s, 8.0 * s)
+                g.FillEllipse(brush(self.c["ok"] if ok else self.c["danger"]), Rectangle(int(16 * s), int(34 * s), int(7 * s), int(7 * s)))
+                g.DrawString(status.lstrip("!"), self.fonts["small"], brush(self.c["muted"]), 27.0 * s, 29.0 * s)
+                return
+            if item.Selected and item.Enabled:
+                path, r, d = GraphicsPath(), Rectangle(int(5 * s), 1, w - int(10 * s), h - 2), int(14 * s)
+                others.append(path)
+                path.AddArc(r.X, r.Y, d, d, 180, 90); path.AddArc(r.Right - d, r.Y, d, d, 270, 90)
+                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); path.AddArc(r.X, r.Bottom - d, d, d, 90, 90)
+                path.CloseFigure()
+                g.FillPath(brush(self.c["hover"]), path)
+            danger = kind == "danger"
+            centre = StringFormat(); centre.Alignment = StringAlignment.Center; centre.LineAlignment = StringAlignment.Center
+            middle = StringFormat(); middle.LineAlignment = StringAlignment.Center
+            others += [centre, middle]
+            icon_colour = self.c["danger"] if danger else (self.c["accent"] if item.Enabled else self.c["muted"])
+            text_colour = self.c["danger"] if danger else (self.c["text"] if item.Enabled else self.c["muted"])
+            g.DrawString(GLYPHS.get(icon, ""), self.fonts["icon"], brush(icon_colour), RectangleF(10.0 * s, 0.0, 28.0 * s, float(h)), centre)
+            g.DrawString(item.Text, self.fonts["text"], brush(text_colour), RectangleF(44.0 * s, 0.0, float(w) - 50.0 * s, float(h)), middle)
+        finally:
+            self._release(*brushes, *others)

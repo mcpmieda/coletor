@@ -31,9 +31,9 @@ export default function FoxPet({ mood }: Readonly<{ mood: FoxMood }>) {
   }, [mood]);
   const activity: FoxActivity = mood === 'running' ? 'reading' : mood === 'error' ? 'error' : 'idle';
   return (
-    <div className="relative">
+    <div className="fox-sidebar relative pt-10">
       {bubble && (
-        <div className="pet-bubble absolute bottom-[150px] left-1/2 z-10 w-max max-w-[210px] -translate-x-1/2 rounded-xl border border-separator bg-surface px-3 py-2 text-center text-xs leading-snug text-foreground shadow-sm">
+        <div className="pet-bubble absolute bottom-[168px] left-1/2 z-10 w-max max-w-[210px] -translate-x-1/2 rounded-xl border border-separator bg-surface px-3 py-2 text-center text-xs leading-snug text-foreground shadow-sm">
           {bubble}
         </div>
       )}

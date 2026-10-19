@@ -15,7 +15,7 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
     if (!current) return;
     current.finished = finished; current.problem = problem;
     // Sent but with students to reconcile is not the same as clean.
-    current.status = status === 'ok' && current.classes.length < current.total ? 'partial'
+    current.status = (status === 'ok' || status === 'review') && current.classes.length < current.total ? 'partial'
       : status === 'ok' && (current.unresolved || current.conflicts) ? 'review' : status;
     runs.push(current); current = null;
   };
@@ -27,7 +27,7 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
       const item = { label: e.label ?? 'Turma', sent: e.sent ?? 0, unresolved: e.unresolved ?? 0, conflicts: e.conflicts ?? 0,
         readMs: (e as HistoryEntry & { readMs?: number }).readMs, sendMs: (e as HistoryEntry & { sendMs?: number }).sendMs };
       current.classes.push(item); current.resolved += item.sent; current.unresolved += item.unresolved; current.conflicts += item.conflicts;
-    } else if (e.kind === 'collection-finished') close(e.at, 'ok', null);
+    } else if (e.kind === 'collection-finished') close(e.at, e.code ? 'review' : 'ok', e.code ? problemText(e.code) : null);
     else if (e.kind === 'failure' && current) close(e.at, current.classes.length ? 'partial' : 'error', problemText(e.code));
   }
   if (current) runs.push(current);
@@ -60,6 +60,8 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   'access-required': ['error', 'O computador precisa entrar no Ecossistema.'],
   started: ['info', 'Programa iniciado.'],
   superseded: ['warn', 'Lote interrompido substituído por uma nova leitura.'],
+  'queue-quarantined': ['warn', 'Fila cifrada de um acesso anterior separada; ela não podia mais ser lida nem conferida.'],
+  'queue-expired': ['warn', 'Lote(s) sem recibo com mais de 7 dias descartado(s) da fila local.'],
   'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
 };
 const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED']);

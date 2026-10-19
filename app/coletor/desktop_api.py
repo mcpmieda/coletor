@@ -68,6 +68,7 @@ class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
         self._paused_for_choice = False
+        self._resume_stop = threading.Event()  # Set on exit or logout.
         # The fox is part of the program's identity: always shown, animated unless the
         # system asks for reduced motion.
         self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True})
@@ -106,12 +107,17 @@ class DesktopApi(PreviewApi):
         try: return self._settings.read()["settings"].get("theme", "system")
         except (OSError, ValueError, TypeError): return "system"
 
-    def _resume_collection(self, attempts=30, interval=60):
+    def _resume_collection(self, attempts=None, interval=60, max_interval=900):
         """Python-only. Reopening the program (or Windows) keeps collecting when the
         operator left collection active; it stops only by an explicit pause or logout.
-        A boot without network yet is retried for about half an hour."""
-        if not self._resume.active(): return False
-        for attempt in range(attempts):
+        Without network it keeps trying (every minute, then backing off to 15
+        minutes) for as long as the operator's intention stays "active"."""
+        attempt = 0
+        while self._resume.active() and (attempts is None or attempt < attempts):
+            if attempt:
+                wait = min(max_interval, interval * (1 if attempt < 30 else 2 ** min(4, (attempt - 30) // 10 + 1)))
+                if self._resume_stop.wait(wait): return False
+            attempt += 1
             status = self._access.status()
             if status.get('authenticated') and status.get('authorized'):
                 result = self._operational(self._collector.activate)
@@ -119,7 +125,6 @@ class DesktopApi(PreviewApi):
             elif status.get('code') not in {'ACCESS_UNAVAILABLE', 'LOGIN_UNAVAILABLE'}:
                 self._alert('ACCESS_REQUIRED')
                 return False
-            if attempt + 1 < attempts: time.sleep(interval)
         return False
 
     def _start_resume(self):
@@ -233,7 +238,9 @@ class DesktopApi(PreviewApi):
         return result
 
     def get_collector_history(self):
-        return {'entries': self._collector.recent_history(200)}
+        # Everything the log keeps (2000 events, 30 days at most), so the 24 h
+        # indicators and Registros never miss an older failure.
+        return {'entries': self._collector.recent_history(2000)}
 
     def save_shared_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_settings(revision, schedule))
@@ -331,6 +338,7 @@ class DesktopApi(PreviewApi):
             self._collector._operation.release()
 
     def logout_institutional_access(self):
+        self._resume_stop.set()  # An offline retry never outlives a logout.
         # Logout is not permission to lose a batch; serialize check+revoke+
         # purge atomically against live collection, even on network failure.
         if not self._collector._operation.acquire(blocking=False):

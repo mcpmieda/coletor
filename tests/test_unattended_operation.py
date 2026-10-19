@@ -189,6 +189,12 @@ class TrayAndResumeTests(unittest.TestCase):
     def test_tooltip_shows_collection_state_within_the_tray_limit(self):
         self.assertEqual(tray_text({'active': True, 'state': 'collecting'}, 'idle'), 'Coletor de Frequência · Coletando')
         self.assertEqual(tray_text(None, 'error'), 'Coletor · Coleta desligada · Arquivo precisa de atenção')
+        # A short outage is a calm wait, not the red "needs attention" state.
+        offline = tray_text({'active': True, 'state': 'error', 'code': 'ACCESS_UNAVAILABLE'}, 'idle')
+        self.assertEqual(offline, 'Coletor de Frequência · Sem conexão, tentando de novo')
+        self.assertLessEqual(len(offline), 63)
+        self.assertEqual(tray_text({'active': True, 'state': 'error', 'code': 'lease-fenced'}, 'idle'),
+                         'Coletor de Frequência · Precisa de atenção')
         for state in ('ready', 'reserve', 'collecting', 'paused', 'login-required', 'error'):
             self.assertLessEqual(len(tray_text({'active': True, 'state': state}, 'idle')), 63)
 
@@ -218,6 +224,30 @@ class TrayAndResumeTests(unittest.TestCase):
         api._access.status = Mock(return_value={'authenticated': True, 'authorized': True})
         self.assertTrue(api._resume_collection(attempts=1, interval=0))
         api._collector.activate.assert_called_once()
+
+    def test_long_offline_boot_keeps_trying_and_activates_without_restart(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._resume.set(True)
+        api._collector.activate = Mock(return_value={'state': 'reserve'})
+        answers = [{'authenticated': False, 'authorized': False, 'code': 'ACCESS_UNAVAILABLE'}] * 31
+        answers.append({'authenticated': True, 'authorized': True})
+        api._access.status = Mock(side_effect=answers)
+        api._resume_stop.wait = Mock(return_value=False)  # No real sleeping.
+        self.assertTrue(api._resume_collection(interval=0))
+        api._collector.activate.assert_called_once()
+        # Waits back off after the first half hour, never beyond 15 minutes.
+        waits = [c.args[0] for c in api._resume_stop.wait.call_args_list]
+        self.assertTrue(all(w <= 900 for w in waits))
+
+    def test_offline_resume_stops_on_pause_or_exit(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._resume.set(True)
+        api._access.status = Mock(return_value={'authenticated': False, 'authorized': False, 'code': 'ACCESS_UNAVAILABLE'})
+        api._resume_stop.set()
+        self.assertFalse(api._resume_collection(interval=0))
+        self.assertEqual(api._access.status.call_count, 1)
 
     def test_alert_waits_for_the_tray_and_then_shows_a_balloon(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)

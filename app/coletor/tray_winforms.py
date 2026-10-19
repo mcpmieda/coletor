@@ -10,8 +10,19 @@ COLLECTOR_TEXT = {"ready": "Coleta ativa", "reserve": "Reserva", "collecting": "
                   "paused": "Coleta pausada", "login-required": "Entrar no Smecel", "error": "Precisa de atenção"}
 
 
+# No network for a moment: the collector retries by itself, so the fox keeps
+# its calm idle motion instead of the static "needs attention" badge.
+OFFLINE_CODES = {"ACCESS_UNAVAILABLE", "unavailable"}
+
+
+def offline(collector):
+    return bool(collector and collector.get("state") == "error" and collector.get("code") in OFFLINE_CODES)
+
+
 def tray_text(collector, activity):
     """Notification-area tooltip (63 characters at most on .NET Framework)."""
+    if offline(collector) and collector.get("active"):
+        return "Coletor de Frequência · Sem conexão, tentando de novo"
     if collector and collector.get("active") and collector.get("state") in COLLECTOR_TEXT:
         return "Coletor de Frequência · " + COLLECTOR_TEXT[collector["state"]]
     return "Coletor · Coleta desligada · " + TEXT[activity]
@@ -138,9 +149,10 @@ class WindowsFormsTray:
     def _effective_activity(self, snapshot):
         """Window activity, plus the unattended collection the window does not drive."""
         activity = snapshot["activity"]
-        state = (self._collector_status() or {}).get("state")
+        status = self._collector_status() or {}
+        state = status.get("state")
         if state == "collecting": return "reading"
-        if activity == "idle" and state in {"error", "login-required"}: return "error"
+        if activity == "idle" and state in {"error", "login-required"} and not offline(status): return "error"
         return activity
 
     def _menu_opening(self, *_):
@@ -149,7 +161,8 @@ class WindowsFormsTray:
         active, paused = bool(status.get("active")), bool(status.get("localPaused"))
         text = COLLECTOR_TEXT.get(status.get("state"), "Coleta desligada") if active else "Coleta desligada"
         if active and paused: text = "Pausada neste computador"
-        trouble = (not active) or status.get("state") in {"error", "login-required"}
+        if active and offline(status): text = "Sem conexão, tentando de novo"
+        trouble = (not active) or (status.get("state") in {"error", "login-required"} and not offline(status))
         self._status_item.Text = "Coletor de Frequência\n" +("!" if trouble else "") + text
         self._collect_item.Enabled = active and not paused and status.get("state") != "collecting" and self.collect_action is not None
         self._pause_item.Text = "Retomar a coleta" if paused else "Pausar a coleta"
@@ -294,6 +307,7 @@ class WindowsFormsTray:
         if self._poll: resources += [self._poll.Stop, self._poll.Dispose]
         if self._notify: resources += [lambda: setattr(self._notify, "Visible", False), self._notify.Dispose]
         if self._menu: resources += [self._menu.Dispose]
+        if getattr(self, "_fox_menu", None): resources += [self._fox_menu.dispose]
         resources += [icon.Dispose for icon in set(self._icons.values())]
         if hasattr(self, "_neutral"): resources += [self._neutral.Dispose]
         self._cleanup_ok = True
