@@ -228,6 +228,14 @@ try:
         recovery_page.get_by_label('Quando coletar').click()
         recovery_page.get_by_role('option', name='Em horários fixos').click()
         recovery_page.get_by_label('Horários', exact=True).fill('08:15, 09:00, 09:55')
+        # An agenda that differs per day/shift needs consent before it is unified.
+        consent = recovery_page.get_by_text('Entendi, usar os mesmos horários em todos os dias e turnos')
+        if consent.count():
+            expect(recovery_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+            consent.click()
+        save = recovery_page.get_by_role('button', name='Salvar', exact=True)
+        if save.is_disabled():
+            raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog').inner_text()[-300:])
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
         expect(recovery_page.get_by_text('A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.', exact=True)).to_be_visible()
         expect(recovery_page.get_by_label('Horários', exact=True)).to_have_value('08:15, 09:00, 09:55')
