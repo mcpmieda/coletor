@@ -27,9 +27,9 @@ REQUIRED_CHECKS = {
     "hidden_and_minimized_panel_motion_stops",
 }
 EXTENDED_CHECKS = {
-    "actual_local_reading_state", "reading_animation_bounded", "reduced_motion_stops_native_timer",
-    "cancel_keeps_actual_native_read_truthful", "discard_blocks_new_reads", "discarded_result_stays_hidden",
-    "error_state_static_and_generic",
+    "menu_header_shows_live_status", "menu_collect_and_pause_reach_collector", "actual_collection_state",
+    "collect_disabled_while_collecting", "reading_animation_bounded", "reduced_motion_stops_native_timer",
+    "error_state_static_and_generic", "menu_header_flags_error",
 }
 # The window's X keeps an active collection beside the clock instead of quitting.
 CLOSE_CHECKS = {"active_collection_close_hides"}
@@ -83,7 +83,6 @@ def exercise(window,args,result):
     checks=result["checks"]
     gate=threading.Event()
     tray=window._coletor_tray
-    real_demo=None
     def require(name, condition=True):
         if not condition: smoke.fail(name)
         checks[name]=True
@@ -143,45 +142,47 @@ def exercise(window,args,result):
         result["menu_screenshot"]=smoke.capture_window(int(tray._menu.Handle.ToInt64()),args.output_dir/("tray-menu-"+args.scenario+".png"))
         tray._invoke(tray._menu.Close)
         if args.scenario=="quit":
-            media(window,tray,False)
-            from coletor.service import PreviewApi
-            real_demo=PreviewApi.load_demo
-            def held(api):
-                if not gate.wait(25): smoke.fail("synthetic_read_gate_timeout")
-                return real_demo(api)
-            PreviewApi.load_demo=held
-            settings.click(window,"Usar dados de exemplo")
-            wait(lambda:inspect(tray)["activity"]=="reading" and inspect(tray)["timer"])
-            require("actual_local_reading_state","Lendo arquivo local" in inspect(tray)["tooltip"])
-            before=inspect(tray)["frame_updates"]; time.sleep(1.95); after=inspect(tray)["frame_updates"]
-            result["reading_frame_updates"]=after-before
-            require("reading_animation_bounded",2<=after-before<=4)
-            result["reading_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-local-reading.png")
-            media(window,tray,True)
-            wait(lambda:not inspect(tray)["timer"])
-            before=inspect(tray)["frame_updates"];time.sleep(.8)
-            require("reduced_motion_stops_native_timer",inspect(tray)["frame_updates"]==before)
-            media(window,tray,False)
-            settings.click(window,"Descartar resultado")
-            smoke.wait_js(window,"document.body.innerText.includes('Lendo o diário')")
-            require("cancel_keeps_actual_native_read_truthful",inspect(tray)["activity"]=="reading")
-            require("discard_blocks_new_reads", window.evaluate_js("[...document.querySelectorAll('button')].filter(n=>['Usar dados de exemplo','Abrir diário'].includes(n.textContent.trim())).every(n=>n.disabled) && document.querySelector('input[inputmode=numeric]')?.disabled===true"))
-            gate.set()
-            wait(lambda:inspect(tray)["activity"]=="idle")
-            # Native end_read occurs before the bridge promise reaches React.
-            # Wait for both layers; do not race the legitimately disabled input.
-            smoke.wait_js(window, "document.querySelector('input[inputmode=numeric]')?.disabled===false && !document.body.innerText.includes('Lendo o diário')")
-            require("discarded_result_stays_hidden", window.evaluate_js("![...document.querySelectorAll('h2')].some(n=>n.textContent==='Prévia da turma')"))
-            # A real invalid year reaches the existing local preview validator.
-            settings.set_input(window,"Ano","0000")
-            expression="""(() => {const input=document.querySelector('input[type=file]');const d=new DataTransfer();d.items.add(new File(['<html>synthetic-invalid</html>'],'synthetic-invalid.html',{type:'text/html'}));input.files=d.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()"""
-            window.evaluate_js(expression)
-            smoke.wait_js(window,"!!document.querySelector('[role=alert]')")
-            wait(lambda:inspect(tray)["activity"]=="error")
-            data=inspect(tray)
-            require("error_state_static_and_generic",not data["timer"] and data["icon"]=="fox-error" and data["tooltip"].endswith("Arquivo precisa de atenção") and "Coleta desligada" in data["tooltip"])
-            result["error_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-local-error.png")
-        require("visible_ui_healthy",window.evaluate_js("document.querySelector('h1')?.textContent==='Coleta da frequência' && document.title.includes('Coletor') && !document.querySelector('vite-error-overlay') && window.__trayQaErrors===0"))
+            # Unattended collection drives the fox: simulate the collector's
+            # states through the same provider the desktop bridge installs.
+            real_status=tray.status_provider
+            calls=[]
+            tray.collect_action=lambda:calls.append("collect")
+            tray.pause_action=lambda paused:calls.append(("pause",paused))
+            try:
+                tray.status_provider=lambda:{"active":True,"state":"ready","localPaused":False}
+                tray._invoke(lambda:tray._menu_opening())
+                require("menu_header_shows_live_status",tray._status_item.Text.endswith("\nColeta ativa") and tray._collect_item.Enabled)
+                menu(tray._collect_item); menu(tray._pause_item)
+                wait(lambda:calls==["collect",("pause",True)])
+                require("menu_collect_and_pause_reach_collector")
+                media(window,tray,False)
+                tray.status_provider=lambda:{"active":True,"state":"collecting","localPaused":False}
+                tray._invoke(tray._refresh)
+                wait(lambda:inspect(tray)["activity"]=="reading" and inspect(tray)["timer"])
+                require("actual_collection_state","Coletando" in inspect(tray)["tooltip"])
+                tray._invoke(lambda:tray._menu_opening())
+                require("collect_disabled_while_collecting",not tray._collect_item.Enabled)
+                before=inspect(tray)["frame_updates"]; time.sleep(1.95); after=inspect(tray)["frame_updates"]
+                result["reading_frame_updates"]=after-before
+                require("reading_animation_bounded",2<=after-before<=4)
+                result["reading_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-collecting.png")
+                media(window,tray,True)
+                wait(lambda:not inspect(tray)["timer"])
+                before=inspect(tray)["frame_updates"];time.sleep(.8)
+                require("reduced_motion_stops_native_timer",inspect(tray)["frame_updates"]==before)
+                media(window,tray,False)
+                tray.status_provider=lambda:{"active":True,"state":"error","localPaused":False}
+                tray._invoke(tray._refresh)
+                wait(lambda:inspect(tray)["activity"]=="error")
+                data=inspect(tray)
+                require("error_state_static_and_generic",not data["timer"] and data["icon"]=="fox-error" and data["tooltip"].endswith("Precisa de atenção"))
+                tray._invoke(lambda:tray._menu_opening())
+                require("menu_header_flags_error",tray._status_item.Text.split("\n")[1].startswith("!"))
+                result["error_screenshot"]=smoke.capture_window(handle,args.output_dir/"tray-error.png")
+            finally:
+                tray.status_provider=real_status
+                tray._invoke(tray._refresh)
+        require("visible_ui_healthy",window.evaluate_js("document.querySelector('h1')?.textContent==='Tarefas' && document.title.includes('Coletor') && !document.querySelector('vite-error-overlay') && window.__trayQaErrors===0"))
         if args.scenario=="close":
             real_status=tray.status_provider
             tray.status_provider=lambda:{"active":True,"state":"ready"}
@@ -200,9 +201,6 @@ def exercise(window,args,result):
         result["error_type"]=type(error).__name__
     finally:
         gate.set()
-        if real_demo is not None:
-            from coletor.service import PreviewApi
-            PreviewApi.load_demo=real_demo
         smoke.write_json(args.worker_output,result)
         if not tray._disposed:
             if args.scenario=="quit": menu(tray._quit_item)

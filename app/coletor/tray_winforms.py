@@ -171,9 +171,8 @@ class WindowsFormsTray:
 
     def _update_text(self):
         text = tray_text(self._collector_status(), self._current_activity)
-        if self._notify.Text != text:
-            self._notify.Text = text
-            pass  # The header reads the live status when the menu opens.
+        # The menu header reads the live status itself when the menu opens.
+        if self._notify.Text != text: self._notify.Text = text
 
     def _poll_tick(self, *_):
         if self._disposed or self._notify is None: return
