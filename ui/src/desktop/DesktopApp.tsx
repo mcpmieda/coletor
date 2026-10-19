@@ -82,7 +82,10 @@ export default function DesktopApp() {
         </nav>
         <div className="mt-auto shrink-0"><FoxPet mood={foxMood(state, runs)} /></div>
         <ServiceLine state={state} />
-        <div className="mt-3 px-2 text-[11px] leading-snug text-muted">Versão {version}</div>
+        <div className="mt-3 px-2 text-[11px] leading-snug text-muted">
+          <div>© 2026 Guilherme Pereira da Silva</div>
+          <div className="mt-1">Versão {version}</div>
+        </div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">

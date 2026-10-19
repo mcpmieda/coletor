@@ -1,7 +1,7 @@
 """Tray on pywebview's existing WinForms thread; no extra dependency or agent.
 
-Reuses the existing fox icons and animation controller. Idle/error have no timer.
-Only an actual local read may animate, at 600 ms or slower. Imports are lazy.
+Reuses the existing fox icons and animation controller. Resting gestures and
+working frames use the native timer even with the panel hidden. Imports are lazy.
 """
 import threading
 from .tray_animation import AnimationController, AnimationPolicy, TrayState, resolve_icon_paths
@@ -27,11 +27,12 @@ def tray_text(collector, activity):
 
 
 def hides_on_close(user_closing, quitting, collector, registered):
-    """The window's X keeps an active collection running beside the clock.
+    """The window's X only hides the panel when the tray is registered.
 
-    Sair in the tray menu, Windows shutdown/logoff and an inactive collector close normally.
+    Explicit exit and Windows shutdown/logoff still close normally. A temporary
+    status failure, paused collection or inactive account must not end the app.
     """
-    return bool(user_closing and not quitting and registered and collector and collector.get("active"))
+    return bool(user_closing and not quitting and registered)
 
 
 class WindowsFormsTray:
@@ -120,7 +121,7 @@ class WindowsFormsTray:
             self._timer = Timer(); self._timer.Interval = 600
             self._timer.Tick += self._tick
             # The collector runs in its own threads; its state reaches the tooltip here.
-            self._poll = Timer(); self._poll.Interval = 5000
+            self._poll = Timer(); self._poll.Interval = 1000
             self._poll.Tick += self._poll_tick
             self._poll.Start()
             self._refresh()
@@ -287,7 +288,7 @@ class WindowsFormsTray:
         self._form.Hide()
         if not self._told_hidden:
             self._told_hidden = True
-            self.notify("Coletor de Frequência", "A coleta continua. Para encerrar, use Sair neste ícone.", "Info")
+            self.notify("Coletor de Frequência", "O Coletor continua em segundo plano. Para encerrar, use Encerrar coletor neste ícone.", "Info")
 
     def _quit(self, *_):
         if self._disposed: return

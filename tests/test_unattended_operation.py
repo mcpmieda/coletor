@@ -206,8 +206,9 @@ class TrayAndResumeTests(unittest.TestCase):
         self.assertTrue(hides_on_close(True, False, active, True))
         self.assertFalse(hides_on_close(True, True, active, True))  # Sair in the tray menu.
         self.assertFalse(hides_on_close(False, False, active, True))  # Windows shutdown or logoff.
-        self.assertFalse(hides_on_close(True, False, {'active': False, 'state': 'connect'}, True))
-        self.assertFalse(hides_on_close(True, False, None, True))
+        self.assertTrue(hides_on_close(True, False, {'active': False, 'state': 'connect'}, True))
+        self.assertTrue(hides_on_close(True, False, {'active': True, 'state': 'paused'}, True))
+        self.assertTrue(hides_on_close(True, False, None, True))  # Status unavailable during reconnection.
         self.assertFalse(hides_on_close(True, False, active, False))  # No icon to come back from.
 
     def test_resume_flag_follows_activation_and_pause(self):

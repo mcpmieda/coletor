@@ -72,8 +72,13 @@ class AnimationTests(unittest.TestCase):
         self.assertEqual(frames[ear:ear + 3], ["fox-ear", "fox-idle", "fox-ear"])  # ear twitch
         # Only head frames exist at icon size; every frame has a real asset.
         self.assertTrue(set(frames) <= {"fox-idle", "fox-blink", "fox-ear"})
-        # Visible but calm (owner's request): the fox rests in at least 7 of 10 frames.
-        self.assertGreaterEqual(frames.count("fox-idle") / len(frames), .7)
+        # The owner wants frequent gestures: at most 1.2 seconds of rest,
+        # including the loop boundary, without speeding up individual frames.
+        rest = 0
+        for frame in frames + frames:
+            rest = rest + 1 if frame == "fox-idle" else 0
+            self.assertLessEqual(rest, 2)
+        self.assertEqual(frames.index("fox-blink"), 2)
         self.assertEqual(self.controller.snapshot().frame_key, "fox-idle")
 
     def test_no_rapid_boundary_updates(self):

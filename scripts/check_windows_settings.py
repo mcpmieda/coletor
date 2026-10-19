@@ -114,7 +114,7 @@ def exercise(window,args,result):
         result["error_type"]=type(error).__name__
     finally:
         smoke.write_json(args.worker_output,result)
-        window.destroy()
+        smoke.close_window(window)
 
 
 def worker(args):

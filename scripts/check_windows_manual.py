@@ -182,7 +182,7 @@ def worker(args):
             report['temporary_lock_diagnostic'] = lock_module.locks(next(
                 (d._temp_failed_path for d in drivers if getattr(d, '_temp_failed_path', None)), None))
         finally:
-            window.destroy()
+            smoke.close_window(window)
     try:
         checks['bundled_application'] = Path(desktop.__file__).resolve().parents[2] == program
         desktop.run_desktop(callback=exercise, settings_directory=args.output.parent / 'settings', access=smoke.synthetic_institutional_access())

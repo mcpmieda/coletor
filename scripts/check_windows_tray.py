@@ -32,7 +32,7 @@ EXTENDED_CHECKS = {
     "error_state_static_and_generic", "menu_header_flags_error", "menu_notifications_and_logs",
 }
 # The window's X keeps an active collection beside the clock instead of quitting.
-CLOSE_CHECKS = {"active_collection_close_hides"}
+CLOSE_CHECKS = {"active_collection_close_hides", "inactive_close_hides", "unknown_status_close_hides", "hidden_native_motion_continues"}
 
 def wait(predicate, timeout=15):
     deadline = time.monotonic()+timeout
@@ -111,7 +111,7 @@ def exercise(window,args,result):
         wait(lambda:inspect(tray)["activity"]=="idle" and inspect(tray)["timer"])
         before=inspect(tray)["frame_updates"]; time.sleep(13); after=inspect(tray)
         result["idle_frame_updates"]=after["frame_updates"]-before
-        require("idle_motion_gentle",2<=after["frame_updates"]-before<=14)
+        require("idle_motion_gentle",8<=after["frame_updates"]-before<=22)
         require("window_icon_follows_fox",after["window_icon_matches"])
         require("fox_icon_shown",data["icon"] in {"fox-idle","fox-blink","fox-ear"})
         for _ in range(6):
@@ -205,6 +205,20 @@ def exercise(window,args,result):
                 tray.status_provider=real_status
             menu(tray._open_item)
             wait(lambda:inspect(tray)["window_visible"])
+            for status, check in (({'active': False, 'state': 'connect'}, 'inactive_close_hides'), (None, 'unknown_status_close_hides')):
+                tray.status_provider=lambda value=status: value
+                tray._invoke(tray._refresh)
+                tray._invoke(tray._form.Close)
+                wait(lambda:not inspect(tray)["window_visible"])
+                require(check, not tray._disposed and not window.native.IsDisposed)
+                before=inspect(tray)["frame_updates"]
+                time.sleep(3.1)
+                after=inspect(tray)
+                require("hidden_native_motion_continues", after["registered"] and after["timer"] and after["frame_updates"] > before)
+                menu(tray._open_item)
+                wait(lambda:inspect(tray)["window_visible"])
+                require("same_window_after_repeated_show_hide",inspect(tray)["handle"]==handle)
+            tray.status_provider=real_status
         result["status"]="passed"
     except Exception as error:
         result["status"]="failed"
@@ -215,7 +229,7 @@ def exercise(window,args,result):
         smoke.write_json(args.worker_output,result)
         if not tray._disposed:
             if args.scenario=="quit": menu(tray._quit_item)
-            else: tray._invoke(tray._form.Close)  # Same WinForms FormClosing path as X.
+            else: menu(tray._quit_item)  # Explicit exit, unlike the window's X.
         if not window.native.IsDisposed: window.destroy()
 
 def worker(args):
