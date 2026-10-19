@@ -2,6 +2,8 @@ import type { SharedSchedule } from '../collector';
 
 /** Server limit of collections per day (each shift rule holds the same times). */
 export const MAX_PER_DAY = 48;
+/** Ecossistema rule (frequencyScheduleWriteV2): moments of a day 5+ minutes apart. */
+export const MIN_GAP_MINUTES = 5;
 export const DAY_LETTERS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 export const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 const SHIFTS = ['matutino', 'vespertino'] as const;
@@ -77,6 +79,10 @@ export function draftProblem(draft: PeriodDraft): string | null {
   if (total > MAX_PER_DAY) return `São ${total} coletas por dia; o limite é ${MAX_PER_DAY}. Aumente o intervalo ou encurte o período.`;
   if (draft.finalCheck && (!isTime(draft.finalCheck) || draft.finalCheck <= times[times.length - 1]))
     return 'A conferência final deve ser depois da última coleta do dia.';
+  // Same rule as the Ecossistema's agenda: two moments of a day 5+ minutes apart.
+  const moments = [...times, ...(draft.finalCheck ? [draft.finalCheck] : [])].map(toMinutes);
+  if (moments.some((m, i) => i > 0 && m - moments[i - 1] < MIN_GAP_MINUTES))
+    return `Deixe pelo menos ${MIN_GAP_MINUTES} minutos entre as coletas.`;
   return null;
 }
 
@@ -124,20 +130,32 @@ export function parseTimesText(text: string): { times: string[]; invalid: string
   return { times: times.sort(), invalid, repeated };
 }
 
-/** Next collection time from now, in the school's time zone; null when none. */
-export function nextRun(draft: PeriodDraft, now = new Date()): Date | null {
-  const times = [...dayTimes(draft), ...(draft.finalCheck ? [draft.finalCheck] : [])];
-  if (!times.length || !draft.weekdays.length) return null;
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: draft.timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+/** Next moment from `now` among per-day minutes (index 0 = Monday), in a time zone. */
+function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: Date): Date | null {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(now);
   const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
   const weekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday'));
   const minute = Number(get('hour')) * 60 + Number(get('minute'));
   for (let offset = 0; offset < 8; offset++) {
-    const day = (weekday + offset) % 7;
-    if (!draft.weekdays.includes(day)) continue;
-    const next = times.map(toMinutes).sort((a, b) => a - b).find(m => offset > 0 || m > minute);
+    const next = dayMinutes((weekday + offset) % 7).sort((a, b) => a - b).find(m => offset > 0 || m > minute);
     if (next !== undefined) return new Date(now.getTime() + ((offset * 1440 + next - minute) * 60 - now.getSeconds()) * 1000);
   }
   return null;
+}
+
+/** Next collection time from now, in the school's time zone; null when none. */
+export function nextRun(draft: PeriodDraft, now = new Date()): Date | null {
+  const times = [...dayTimes(draft), ...(draft.finalCheck ? [draft.finalCheck] : [])].map(toMinutes);
+  if (!times.length || !draft.weekdays.length) return null;
+  return nextFrom(day => (draft.weekdays.includes(day) ? [...times] : []), draft.timezone, now);
+}
+
+/** Next collection of the agenda exactly as saved (any per-day or per-shift
+ *  difference made in the Ecossistema included), not of its editor summary. */
+export function nextSharedRun(schedule: SharedSchedule | null, now = new Date()): Date | null {
+  if (!schedule) return null;
+  return nextFrom(day => [...new Set(schedule.rules
+    .filter(r => r.enabled && r.weekday === serverDay(day))
+    .flatMap(r => [...r.times, ...(r.recheck ? [r.recheck] : [])]))].filter(isTime).map(toMinutes), schedule.timezone, now);
 }

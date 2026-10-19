@@ -115,7 +115,7 @@ def exercise(window,args,result):
         require("window_icon_follows_fox",after["window_icon_matches"])
         require("fox_icon_shown",data["icon"] in {"fox-idle","fox-blink","fox-ear"})
         for _ in range(6):
-            menu(tray._hide_item); require("same_window_after_repeated_show_hide",not inspect(tray)["window_visible"])
+            tray._invoke(tray._hide); require("same_window_after_repeated_show_hide",not inspect(tray)["window_visible"])
             menu(tray._open_item); menu(tray._open_item)
             require("same_window_after_repeated_show_hide",inspect(tray)["window_visible"] and inspect(tray)["handle"]==handle)
         settings.click(window,"Ocultar na bandeja")

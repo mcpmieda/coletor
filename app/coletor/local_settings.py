@@ -25,6 +25,12 @@ def default_settings():
             "notifications": {"show": True}}
 
 
+def default_settings_without_classes():
+    value = default_settings()
+    del value["classes"]
+    return value
+
+
 def exact_fields(value, fields):
     if type(value) is not dict or set(value) != fields:
         raise ValueError("Invalid settings schema")
@@ -125,6 +131,7 @@ class LocalSettings:
         self._directory = Path(directory) if directory is not None else user_settings_directory()
         self._path = self._directory / "settings.json"
         self._lock = threading.RLock()
+        self._cached, self._cached_stamp = None, None
 
     @contextmanager
     def _process_lock(self):
@@ -152,25 +159,49 @@ class LocalSettings:
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
+    def _had_chosen_classes(self):
+        """Installations from before 'Todas as turmas' chose classes by hand:
+        an upgrade keeps that choice instead of silently collecting every class."""
+        try:
+            saved = json.loads((self._directory / "class-selection.json").read_text(encoding="utf-8"))
+            return any(isinstance(p, dict) and p.get("selected_class_ids") for p in saved.get("profiles", []))
+        except (OSError, ValueError, AttributeError, TypeError):
+            return False
+
+    def _upgrade(self, value):
+        if isinstance(value, dict) and "classes" not in value and self._had_chosen_classes():
+            value = {**value, "classes": {"mode": "chosen"}}
+        return value
+
     def _read(self):
         try:
             with self._path.open("rb") as file:
                 raw = file.read(MAX_BYTES + 1)
         except FileNotFoundError:
-            return default_settings(), ""
+            return validate_settings(self._upgrade(default_settings_without_classes())), ""
         try:
             if len(raw) > MAX_BYTES:
                 raise ValueError("Settings too large")
-            return validate_settings(json.loads(raw.decode("utf-8"))), ""
+            return validate_settings(self._upgrade(json.loads(raw.decode("utf-8")))), ""
         except (ValueError, UnicodeError, RecursionError, TypeError):
             # No invalid-content backup or input echo. Replace only after a valid
             # explicit save; never copy arbitrary material from a damaged file.
             return default_settings(), RECOVERY_NOTICE
 
     def read(self):
+        """Parsed once per file version: the tray and status calls read this
+        every few seconds, so an unchanged file is not parsed again."""
         with self._lock:
-            settings, notice = self._read()
-            return {"settings": settings, "notice": notice}
+            try:
+                stat = self._path.stat()
+                stamp = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                stamp = None
+            if stamp is None or stamp != self._cached_stamp:
+                self._cached = self._read()
+                self._cached_stamp = stamp
+            settings, notice = self._cached
+            return {"settings": deepcopy(settings), "notice": notice}
 
     def update(self, field, value):
         if field not in {"schedule", "theme", "fox", "browser", "classes", "notifications"}:
@@ -197,5 +228,6 @@ class LocalSettings:
                 os.replace(temporary, self._path)
             finally:
                 Path(temporary).unlink(missing_ok=True)
+            self._cached_stamp = None  # Same-second writes keep the size: never trust the cache here.
             return deepcopy(clean)
 

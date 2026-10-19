@@ -190,10 +190,13 @@ class TrayAndResumeTests(unittest.TestCase):
         self.assertEqual(tray_text({'active': True, 'state': 'collecting'}, 'idle'), 'Coletor de Frequência · Coletando')
         self.assertEqual(tray_text(None, 'error'), 'Coletor · Coleta desligada · Arquivo precisa de atenção')
         # A short outage is a calm wait, not the red "needs attention" state.
-        offline = tray_text({'active': True, 'state': 'error', 'code': 'ACCESS_UNAVAILABLE'}, 'idle')
+        offline = tray_text({'active': True, 'state': 'reserve', 'code': 'ACCESS_UNAVAILABLE'}, 'idle')
         self.assertEqual(offline, 'Coletor de Frequência · Sem conexão, tentando de novo')
         self.assertLessEqual(len(offline), 63)
         self.assertEqual(tray_text({'active': True, 'state': 'error', 'code': 'lease-fenced'}, 'idle'),
+                         'Coletor de Frequência · Precisa de atenção')
+        # The catch-all code is a real fault, never shown as a harmless outage.
+        self.assertEqual(tray_text({'active': True, 'state': 'error', 'code': 'unavailable'}, 'idle'),
                          'Coletor de Frequência · Precisa de atenção')
         for state in ('ready', 'reserve', 'collecting', 'paused', 'login-required', 'error'):
             self.assertLessEqual(len(tray_text({'active': True, 'state': state}, 'idle')), 63)
@@ -248,6 +251,40 @@ class TrayAndResumeTests(unittest.TestCase):
         api._resume_stop.set()
         self.assertFalse(api._resume_collection(interval=0))
         self.assertEqual(api._access.status.call_count, 1)
+
+    def test_refused_logout_keeps_the_offline_retry_alive(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._pending_batch_blocker = Mock(return_value={'error': 'pendente', 'code': 'PENDING_BATCHES'})
+        self.assertEqual(api.logout_institutional_access()['code'], 'PENDING_BATCHES')
+        self.assertFalse(api._resume_stop.is_set())
+
+    def test_failed_class_choice_opening_resumes_collection(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._collector.public_status = Mock(return_value={'active': True, 'localPaused': False})
+        api._collector.local_pause = Mock(return_value={'state': 'ready'})
+        api._manual = Mock(return_value={'error': 'Há uma coleta em andamento.'})
+        api._operational = lambda work: work()
+        self.assertIn('error', api.prepare_manual_login(2026))
+        self.assertEqual([c.args for c in api._collector.local_pause.call_args_list], [(True,), (False,)])
+        self.assertFalse(api._paused_for_choice)
+
+    def test_operator_pause_during_the_choice_is_not_undone(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._paused_for_choice = True
+        api._operational = lambda work: {'state': 'paused'}
+        api.pause_collector(True)
+        self.assertFalse(api._paused_for_choice)
+
+    def test_tray_notifications_switch_saves_without_online_check(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._set_notifications(False)
+        self.assertFalse(api._notifications_on())
+        api._set_notifications(True)
+        self.assertTrue(api._notifications_on())
 
     def test_alert_waits_for_the_tray_and_then_shows_a_balloon(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)

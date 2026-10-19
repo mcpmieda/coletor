@@ -31,7 +31,9 @@ class StartupSnapshotTests(unittest.TestCase):
         self.api._remember_status(self.status(password='never', secret={'token': 'x'}))
         snapshot = self.api.get_startup_snapshot()
         self.assertTrue(snapshot['paired'])
-        self.assertEqual(snapshot['status']['credential'], {'saved': True, 'account': 'op•••@escola.invalid'})
+        # Before the live access check the window only learns that an access exists.
+        self.assertEqual(snapshot['status']['credential'], {'saved': True})
+        self.assertNotIn('escola.invalid', (self.path / 'ui-snapshot.json').read_text(encoding='utf-8'))
         raw = (self.path / 'ui-snapshot.json').read_text(encoding='utf-8')
         self.assertNotIn('never', raw); self.assertNotIn('token', raw); self.assertNotIn('progress', raw)
         self.assertIn('browser', snapshot['settings'])

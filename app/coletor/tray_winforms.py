@@ -10,13 +10,11 @@ COLLECTOR_TEXT = {"ready": "Coleta ativa", "reserve": "Reserva", "collecting": "
                   "paused": "Coleta pausada", "login-required": "Entrar no Smecel", "error": "Precisa de atenção"}
 
 
-# No network for a moment: the collector retries by itself, so the fox keeps
-# its calm idle motion instead of the static "needs attention" badge.
-OFFLINE_CODES = {"ACCESS_UNAVAILABLE", "unavailable"}
-
-
 def offline(collector):
-    return bool(collector and collector.get("state") == "error" and collector.get("code") in OFFLINE_CODES)
+    """No network for a moment (the runtime reports it as a 'reserve' wait):
+    the fox keeps its calm motion and says it is trying again. The catch-all
+    'unavailable' is a real fault and keeps the attention badge."""
+    return bool(collector and collector.get("code") == "ACCESS_UNAVAILABLE")
 
 
 def tray_text(collector, activity):
@@ -41,7 +39,7 @@ class WindowsFormsTray:
         self._window, self._form, self._state = window, window.native, state
         self._controller = AnimationController(AnimationPolicy(enabled=False))
         self._icons = {}
-        self._notify = self._menu = self._timer = self._poll = None
+        self._notify = self._menu = self._timer = self._poll = self._fox_menu = None
         self.status_provider = None
         # Set by the desktop bridge: actions run off the UI thread.
         self.collect_action = self.pause_action = None
@@ -85,14 +83,12 @@ class WindowsFormsTray:
             self._fox_menu = FoxMenu(self._menu)
             self._status_item = ToolStripMenuItem(); self._status_item.Enabled = False
             self._open_item = ToolStripMenuItem("Abrir painel")
-            self._hide_item = ToolStripMenuItem("Ocultar painel")
             self._collect_item = ToolStripMenuItem("Coletar agora")
             self._pause_item = ToolStripMenuItem("Pausar a coleta")
             self._notify_item = ToolStripMenuItem("Mostrar notificações")
             self._logs_item = ToolStripMenuItem("Abrir pasta de logs")
             self._quit_item = ToolStripMenuItem("Encerrar coletor")
             self._open_item.Click += self._open
-            self._hide_item.Click += self._hide  # Kept for the window's own hide; not in the menu.
             self._collect_item.Click += self._collect
             self._pause_item.Click += self._toggle_pause
             self._notify_item.Click += self._toggle_notifications
@@ -247,7 +243,6 @@ class WindowsFormsTray:
         if self._disposed: return
         from System.Windows.Forms import FormWindowState
         self._open_item.Enabled = True
-        self._hide_item.Enabled = bool(self._form.Visible)
         # WebView2 on this host keeps document.hidden=false when Form.Hide runs.
         # Send a boolean-only signal without waiting for JavaScript on the UI
         # thread. Also pause the panel while the native window is minimized.
@@ -321,7 +316,6 @@ class WindowsFormsTray:
             self._notify.MouseClick -= self._mouse
             self._notify.MouseDoubleClick -= self._mouse
             self._open_item.Click -= self._open
-            self._hide_item.Click -= self._hide
             self._quit_item.Click -= self._quit
             self._collect_item.Click -= self._collect
             self._pause_item.Click -= self._toggle_pause
@@ -333,7 +327,7 @@ class WindowsFormsTray:
         if self._poll: resources += [self._poll.Stop, self._poll.Dispose]
         if self._notify: resources += [lambda: setattr(self._notify, "Visible", False), self._notify.Dispose]
         if self._menu: resources += [self._menu.Dispose]
-        if getattr(self, "_fox_menu", None): resources += [self._fox_menu.dispose]
+        if self._fox_menu: resources += [self._fox_menu.dispose]
         resources += [icon.Dispose for icon in set(self._icons.values())]
         if hasattr(self, "_neutral"): resources += [self._neutral.Dispose]
         self._cleanup_ok = True

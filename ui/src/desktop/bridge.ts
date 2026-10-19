@@ -20,7 +20,7 @@ export type Status = CollectorStatus & { classesMode?: 'all' | 'chosen' };
 interface Native {
   get_startup_snapshot(): Promise<StartupSnapshot>;
   get_collector_status(): Promise<Status | Failure>;
-  get_collector_history(): Promise<{ entries: HistoryEntry[] } | Failure>;
+  get_collector_history(after?: number): Promise<{ entries: HistoryEntry[] } | Failure>;
   get_local_settings(): Promise<{ settings: Preferences } | Failure>;
   activate_collector(): Promise<Status | Failure>;
   collect_now(): Promise<Status | Failure>;

@@ -168,6 +168,9 @@ class DesktopApi(PreviewApi):
             clean = {k: status.get(k) for k in self._SNAPSHOT_FIELDS}
             # A saved "collecting" is stale by the next opening: show it as ready.
             if clean.get('state') == 'collecting': clean['state'] = 'ready'
+            # Read before the live access check: only whether an access exists,
+            # never the (masked) account.
+            clean['credential'] = {'saved': bool((clean.get('credential') or {}).get('saved'))}
             payload = json.dumps({'version': 1, 'savedAt': time.time(), 'status': clean}, ensure_ascii=False)
             if len(payload) > 64_000: return
             directory = self._snapshot_path().parent
@@ -219,6 +222,7 @@ class DesktopApi(PreviewApi):
         return self._operational(self._collector.collect)
 
     def pause_collector(self, paused):
+        self._paused_for_choice = False  # The operator's explicit decision wins.
         result = self._operational(lambda: self._collector.local_pause(paused))
         if 'error' not in result: self._resume.set(not paused)
         return result
@@ -241,10 +245,14 @@ class DesktopApi(PreviewApi):
         if 'error' not in result: self._remember_status(result)
         return result
 
-    def get_collector_history(self):
+    def get_collector_history(self, after=None):
         # Everything the log keeps (2000 events, 30 days at most), so the 24 h
-        # indicators and Registros never miss an older failure.
-        return {'entries': self._collector.recent_history(2000)}
+        # indicators and Registros never miss an older failure. Polls pass the
+        # newest 'at' they have and receive only what came after it.
+        entries = self._collector.recent_history(2000)
+        if type(after) in {int, float}:
+            entries = [e for e in entries if e['at'] > after]
+        return {'entries': entries}
 
     def save_shared_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_settings(revision, schedule))
@@ -342,7 +350,6 @@ class DesktopApi(PreviewApi):
             self._collector._operation.release()
 
     def logout_institutional_access(self):
-        self._resume_stop.set()  # An offline retry never outlives a logout.
         # Logout is not permission to lose a batch; serialize check+revoke+
         # purge atomically against live collection, even on network failure.
         if not self._collector._operation.acquire(blocking=False):
@@ -352,6 +359,8 @@ class DesktopApi(PreviewApi):
             if blocked is not None: return blocked
             try:
                 self._access.logout()
+                self._resume_stop.set()  # A completed logout ends any offline retry.
+                self._paused_for_choice = False
                 self._forget_status()
                 self._resume.set(False)
                 self._collector.cancel(purge=True)
@@ -371,7 +380,15 @@ class DesktopApi(PreviewApi):
             # choice and resume when it closes. A pause the operator made stays.
             self._collector.local_pause(True)
             self._paused_for_choice = True
-        return self._manual(lambda: self._manual_session.prepare_login(year))
+        result = self._manual(lambda: self._manual_session.prepare_login(year))
+        if 'error' in result: self._resume_after_choice()  # Nothing opened: nothing to wait for.
+        return result
+
+    def _resume_after_choice(self):
+        if not self._paused_for_choice: return
+        self._paused_for_choice = False
+        resumed = self._operational(lambda: self._collector.local_pause(False))
+        if 'error' not in resumed: self._remember_status(resumed)
 
     def get_manual_class_selection_preferences(self):
         saved = self._manual_session._selections.read()
@@ -417,7 +434,8 @@ class DesktopApi(PreviewApi):
     def open_manual_session(self, generation, confirmed):
         # With a saved Smecel access the Coletor signs in itself, so the window
         # can stay hidden (Ajustes); otherwise the person signs in in Edge.
-        can_sign_in = bool(self._collector.saved_credential())
+        refused = self._collector.public_status().get('code') in {'SOURCE_LOGIN_FAILED', 'SOURCE_LOGIN_REQUIRED'}
+        can_sign_in = bool(self._collector.saved_credential()) and not refused
         return self._manual(lambda: self._manual_session.open(generation, confirmed, can_sign_in))
 
     def close_manual_session(self):
@@ -430,10 +448,8 @@ class DesktopApi(PreviewApi):
             closed = self._manual_session.status()
         else:
             closed = self._manual(self._manual_session.close)
-        if self._paused_for_choice and 'error' not in closed and not closed.get('cleanup_pending'):
-            self._paused_for_choice = False
-            resumed = self._operational(lambda: self._collector.local_pause(False))
-            if 'error' not in resumed: self._remember_status(resumed)
+        if 'error' not in closed and not closed.get('cleanup_pending'):
+            self._resume_after_choice()
         return closed
 
     def get_manual_session_status(self):
@@ -505,8 +521,9 @@ class DesktopApi(PreviewApi):
         except (OSError, ValueError, TypeError, KeyError): return True
 
     def _set_notifications(self, show):
-        """Tray menu switch: same preference as in Ajustes."""
-        self.save_notifications(show)
+        """Tray menu switch (native, trusted): same local preference as in
+        Ajustes, saved without the online check so it also works offline."""
+        if type(show) is bool: self._save("notifications", {"show": show})
 
     def _open_logs_folder(self):
         """Tray menu: the folder with the collector's log (no secrets there)."""

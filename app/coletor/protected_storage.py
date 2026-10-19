@@ -17,6 +17,9 @@ from .local_settings import user_settings_directory
 MAX_QUEUE_BYTES = 64 * 1024 * 1024
 MAX_QUEUE_ITEMS = 64
 RETENTION_SECONDS = 7 * 24 * 60 * 60
+# How long a queue must stay undecryptable (with the live binding) before it is
+# set aside as belonging to an older device generation.
+UNREADABLE_GRACE_SECONDS = 10 * 60
 MAX_SESSION_BYTES = 1024 * 1024
 MAX_SMALL_BYTES = 8 * 1024
 PURPOSES = ('session', 'queue', 'consent', 'credential')
@@ -73,6 +76,9 @@ class ProtectedStorage:
         self.directory = (Path(directory) if directory is not None else user_settings_directory()) / 'protected-frequency-v2'
         self._crypto = crypto or Dpapi()
         self._consent, self._clock = consent, clock
+        self.expired = 0  # Unreceipted batches dropped by retention, not yet logged.
+        self._credential_summary = None
+        self._unreadable_since = None
         self._binding = None
         self._enabled = False
         self._memory = {}
@@ -216,29 +222,55 @@ class ProtectedStorage:
             if fresh != values:
                 self._write('queue', fresh)
                 # Never silent: the runtime records how many expired unreceipted.
-                self.expired = getattr(self, 'expired', 0) + len(values) - len(fresh)
+                self.expired += len(values) - len(fresh)
             return fresh
 
     def take_expired(self):
         with self._lock:
-            count, self.expired = getattr(self, 'expired', 0), 0
+            count, self.expired = self.expired, 0
             return count
 
     def quarantine_unreadable_queue(self):
         """With the current online binding in place, a queue that still cannot
         be decrypted belongs to an older device generation: it can never be read
         or receipted again. Move it aside (kept, encrypted) instead of blocking
-        collection or asking someone to discard it. Returns True if moved."""
+        collection or asking someone to discard it. Returns True if moved.
+
+        A single failure is never enough (DPAPI can fail for a moment at logon,
+        an antivirus can hold the file): the queue must stay unreadable for
+        UNREADABLE_GRACE_SECONDS. Set-aside files are removed after the queue's
+        own retention and by clear() (logout, safe removal)."""
         with self._lock:
+            self._purge_quarantine(older_than=RETENTION_SECONDS)
             path = self.directory / 'queue.dpapi'
-            if self._binding is None or 'queue' in self._memory or not path.exists() or path.is_symlink(): return False
+            if self._binding is None or 'queue' in self._memory or not path.exists() or path.is_symlink():
+                self._unreadable_since = None
+                return False
             try:
                 self._read('queue')
+                self._unreadable_since = None
                 return False
             except StorageError:
-                stamp = time.strftime('%Y%m%d-%H%M%S')
-                path.replace(self.directory / f'queue-unreadable-{stamp}.dpapi')
+                now = self._clock()
+                if self._unreadable_since is None: self._unreadable_since = now
+                if now - self._unreadable_since < UNREADABLE_GRACE_SECONDS: return False
+                try:
+                    path.replace(self.directory / f'queue-unreadable-{time.strftime("%Y%m%d-%H%M%S")}.dpapi')
+                except OSError:
+                    return False  # Held by another process: try again later.
+                self._unreadable_since = None
                 return True
+            except OSError:
+                return False
+
+    def _purge_quarantine(self, older_than=None):
+        now = self._clock()
+        for item in self.directory.glob('queue-unreadable-*.dpapi'):
+            try:
+                if item.is_symlink(): continue
+                if older_than is None or now - item.stat().st_mtime > older_than: item.unlink()
+            except OSError:
+                pass
 
     def recovery_status(self):
         """Minimal LOCAL metadata, even if an old DPAPI generation is unreadable.
@@ -316,6 +348,7 @@ class ProtectedStorage:
                     or any(c.isspace() for c in email.strip())
                     or not isinstance(password, str) or not 1 <= len(password) <= 256 or chr(0) in password):
                 raise StorageError('SOURCE_CREDENTIAL_INVALID')
+            self._credential_summary = None
             self._write_disk('credential', {'email': email.strip(), 'password': password})
 
     def load_credential(self):
@@ -330,20 +363,32 @@ class ProtectedStorage:
             return value
 
     def credential_status(self):
+        """Masked summary, cached per binding: the tray asks every few seconds
+        and must not decrypt the password each time. Saving, clearing or a new
+        binding forgets the cache."""
+        with self._lock:
+            if self._credential_summary is not None and self._credential_summary[0] == self._binding:
+                return dict(self._credential_summary[1])
         value = self.load_credential()
-        if value is None: return {'saved': False}
-        local, _, domain = value['email'].partition('@')
-        return {'saved': True, 'account': (local[:2] + '•••@' + domain) if domain else '•••'}
+        if value is None: summary = {'saved': False}
+        else:
+            local, _, domain = value['email'].partition('@')
+            summary = {'saved': True, 'account': (local[:2] + '•••@' + domain) if domain else '•••'}
+        with self._lock: self._credential_summary = (self._binding, summary)
+        return dict(summary)
 
     def clear_credential(self):
         with self._lock:
+            self._credential_summary = None
             self._memory.pop('credential', None)
             (self.directory / 'credential.dpapi').unlink(missing_ok=True)
 
     def clear(self):
         with self._lock:
+            self._credential_summary = None
             self._memory.clear()
             self._enabled = False
             # Only the owned files; no recursive deletion or other app paths.
             for purpose in PURPOSES:
                 (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)
+            self._purge_quarantine()  # Set-aside queues are this collector's data too.

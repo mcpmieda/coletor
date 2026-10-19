@@ -584,6 +584,47 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(FrequencyError): self.runtime.save_settings(99, schedule())
         self.assertEqual(self.provider.shared_schedule, before)
 
+    def test_fenced_or_conflicting_run_does_not_stop_the_schedule(self):
+        for code in ('lease-fenced', 'revision-conflict'):
+            self.runtime._code, self.runtime._state = code, 'error'
+            zone = __import__('zoneinfo').ZoneInfo('America/Bahia')
+            now = datetime.fromtimestamp(self.provider.now, timezone.utc).astimezone(zone)
+            value = schedule()
+            rule = next(r for r in value['rules'] if r['weekday'] == (now.weekday() + 1) % 7 and r['shift'] == 'matutino')
+            rule.update(enabled=True, times=[now.strftime('%H:%M')])
+            self.provider.shared_schedule = value
+            self.runtime.collect = Mock()
+            self.runtime._minute = None
+            self.runtime._fired.clear()
+            self.runtime.tick()
+            import time
+            time.sleep(.02)
+            self.assertEqual(self.runtime.collect.call_count, 1, code)
+            self.provider.now += 3600
+
+    def test_unlinked_class_in_a_shift_alerts_without_blocking(self):
+        self.source.operational_catalog = lambda storage: {
+            'selected_class_ids': ['13331', '99'], 'unavailable_class_ids': [], 'all_classes': True,
+            'catalog': {'classes': [{'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'},
+                                    {'class_id': '99', 'name': 'AEE SEM LIGACAO', 'shift': 'vespertino'}]}}
+        result = self.runtime.collect({'vespertino'})  # No linked class in this shift.
+        self.assertEqual(result['code'], 'CLASS_RECONCILIATION_REQUIRED')
+        self.assertEqual(self.source.reads, 0)
+        result = self.runtime.collect({'matutino'})  # The next slot still collects.
+        self.assertEqual(self.source.reads, 1)
+
+    def test_shift_without_classes_is_a_quiet_wait(self):
+        result = self.runtime.collect({'vespertino'})  # The synthetic class is matutino.
+        self.assertEqual((result['code'], result['state']), ('NO_CLASSES_IN_SHIFT', 'reserve'))
+        self.assertFalse(any(e['kind'] == 'failure' for e in self.runtime.recent_history(20)))
+
+    def test_paused_run_gets_a_closing_fact(self):
+        self.source.on_capture = lambda: self.runtime.local_pause(True)
+        self.runtime.collect()
+        kinds = [e['kind'] for e in self.runtime.recent_history(20)]
+        self.assertIn('collection-started', kinds)
+        self.assertIn('collection-stopped', kinds)
+
     def test_expired_source_login_does_not_loop_or_launch(self):
         self.source.operational_catalog = Mock(side_effect=SessionError('expired'))
         result = self.runtime.collect()

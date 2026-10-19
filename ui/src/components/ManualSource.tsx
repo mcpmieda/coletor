@@ -37,7 +37,6 @@ async function bridge(): Promise<ManualBridge> {
 /** Load the Smecel class list (signing in with the saved access) and choose classes. */
 export default function ManualSource({ onChanged }: Readonly<{ onChanged?: () => void }> = {}) {
   const [busy, setBusy] = useState(false);
-  const onBusy = setBusy, onClear = () => {};
   const [year, setYear] = useState('2026');
   const [session, setSession] = useState<ManualStatus | null>(null);
   const [catalog, setCatalog] = useState<CatalogReply | null>(null);
@@ -61,7 +60,7 @@ export default function ManualSource({ onChanged }: Readonly<{ onChanged?: () =>
   }, []);
   async function perform(work: () => Promise<ManualStatus | CatalogReply>) {
     if (active.current || busy || closing.current) return;
-    active.current = true; onBusy(true); setError('');
+    active.current = true; setBusy(true); setError('');
     const id = ++operation.current;
     try {
       const result = await work();
@@ -71,11 +70,11 @@ export default function ManualSource({ onChanged }: Readonly<{ onChanged?: () =>
         } else setSession(result);
       }
     } catch (e) { if (id === operation.current) { setError(e instanceof Error ? e.message : 'Não foi possível carregar as turmas.'); } }
-    finally { active.current = false; onBusy(false); onChanged?.(); }
+    finally { active.current = false; setBusy(false); onChanged?.(); }
   }
   /** One click: open the isolated Edge, sign in with the saved access and read the list. */
   async function load() {
-    setCatalog(null); onClear();
+    setCatalog(null);
     await perform(async () => {
       const id=operation.current, api=await bridge();
       let current=session;
@@ -91,7 +90,7 @@ export default function ManualSource({ onChanged }: Readonly<{ onChanged?: () =>
   }
   async function close() {
     if (closing.current) return;
-    closing.current = true; operation.current++; onClear(); setCatalog(null); setError('');
+    closing.current = true; operation.current++; setCatalog(null); setError('');
     try { setSession(checked(await (await bridge()).close_manual_session())); }
     catch {
       const status=await window.pywebview?.api.get_manual_session_status?.().catch(()=>undefined);
@@ -101,13 +100,11 @@ export default function ManualSource({ onChanged }: Readonly<{ onChanged?: () =>
   async function toggle(key: string, selected: boolean) {
     if (!catalog || !session || active.current || busy) return;
     const ids=selected ? [...catalog.selected_class_ids,key] : catalog.selected_class_ids.filter(id=>id!==key);
-    onClear();
     await perform(async()=>checked(await (await bridge()).save_manual_class_selection(session.generation,ids,catalog.selection_revision)));
   }
   async function selectAll(all: boolean) {
     if (!catalog || !session || active.current || busy) return;
     const ids=all ? catalog.catalog.classes.map(item=>item.class_id) : [];
-    onClear();
     await perform(async()=>checked(await (await bridge()).save_manual_class_selection(session.generation,ids,catalog.selection_revision)));
   }
   const live=!!session && (session.state!=='closed' || session.cleanup_pending);

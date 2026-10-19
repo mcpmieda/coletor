@@ -2,7 +2,7 @@ import { COLLECTOR_CODES, type HistoryEntry } from '../collector';
 
 export interface ClassResult { label: string; sent: number; unresolved: number; conflicts: number; readMs?: number; sendMs?: number }
 export interface Run {
-  id: string; started: number; finished: number | null; status: 'ok' | 'review' | 'partial' | 'error' | 'running';
+  id: string; started: number; finished: number | null; status: 'ok' | 'review' | 'partial' | 'stopped' | 'error' | 'running';
   total: number; classes: ClassResult[]; resolved: number; unresolved: number; conflicts: number; problem: string | null;
 }
 
@@ -29,6 +29,8 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
       current.classes.push(item); current.resolved += item.sent; current.unresolved += item.unresolved; current.conflicts += item.conflicts;
     } else if (e.kind === 'collection-finished') close(e.at, e.code ? 'review' : 'ok', e.code ? problemText(e.code) : null);
     else if (e.kind === 'failure' && current) close(e.at, current.classes.length ? 'partial' : 'error', problemText(e.code));
+    // Paused (here or by the school) or taken over by another PC: not a failure.
+    else if (e.kind === 'collection-stopped' && current) close(e.at, 'stopped', problemText(e.code));
   }
   if (current) runs.push(current);
   return runs.reverse();
@@ -62,9 +64,13 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   superseded: ['warn', 'Lote interrompido substituído por uma nova leitura.'],
   'queue-quarantined': ['warn', 'Fila cifrada de um acesso anterior separada; ela não podia mais ser lida nem conferida.'],
   'queue-expired': ['warn', 'Lote(s) sem recibo com mais de 7 dias descartado(s) da fila local.'],
+  'late-cancelled': ['info', 'Horário atrasado cancelado: ele saiu da agenda enquanto a coleta anterior rodava.'],
+  'collection-stopped': ['info', 'Coleta interrompida (pausa ou outro computador assumiu).'],
   'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
 };
-const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED']);
+const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
+// The collector retries these by itself: worth seeing, not counted as failures.
+const TEMPORARY = new Set(['ACCESS_UNAVAILABLE']);
 
 /** One readable line per history fact, newest first (Registros). */
 export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
@@ -75,12 +81,17 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
       return { id, at: e.at, level: e.unresolved || e.conflicts ? 'warn' : 'info', message: `${e.label ?? 'Turma'} enviada · ${e.sent ?? 0} aluno(s)`, detail: extra || undefined };
     }
     if (e.kind === 'failure') {
-      const level: Level = QUIET.has(e.code ?? '') ? 'info' : 'error';
+      const level: Level = QUIET.has(e.code ?? '') ? 'info' : TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
       return { id, at: e.at, level, message: problemText(e.code), detail: [e.label, e.code].filter(Boolean).join(' · ') };
     }
     const [level, message] = EVENT_TEXT[e.kind] ?? ['info', e.kind];
     return { id, at: e.at, level, message, detail: e.label };
   });
+}
+
+/** Failures in the last 24 h: one rule for the Registros badge and the Tarefas tile. */
+export function failures24h(entries: readonly HistoryEntry[], nowMs = Date.now()): number {
+  return logEvents(entries).filter(e => e.level === 'error' && nowMs / 1000 - e.at < 86_400).length;
 }
 
 export const fmtDate = (s: number) => new Date(s * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });

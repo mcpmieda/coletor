@@ -20,10 +20,14 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
   const [timesText, setTimesText] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
   const [unify, setUnify] = useState(false);
+  // The revision the draft was loaded from: saving with a newer polled one
+  // would hide an edit made meanwhile on another computer.
+  const [baseRevision, setBaseRevision] = useState<number | null>(null);
   useEffect(() => {
     if (!open) return;
     const next = fromShared(status?.settings?.schedule ?? null);
     setDraft(next); setTimesText(next.times.join(', ')); setError(''); setUnify(false);
+    setBaseRevision(status?.settings?.revision ?? null);
   }, [open]); // Reload only when the dialog opens, not on every status poll.
   const set = (patch: Partial<PeriodDraft>) => setDraft(d => ({ ...d, ...patch }));
   const typed = parseTimesText(timesText);
@@ -34,11 +38,11 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
   const perDay = dayTimes(draft).length + (draft.finalCheck ? 1 : 0);
 
   async function save() {
-    if (problem || !status?.settings) return;
+    if (problem || baseRevision === null) return;
     setSaving(true); setError('');
     try {
       const schedule: SharedSchedule = toShared(draft);
-      const saved = await call(api => api.save_shared_schedule(status.settings!.revision, schedule));
+      const saved = await call(api => api.save_shared_schedule(baseRevision, schedule));
       toast.success('Agenda salva para todos os computadores da escola');
       onSaved(saved);
     } catch (e) {
@@ -130,7 +134,7 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
           </Modal.Body>
           <Modal.Footer className="flex justify-end gap-2">
             <Button variant="tertiary" onPress={onClose}>Cancelar</Button>
-            <Button variant="primary" onPress={() => { void save(); }} isPending={saving} isDisabled={!!problem || !status?.settings}><Save size={16} /> Salvar</Button>
+            <Button variant="primary" onPress={() => { void save(); }} isPending={saving} isDisabled={!!problem || baseRevision === null}><Save size={16} /> Salvar</Button>
           </Modal.Footer>
         </Modal.Dialog>
       </Modal.Container>

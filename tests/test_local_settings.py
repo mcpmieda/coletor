@@ -150,3 +150,33 @@ class NewPreferenceTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class UpgradeKeepsChosenClassesTests(unittest.TestCase):
+    def test_install_that_chose_classes_keeps_its_choice_after_the_upgrade(self):
+        import json, tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "settings.json").write_text(json.dumps(
+                {"schemaVersion": 1, "schedule": None, "theme": "dark", "fox": {"version": 1, "show": True, "animate": True}}), encoding="utf-8")
+            (folder / "class-selection.json").write_text(json.dumps(
+                {"schemaVersion": 1, "localRevision": 1, "profiles": [{"selected_class_ids": ["11"]}]}), encoding="utf-8")
+            self.assertEqual(LocalSettings(folder).read()["settings"]["classes"], {"mode": "chosen"})
+
+    def test_new_install_defaults_to_every_class(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(LocalSettings(directory).read()["settings"]["classes"], {"mode": "all"})
+
+    def test_cached_read_follows_saves(self):
+        import tempfile
+        from coletor.local_settings import LocalSettings
+        with tempfile.TemporaryDirectory() as directory:
+            settings = LocalSettings(directory)
+            self.assertEqual(settings.read()["settings"]["theme"], "system")
+            settings.update("theme", "dark")
+            self.assertEqual(settings.read()["settings"]["theme"], "dark")
+            settings.read()["settings"]["fox"]["show"] = False  # Callers get a copy.
+            self.assertTrue(settings.read()["settings"]["fox"]["show"])

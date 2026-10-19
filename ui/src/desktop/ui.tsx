@@ -9,6 +9,7 @@ const RUN_STATUS: Record<string, { label: string; color: Tone }> = {
   ok: { label: 'Concluída', color: 'success' },
   review: { label: 'Com pendências', color: 'warning' },
   partial: { label: 'Parcial', color: 'warning' },
+  stopped: { label: 'Interrompida', color: 'default' },
   error: { label: 'Falhou', color: 'danger' },
   running: { label: 'Coletando', color: 'accent' },
 };

@@ -6,7 +6,7 @@ import { useDesktopTray } from '../desktop';
 import FoxPet from './FoxPet';
 import type { FoxMood } from './foxPhrases';
 import { HistoryPage, LogsPage } from './HistoryPages';
-import { groupRuns, logEvents } from './runs';
+import { failures24h, groupRuns, type Run } from './runs';
 import SettingsPage from './SettingsPage';
 import TasksPage from './TasksPage';
 import { useColetor, type ColetorState } from './useColetor';
@@ -19,12 +19,15 @@ const NAV: { id: Page; label: string; icon: typeof LayoutList }[] = [
   { id: 'settings', label: 'Ajustes', icon: Settings },
 ];
 
-function foxMood(state: ColetorState): FoxMood {
+function foxMood(state: ColetorState, runs: Run[]): FoxMood {
   const s = state.status;
   if (s?.state === 'collecting') return 'running';
   if (s?.localPaused || s?.settings?.paused) return 'paused';
-  const last = groupRuns(state.history).find(r => r.status !== 'running');
-  if (last && Date.now() / 1000 - (last.finished ?? last.started) < 90) return last.status === 'error' ? 'error' : 'ok';
+  const last = runs.find(r => r.status !== 'running');
+  // Only a clean run is celebrated; partial or failed runs are a problem, a run
+  // with students to reconcile or a stopped one just leaves the fox calm.
+  if (last && Date.now() / 1000 - (last.finished ?? last.started) < 90)
+    return last.status === 'ok' ? 'ok' : last.status === 'error' || last.status === 'partial' ? 'error' : 'idle';
   if (s?.state === 'error' || s?.state === 'login-required') return 'error';
   return 'idle';
 }
@@ -35,6 +38,7 @@ function ServiceLine({ state }: Readonly<{ state: ColetorState }>) {
     : !s.active ? ['bg-danger', 'Coleta desligada']
     : s.localPaused || s.settings?.paused ? ['bg-warning', 'Pausada']
     : s.state === 'collecting' ? ['bg-accent', 'Coletando agora']
+    : s.code === 'ACCESS_UNAVAILABLE' ? ['bg-warning', 'Sem conexão, tentando de novo']
     : ['bg-success', 'Coleta automática ativa'];
   return (
     <div className="mt-2 flex items-center gap-2 px-2 text-xs text-muted">
@@ -49,7 +53,8 @@ export default function DesktopApp() {
   const state = useColetor();
   const [page, setPage] = useState<Page>('tasks');
   const tray = useDesktopTray(state.status?.state === 'collecting' ? 'reading' : 'idle');
-  const errors24h = useMemo(() => logEvents(state.history).filter(e => e.level === 'error' && Date.now() / 1000 - e.at < 86_400).length, [state.history]);
+  const errors24h = useMemo(() => failures24h(state.history), [state.history]);
+  const runs = useMemo(() => groupRuns(state.history), [state.history]);
   const title = NAV.find(n => n.id === page)!.label;
 
   return (
@@ -74,7 +79,7 @@ export default function DesktopApp() {
             </button>
           ))}
         </nav>
-        <div className="mt-auto shrink-0"><FoxPet mood={foxMood(state)} /></div>
+        <div className="mt-auto shrink-0"><FoxPet mood={foxMood(state, runs)} /></div>
         <ServiceLine state={state} />
         <div className="mt-3 px-2 text-[11px] leading-snug text-muted">Versão {version}</div>
       </aside>

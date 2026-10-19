@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { fmtCountdown, fmtDuration, groupRuns, logEvents, runSummary } from './runs';
+import { failures24h, fmtCountdown, fmtDuration, groupRuns, logEvents, runSummary } from './runs';
 import type { HistoryEntry } from '../collector';
 
 const history: HistoryEntry[] = [
@@ -36,4 +36,25 @@ test('durations and countdowns', () => {
   expect(fmtCountdown(new Date(90_000), 0)).toBe('1:30');
   expect(fmtCountdown(new Date(3_900_000), 0)).toBe('1 h 05 min');
   expect(fmtCountdown(null)).toBe('—');
+});
+
+test('a paused run is closed as stopped and is not a failure', () => {
+  const entries: HistoryEntry[] = [
+    { at: 100, kind: 'collection-started', sent: 3 },
+    { at: 110, kind: 'class-sent', label: '6A', sent: 30, unresolved: 0, conflicts: 0 },
+    { at: 120, kind: 'collection-stopped', code: 'paused' },
+    { at: 130, kind: 'late-cancelled', label: '07:15' },
+  ];
+  expect(groupRuns(entries)[0].status).toBe('stopped');
+  expect(failures24h(entries, 200_000)).toBe(0);
+  expect(logEvents(entries).find(e => e.message.includes('cancelado'))).toBeTruthy();
+});
+
+test('one 24 h failure count for the badge and the tile, including failures outside a run', () => {
+  const entries: HistoryEntry[] = [
+    { at: 1000, kind: 'failure', code: 'SOURCE_LOGIN_FAILED' },
+    { at: 1100, kind: 'failure', code: 'ACCESS_UNAVAILABLE' },
+    { at: 1200, kind: 'failure', code: 'lease-busy' },
+  ];
+  expect(failures24h(entries, 2_000_000)).toBe(1);
 });

@@ -24,7 +24,7 @@ from .protected_storage import ProtectedStorage, StorageError
 
 SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy',
               'lease-fenced', 'paused', 'source-invalid', 'identity-review', 'SOURCE_LOGIN_REQUIRED',
-              'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES',
+              'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS', 'NO_SELECTED_CLASSES', 'NO_CLASSES_IN_SHIFT',
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
               'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
@@ -38,7 +38,9 @@ LEASE_SECONDS = 300
 # Same limit as the Ecossistema's frequencyScheduleV2 (recheck included).
 MAX_DAILY_TIMES = 48
 # Routine waits are not failures: a reserve computer or a school pause.
-QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED'}
+# NO_CLASSES_IN_SHIFT: a slot of a shift this school (or this PC's choice) has
+# no linked class for. Nothing to do, and nothing wrong.
+QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT'}
 
 
 def discard_confirmation():
@@ -164,6 +166,7 @@ class FrequencyRuntime:
         self._minute = None
         self._fired = set()
         self._pending_slots, self._last_schedule = set(), None
+        self._stale = {}  # Fenced, uncommitted batches by source class (see _drain).
         self._source_blocked = False
         self._last_tick = 0
         self._thread = None
@@ -271,7 +274,9 @@ class FrequencyRuntime:
 
     @staticmethod
     def _state_for(code):
-        if code == 'lease-busy': return 'reserve'
+        # No network for a moment is a wait, not a fault: the collector retries
+        # by itself, so every consumer (tray, window, fox, snapshot) sees 'reserve'.
+        if code in {'lease-busy', 'NO_CLASSES_IN_SHIFT', 'ACCESS_UNAVAILABLE'}: return 'reserve'
         if code in {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED'}: return 'login-required'
         if code in {'paused', 'CANCELLED'}: return 'paused'
         return 'error'
@@ -465,7 +470,7 @@ class FrequencyRuntime:
             self.source_ready()
         blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
-                    'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review', 'revision-conflict',
+                    'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review',
                     'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES'}
         if self._source_blocked or self._code in blockers:
             self._release_if_ineligible(status)
@@ -502,7 +507,10 @@ class FrequencyRuntime:
             shifts |= {k[1] for k in late}; keys |= late
             self._history.record('late-start', label=', '.join(sorted({k[2] for k in late})))
         if shifts:
-            if self._source_blocked or self._code in {'lease-fenced', 'revision-conflict', 'source-invalid',
+            # lease-fenced and revision-conflict are NOT blockers: a fenced batch
+            # waits for a confirmed re-read and the next status carries the new
+            # class revision, so the next slot heals them without anyone.
+            if self._source_blocked or self._code in {'source-invalid',
                    'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'SOURCE_CLASS_UNAVAILABLE',
                    'SOURCE_CLASS_AMBIGUOUS', 'identity-review'}: return
             if not self._operation.acquire(blocking=False):
@@ -540,7 +548,7 @@ class FrequencyRuntime:
         if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
         self._on_started()
         heartbeat_stop = threading.Event()
-        heartbeat = None
+        heartbeat, started = None, False
         try:
             with self._lock:
                 epoch = self._epoch
@@ -563,8 +571,13 @@ class FrequencyRuntime:
             pairs, unmatched = self._pair_classes(sources, status['classes'], shifts)
             if not pairs:
                 # Zero coverage cannot be a successful scheduled window and
-                # must not consume another computer's school leadership.
-                raise FrequencyError('NO_SELECTED_CLASSES' if not unmatched else 'SOURCE_CLASS_AMBIGUOUS')
+                # must not consume another computer's school leadership. It is
+                # not a blocker either: the next slot (other shift) still runs.
+                if unmatched:
+                    error = FrequencyError('CLASS_RECONCILIATION_REQUIRED')
+                    error.label = ', '.join(unmatched)
+                    raise error
+                raise FrequencyError('NO_CLASSES_IN_SHIFT')
             self._acquire(status)
             self._check(epoch)
             self._drain(epoch)
@@ -572,6 +585,7 @@ class FrequencyRuntime:
                 self._state, self._code = 'collecting', None
                 self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}
             self._history.record('collection-started', sent=len(pairs))
+            started = True
             def renew():
                 while not heartbeat_stop.wait(30):
                     with self._lock:
@@ -661,9 +675,16 @@ class FrequencyRuntime:
                 self._error(FrequencyError(closing), label=', '.join(unmatched) if unmatched else None)
             return self.public_status()
         except Exception as error:
-            self._error(error)
+            self._error(error, label=getattr(error, 'label', None))
+            code = getattr(error, 'code', None)
+            if started and code in QUIET_CODES:
+                # A run stopped by a pause, a school pause or another PC's lease
+                # still gets a closing fact (other codes are recorded as failures),
+                # so the history never shows it running forever.
+                self._history.record('collection-stopped', code=code)
             if getattr(error, 'code', None) in {
-                'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
+                'NO_SELECTED_CLASSES', 'NO_CLASSES_IN_SHIFT', 'CLASS_RECONCILIATION_REQUIRED',
+                'SOURCE_CLASS_UNAVAILABLE', 'SOURCE_CLASS_AMBIGUOUS',
                 'CENTER_CLASSES_REQUIRED', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED',
                 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES', 'source-invalid',
                 'identity-review', 'revision-conflict',
@@ -718,7 +739,7 @@ class FrequencyRuntime:
         # Reopening with an uncertain queue consults the original receipt
         # BEFORE acquiring a fresh concession or doing any source work.
         entries = self._storage.queue()
-        expired = self._storage.take_expired() if hasattr(self._storage, 'take_expired') else 0
+        expired = self._storage.take_expired()
         if expired: self._history.record('queue-expired', sent=expired)
         for entry in entries:
             self._check(epoch, lease=False)
@@ -774,7 +795,7 @@ class FrequencyRuntime:
         """Drop a stale batch only after a fresh read of the same class has a
         server receipt. Absence from this run (other shift, unselected,
         unmatched or filtered list) proves nothing, so those stay protected."""
-        stale = getattr(self, '_stale', None) or {}
+        stale = self._stale
         for payload in stale.pop(source_class_id, []):
             self._storage.acknowledge(payload['requestId'])
             self._history.record('superseded', label=payload.get('sourceClassLabel'))

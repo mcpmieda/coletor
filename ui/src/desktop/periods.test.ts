@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, parseTimesText, scheduleText, toShared, type PeriodDraft } from './periods';
+import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, nextSharedRun, parseTimesText, scheduleText, toShared, type PeriodDraft } from './periods';
 
 const draft = (patch: Partial<PeriodDraft> = {}): PeriodDraft => ({ ...DEFAULT_DRAFT, ...patch });
 
@@ -71,4 +71,25 @@ test('an agenda read as intervals keeps its own times for the fixed-times mode',
   expect(read.mode).toBe('interval');
   expect(read.times).toEqual(dayTimes(interval));
   expect(dayTimes({ ...read, mode: 'times' })).toEqual(['07:00', '07:30', '08:00']);
+});
+
+test('the next run follows the saved agenda per day, not its summary', () => {
+  // Monday to Friday 07:00 and 07:30; Saturday 08:00 only (made in the Ecossistema).
+  const rules = Array.from({ length: 14 }, (_, i) => {
+    const weekday = Math.floor(i / 2);
+    const times = weekday >= 1 && weekday <= 5 ? ['07:00', '07:30'] : weekday === 6 && i % 2 === 0 ? ['08:00'] : [];
+    return { weekday, shift: (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino', enabled: times.length > 0, times, recheck: null };
+  });
+  const schedule = { timezone: 'America/Bahia', rules };
+  // Saturday 2026-10-17 07:45 in Bahia (UTC-3) -> 08:00 the same day.
+  const saturday = new Date('2026-10-17T10:45:00Z');
+  expect(nextSharedRun(schedule, saturday)?.toISOString()).toBe('2026-10-17T11:00:00.000Z');
+  // Saturday 09:00 -> Monday 07:00 (Sunday has nothing).
+  expect(nextSharedRun(schedule, new Date('2026-10-17T12:00:00Z'))?.toISOString()).toBe('2026-10-19T10:00:00.000Z');
+});
+
+test('fixed times closer than 5 minutes are refused before reaching the Ecossistema', () => {
+  expect(draftProblem({ ...DEFAULT_DRAFT, mode: 'times', times: ['08:00', '08:03'] })).toMatch(/5 minutos/);
+  expect(draftProblem({ ...DEFAULT_DRAFT, mode: 'times', times: ['08:00', '08:05'] })).toBeNull();
+  expect(draftProblem({ ...DEFAULT_DRAFT, mode: 'times', times: ['08:00'], finalCheck: '08:02' })).toMatch(/5 minutos/);
 });
