@@ -8,13 +8,31 @@ A PR #7 passa a produzir dois formatos após os mesmos gates de segurança:
 O instalador utiliza Inno Setup **6.7.3** obtido do lançamento oficial, e
 o CI exige a assinatura Authenticode válida do fornecedor **Pyrsys B.V.**
 antes de executar o compilador. Verifique a licença correspondente para uso
-comercial. O instalador é assinado por `installer/sign-installer.ps1` quando
-os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
-existem (sem eles, sai sem assinatura e o CI avisa). Um certificado
-autoassinado (`installer/new-signing-certificate.ps1`) identifica a escola e
-prova integridade, mas não remove o SmartScreen; isso exige certificado de
-autoridade reconhecida. O programa roda no `pythonw.exe` oficial, assinado
-pela Python Software Foundation.
+comercial. O launcher **ColetorFrequencia.exe** e o instalador têm assinatura
+própria opcional, aplicada por `installer/sign-installer.ps1` com a configuração
+existente `WINDOWS_SIGNING_BUNDLE_BASE64` (ou o par legado
+`WINDOWS_SIGNING_PFX_BASE64`/`WINDOWS_SIGNING_PFX_PASSWORD`). O launcher é
+assinado antes do MANIFEST, dos hashes e do ZIP. Sem certificado, sua política
+é explicitamente **unsigned**; o manifesto registra `NotSigned`, sem editor
+signatário. Não se cria certificado nem se modifica a confiança do Windows.
+Certificados sem cadeia confiável são identificados como `signed-untrusted`;
+isso não garante aprovação pelo SmartScreen ou por políticas corporativas.
+
+O processo pai tem nome e ícone do Coletor; o filho **pythonw.exe** conserva
+nome, ícone e assinatura PSF próprios. A assinatura do filho **não assina o
+launcher**. O MANIFEST distingue produto, versão do arquivo, commit, assinatura
+e SHA-256 de cada um. `app/coletor/__init__.py` fornece a versão do produto;
+o build gera atributos do assembly e `dist/windows-portable/version.iss` para
+o Inno, preservando os nomes publicados pelo workflow.
+
+Antes de executar o compilador C#, o build consulta o diretório do Windows
+pela API do sistema, rejeita `WINDIR` divergente e exige componentes Microsoft
+com Authenticode válido em `Microsoft.NET/Framework64/v4.0.30319`. Registra
+caminho relativo ao Windows, hash, editor e versão de `csc.exe`, `mscorlib.dll`,
+`System.dll` e `System.Windows.Forms.dll`. As referências são explícitas;
+compilador ausente, assinatura inválida ou erro C# interrompem o build sem
+publicar um launcher parcial. Essa evidência de proveniência não significa que
+os bytes C# sejam reproduzíveis entre versões diferentes do Windows/.NET.
 
 ## Conteúdo e instalação
 
@@ -58,6 +76,28 @@ Depois, instala o executável em pasta descartável usando modo atual
 do usuário, verifica o commit do manifesto e todos os arquivos por SHA-256,
 executa `python -m coletor --help`, desinstala e prova que um arquivo
 sentinela externo não sofreu alterações.
+
+O gate `check_windows_launcher.py` executa o EXE, o CMD e atalhos `.lnk` reais
+do menu Iniciar e Inicializar em uma cópia descartável. Um módulo sintético,
+somente nessa cópia, confere argumentos (inclusive aspas/espaços), diretório,
+ausência de console no launcher/Python, códigos de saída, runtime ausente/inválido/acesso negado
+e popup apenas interativo. Outra fase abre a janela e a bandeja reais, com
+acesso institucional falso e preferências temporárias, nos mesmos quatro
+caminhos. Um job Windows contém e verifica o fim dos processos próprios.
+O pai e o Python devem encerrar; descendentes restantes do WebView2 são
+contidos/limpos pelo job, com eventual encerramento forçado registrado na evidência.
+O arquivo CMD usa o interpretador de comandos do Windows; quem desejar evitar
+essa janela transitória deve abrir o EXE ou os atalhos nativos.
+O instalador também verifica assinatura/versão do launcher instalado e o
+contrato real do atalho Startup. Isso não certifica execução sob uma política
+corporativa específica; se ela exigir assinatura confiável, deve-se usar o
+certificado apropriado sem contornar o bloqueio.
+
+Falhas do launcher registram somente horário UTC, categoria fixa e código em
+`%LOCALAPPDATA%\EcossistemaEscolar\ColetorFrequencia\launcher.log` (limitado
+a 64 KiB). Não incluem argumentos, caminhos privados, saída Python ou tokens.
+Na abertura interativa aparece uma orientação de reinstalação/suporte; em
+`--background` o erro mantém seu código de saída e é registrado sem popup.
 
 Um pacote só recebe o artefato `windows-installer-candidate` se
 **essas duas fases** forem aprovadas. CI sintético nunca prova pareamento

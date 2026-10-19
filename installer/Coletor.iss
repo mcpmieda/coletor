@@ -2,14 +2,13 @@
 ; Opening at Windows sign-in is an installer option (checked by default): a Startup
 ; shortcut that opens beside the clock. Distribution only after the native CI gates.
 #define AppName "Coletor de Frequência"
-#define AppVersion "0.4.0"
-#define BundleRoot "..\dist\windows-portable\ColetorFrequencia-0.4.0-teste-windows-x64"
+#include "..\dist\windows-portable\version.iss"
 
 [Setup]
 AppId={{D2471FE4-968A-4E83-AC4C-5A85CC8E651B}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Coletor de Frequência 0.4.0 (candidato)
+AppVerName=Coletor de Frequência {#AppVersion} (candidato)
 AppPublisher=Ecossistema Escolar
 UninstallDisplayName=Coletor de Frequência
 UninstallDisplayIcon={app}\programa\app\assets\fox-icons\fox-idle.ico
@@ -19,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 MinVersion=10.0
 OutputDir=..\dist\windows-installer
-OutputBaseFilename=ColetorFrequencia-0.4.0-windows-x64-setup-candidato
+OutputBaseFilename=ColetorFrequencia-{#AppVersion}-windows-x64-setup-candidato
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

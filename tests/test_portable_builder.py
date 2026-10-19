@@ -1,7 +1,11 @@
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile, ZipInfo
 
 PATH = Path(__file__).resolve().parents[1] / "scripts/build_windows_portable.py"
@@ -11,6 +15,82 @@ spec.loader.exec_module(builder)
 
 
 class PortableBuildTests(unittest.TestCase):
+    def test_version_is_derived_from_product_and_future_version_reaches_inno(self):
+        self.assertEqual(builder.VERSION, builder.product_version() + "-teste")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "app/coletor").mkdir(parents=True)
+            (root / "app/coletor/__init__.py").write_text('__version__ = "8.12.3"\n', encoding="utf-8")
+            self.assertEqual(builder.product_version(root), "8.12.3")
+            builder.write_installer_version(root, builder.product_version(root))
+            include = (root / "version.iss").read_text()
+            self.assertIn('#define AppVersion "8.12.3"', include)
+            self.assertIn("ColetorFrequencia-8.12.3-teste-windows-x64", include)
+            self.assertNotIn(builder.PRODUCT_VERSION, include)
+        inno = (builder.ROOT / "installer/Coletor.iss").read_text(encoding="utf-8")
+        self.assertIn('version.iss"', inno)
+        self.assertNotIn('#define AppVersion "', inno)
+
+    def test_compiler_requires_canonical_signed_microsoft_components(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            folder = root / "Microsoft.NET/Framework64/v4.0.30319"
+            folder.mkdir(parents=True)
+            for name in ("csc.exe", "mscorlib.dll", "System.dll", "System.Windows.Forms.dll"):
+                (folder / name).touch()
+            valid = {"signature_status": "Valid", "signer": "CN=Microsoft Windows, O=Microsoft Corporation, C=US",
+                     "company": "Microsoft Corporation", "file_version": "4.8.1", "original_filename": "csc.exe"}
+            with patch.object(builder, "windows_directory", return_value=root), patch.object(builder, "inspect_binary", return_value=valid):
+                compiler, evidence = builder.trusted_compiler()
+                self.assertEqual(compiler, folder / "csc.exe")
+                self.assertEqual(len(evidence), 4)
+                self.assertTrue(all("Microsoft.NET/Framework64" in record["path"] for record in evidence))
+            for key, value in (("signature_status", "HashMismatch"), ("signer", "CN=Different Company"), ("company", "Untrusted"), ("original_filename", "alternate.exe")):
+                with self.subTest(key=key), patch.object(builder, "windows_directory", return_value=root), patch.object(builder, "inspect_binary", return_value={**valid, key: value}):
+                    with self.assertRaisesRegex(RuntimeError, "compiler"):
+                        builder.trusted_compiler()
+            (folder / "csc.exe").unlink()
+            with patch.object(builder, "windows_directory", return_value=root), self.assertRaisesRegex(RuntimeError, "missing"):
+                builder.trusted_compiler()
+
+    def test_compiler_failure_shows_cs_code_and_removes_partial_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / builder.LAUNCHER
+            target.write_bytes(b"partial")
+            failure = subprocess.CompletedProcess([], 1, str(root) + "/Source.cs(1,1): error CS1002: ; expected", "")
+            with patch.object(builder, "trusted_compiler", return_value=(root / "csc.exe", [])), patch.object(builder.subprocess, "run", return_value=failure):
+                with self.assertRaisesRegex(RuntimeError, "CS1002") as caught:
+                    builder.build_launcher(root)
+                self.assertNotIn(str(root), str(caught.exception))
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(sys.platform == "win32", "real Windows compiler required")
+    def test_native_compiler_future_version_and_useful_invalid_input_errors(self):
+        with tempfile.TemporaryDirectory(prefix="coletor-compiler-test-") as temporary:
+            root = Path(temporary)
+            with patch.dict(os.environ, {key: "" for key in ("WINDOWS_SIGNING_BUNDLE_BASE64", "WINDOWS_SIGNING_PFX_BASE64", "WINDOWS_SIGNING_PFX_PASSWORD")}):
+                metadata = builder.build_launcher(root, version="8.12.3")
+                self.assertEqual(metadata["file_version"], "8.12.3.0")
+                self.assertEqual(metadata["product_version"], "8.12.3")
+                self.assertEqual(metadata["description"], "Coletor de Frequência")
+                self.assertEqual(metadata["trust"], "unsigned")
+                bad_source = root / "invalid.cs"
+                bad_source.write_text("this is not C#", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "CS[0-9]+"):
+                    builder.build_launcher(root, source=bad_source)
+                self.assertFalse((root / builder.LAUNCHER).exists())
+                bad_icon = root / "invalid.ico"
+                bad_icon.write_text("not an icon", encoding="ascii")
+                with self.assertRaisesRegex(RuntimeError, "CS[0-9]+"):
+                    builder.build_launcher(root, icon=bad_icon)
+                self.assertFalse((root / builder.LAUNCHER).exists())
+                (root / builder.LAUNCHER).mkdir()
+                with self.assertRaisesRegex(RuntimeError, "CS[0-9]+"):
+                    builder.build_launcher(root)
+            with patch.dict(os.environ, {"WINDIR": str(root)}), self.assertRaisesRegex(RuntimeError, "WINDIR differs"):
+                builder.windows_directory()
+
     def test_manual_distribution_gate_rejects_missing_consent_isolation_and_cleanup(self):
         native = {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
                   "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened",

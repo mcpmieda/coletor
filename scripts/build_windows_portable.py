@@ -4,6 +4,8 @@ Runs only on Windows x64. No installer, registry write, credentials or productio
 access. The native smoke must pass separately before package_zip is called.
 """
 import argparse
+import base64
+import ctypes
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
@@ -15,11 +17,21 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.0-teste"
+def product_version(root=ROOT):
+    text = (root / "app/coletor/__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__ = "(\d+\.\d+\.\d+)"$', text, re.M)
+    if not match or any(int(part) > 65535 for part in match[1].split(".")):
+        raise ValueError("Product version must be a three-part Windows-compatible version")
+    return match[1]
+
+
+PRODUCT_VERSION = product_version()
+VERSION = PRODUCT_VERSION + "-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -72,15 +84,132 @@ def ui_license_notices(destination):
 LAUNCHER = "ColetorFrequencia.exe"
 
 
-def build_launcher(runtime):
-    """Name and fox icon for Windows (Task Manager, right-click menu): a small
-    .NET Framework launcher, compiled by the csc.exe that ships with Windows,
-    that starts the untouched, PSF-signed pythonw.exe beside it."""
-    csc = Path(os.environ.get("WINDIR", "C:/Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
-    subprocess.run([str(csc), "-nologo", "-target:winexe", "-optimize", "-utf8output",
-                    "-win32icon:" + str(ROOT / "app/assets/fox-icons/fox-idle.ico"),
-                    "-out:" + str(runtime / LAUNCHER), str(ROOT / "installer/launcher/ColetorFrequencia.cs")],
-                   check=True, stdout=subprocess.DEVNULL)
+def windows_directory():
+    if sys.platform != "win32":
+        raise RuntimeError("Windows compiler inspection requires Windows")
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.windll.kernel32.GetWindowsDirectoryW(buffer, len(buffer))
+    if not 0 < size < len(buffer):
+        raise RuntimeError("Cannot resolve canonical Windows directory")
+    windows = Path(buffer.value).resolve(strict=True)
+    if os.environ.get("WINDIR") and Path(os.environ["WINDIR"]).resolve() != windows:
+        raise RuntimeError("WINDIR differs from the operating system directory")
+    return windows
+
+
+def powershell(script, *, env=None):
+    directory = windows_directory() / "System32/WindowsPowerShell/v1.0"
+    executable = directory / "powershell.exe"
+    # Do not inherit PowerShell 7 modules or a user-controlled module search path.
+    env = dict(os.environ if env is None else env, PSModulePath=str(directory / "Modules"))
+    script = "$ProgressPreference = 'SilentlyContinue';\n" + script
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return subprocess.run([str(executable), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                          env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=90)
+
+
+def inspect_binary(path):
+    """Read signature/PE metadata through the OS, without executing the binary."""
+    env = dict(os.environ, COLLECTOR_INSPECT_BINARY=str(path))
+    result = powershell(r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$path = $env:COLLECTOR_INSPECT_BINARY
+$item = Get-Item -LiteralPath $path
+$sig = Get-AuthenticodeSignature -LiteralPath $path
+$version = $item.VersionInfo
+[ordered]@{
+    file_version = $version.FileVersion; product_version = $version.ProductVersion
+    company = $version.CompanyName; original_filename = $version.OriginalFilename
+    description = $version.FileDescription; signature_status = [string]$sig.Status
+    signer = $(if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { $null })
+    signer_thumbprint = $(if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { $null })
+    timestamped = ($null -ne $sig.TimeStamperCertificate)
+} | ConvertTo-Json -Compress
+''', env=env)
+    if result.returncode:
+        raise RuntimeError("Windows binary signature/metadata inspection failed: " + path.name)
+    metadata = json.loads(result.stdout.lstrip("\ufeff"))
+    metadata["sha256"] = sha256(path)
+    return metadata
+
+
+def trusted_compiler():
+    """Accept only the canonical, Microsoft-signed Windows .NET compiler."""
+    windows = windows_directory()
+    folder = windows / "Microsoft.NET/Framework64/v4.0.30319"
+    evidence = []
+    # Explicit /nostdlib references below prevent compiler probing other SDKs.
+    for name in ("csc.exe", "mscorlib.dll", "System.dll", "System.Windows.Forms.dll"):
+        path = folder / name
+        if not path.is_file() or path.resolve() != path:
+            raise RuntimeError("Required system compiler component missing or redirected: " + name)
+        meta = inspect_binary(path)
+        if (meta.get("signature_status") != "Valid" or "O=Microsoft Corporation" not in (meta.get("signer") or "")
+                or meta.get("company") != "Microsoft Corporation" or not meta.get("file_version")):
+            raise RuntimeError("Microsoft compiler component validation failed: " + name)
+        if name == "csc.exe" and (meta.get("original_filename") or "").lower() != "csc.exe":
+            raise RuntimeError("Unexpected compiler identity")
+        evidence.append({"path": path.relative_to(windows).as_posix(), **meta})
+    return folder / "csc.exe", evidence
+
+
+def compiler_diagnostic(value, *private_paths):
+    for path in sorted((str(p) for p in (*private_paths, Path.home(), ROOT)), key=len, reverse=True):
+        value = re.sub(re.escape(path), "<build>", value, flags=re.I)
+    return value[-16000:]
+
+
+def write_installer_version(output, version=PRODUCT_VERSION):
+    # The Inno preprocessor consumes this build output, not a second version literal.
+    name = f"ColetorFrequencia-{version}-teste-windows-x64"
+    (output / "version.iss").write_text(f'#define AppVersion "{version}"\n'
+        f'#define BundleRoot "..\\dist\\windows-portable\\{name}"\n', encoding="ascii")
+
+
+def build_launcher(runtime, *, version=PRODUCT_VERSION, source=None, icon=None):
+    """Compile and optionally sign the parent EXE before its inventory/hashes."""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or any(int(p) > 65535 for p in version.split(".")):
+        raise ValueError("Invalid launcher product version")
+    csc, compiler = trusted_compiler()
+    source = source or ROOT / "installer/launcher/ColetorFrequencia.cs"
+    icon = icon or ROOT / "app/assets/fox-icons/fox-idle.ico"
+    target = runtime / LAUNCHER
+    try:
+        with tempfile.TemporaryDirectory(prefix="coletor-assembly-") as temporary:
+            attributes = Path(temporary) / "Version.cs"
+            attributes.write_text('using System.Reflection;\n'
+                f'[assembly: AssemblyVersion("{version}.0")]\n'
+                f'[assembly: AssemblyFileVersion("{version}.0")]\n'
+                f'[assembly: AssemblyInformationalVersion("{version}")]\n', encoding="utf-8")
+            command = [str(csc), "-nologo", "-target:winexe", "-platform:x64", "-optimize", "-utf8output", "-codepage:65001", "-noconfig", "-nostdlib+",
+                       *["-reference:" + str(csc.parent / name) for name in ("mscorlib.dll", "System.dll", "System.Windows.Forms.dll")],
+                       "-win32icon:" + str(icon), "-out:" + str(target), str(attributes), str(source)]
+            result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+            if result.returncode:
+                raise RuntimeError(f"Launcher compiler exited {result.returncode}: " +
+                                   compiler_diagnostic(result.stdout + result.stderr, runtime, temporary, source.parent))
+        # Existing project signing configuration is optional; never create a key.
+        signing = powershell("& $env:COLLECTOR_SIGN_SCRIPT -Path $env:COLLECTOR_SIGN_TARGET; exit $LASTEXITCODE",
+                             env=dict(os.environ, COLLECTOR_SIGN_SCRIPT=str(ROOT / "installer/sign-installer.ps1"),
+                                      COLLECTOR_SIGN_TARGET=str(target)))
+        if signing.returncode:
+            raise RuntimeError("Configured launcher code signing failed")
+        metadata = inspect_binary(target)
+        if metadata.get("signature_status") == "NotSigned":
+            metadata["trust"] = "unsigned"
+        elif metadata.get("signature_status") in {"Valid", "UnknownError", "NotTrusted"} and metadata.get("signer"):
+            metadata["trust"] = "signed-valid" if metadata["signature_status"] == "Valid" else "signed-untrusted"
+        else:
+            raise RuntimeError("Launcher signature failed verification")
+        if metadata.get("file_version") != version + ".0" or metadata.get("product_version") != version:
+            raise RuntimeError("Launcher version differs from product version")
+        return {"file": "programa/" + LAUNCHER, "version_source": "app/coletor/__init__.py", "compiler": compiler,
+                "child_identity": "pythonw.exe; original Python identity and PSF signature, not inherited", **metadata}
+    except BaseException:
+        if target.is_file():
+            target.unlink(missing_ok=True)
+        raise
 
 
 def build(output, source_commit):
@@ -102,7 +231,7 @@ def build(output, source_commit):
     if sha256(archive) != PYTHON_SHA256:
         raise ValueError("Official Python archive SHA-256 does not match")
     safe_extract(archive, runtime)
-    # Preserve signed official executable bytes. No renamed/custom executable.
+    # Preserve signed official Python bytes. The separate parent has its own trust.
     (runtime / "python313._pth").write_text("python313.zip\n.\nLib\\site-packages\napp\nimport site\n", encoding="ascii")
     site = runtime / "Lib/site-packages"
     subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
@@ -116,7 +245,7 @@ def build(output, source_commit):
     shutil.copyfile(ROOT / "app/coletor/preview-limits.json", app / "preview-limits.json")
     shutil.copytree(ROOT / "app/assets", runtime / "app/assets")
     shutil.copytree(ROOT / "ui/dist", runtime / "ui/dist")
-    build_launcher(runtime)
+    launcher = build_launcher(runtime)
     shutil.copyfile(ROOT / "docs/PORTABLE_LEIA_ME.txt", bundle / "LEIA-ME.txt")
     (bundle / "Abrir Coletor.cmd").write_bytes(
         b'@echo off\r\nsetlocal\r\nstart "Coletor de Frequencia" "%~dp0programa\\ColetorFrequencia.exe"\r\n')
@@ -133,7 +262,7 @@ def build(output, source_commit):
                                  check=True, capture_output=True, text=True).stdout.strip()
     if driver_node != "v24.21.0":
         raise ValueError("Unexpected browser driver Node runtime")
-    manifest = {"application": "Coletor de Frequência", "version": VERSION,
+    manifest = {"application": "Coletor de Frequência", "version": VERSION, "product_version": PRODUCT_VERSION, "launcher": launcher,
         "kind": "portable-test-not-installer", "source_commit": source_commit,
         "built_at": datetime.now(timezone.utc).isoformat(), "platform": "windows-x64",
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,
@@ -148,6 +277,7 @@ def build(output, source_commit):
         if p.is_file():
             manifest["files"].append({"path": p.relative_to(bundle).as_posix(), "size": p.stat().st_size, "sha256": sha256(p)})
     (bundle / "MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_installer_version(output)
     print(json.dumps({"bundle": str(bundle), "files": len(manifest["files"])}))
 
 

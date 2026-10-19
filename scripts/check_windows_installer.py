@@ -57,6 +57,17 @@ def run(installer, expected_sha, output):
                 if not path.is_file() or path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
                     raise RuntimeError("installer-file-hash-mismatch")
             report["checks"]["source_commit_and_full_inventory"] = True
+            from check_windows_launcher import builder
+            launcher = installed / "programa/ColetorFrequencia.exe"
+            metadata = builder.inspect_binary(launcher)
+            for key in ("sha256", "file_version", "product_version", "signature_status", "signer_thumbprint"):
+                if metadata.get(key) != manifest.get("launcher", {}).get(key):
+                    raise RuntimeError("installed-launcher-signature-or-version-mismatch")
+            if metadata["product_version"] != manifest.get("product_version"):
+                raise RuntimeError("installed-product-version-mismatch")
+            report["launcher_signature_status"] = metadata["signature_status"]
+            report["launcher_trust"] = manifest["launcher"]["trust"]
+            report["checks"]["installed_launcher_identity_and_signature"] = True
             python = installed / "programa" / "python.exe"
             if not (installed / "programa" / "pythonw.exe").is_file() or not uninstaller.is_file():
                 raise RuntimeError("native-launcher-or-uninstaller-missing")
@@ -68,6 +79,20 @@ def run(installer, expected_sha, output):
             startup = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup/Coletor de Frequência.lnk"
             if not startup.is_file():
                 raise RuntimeError("startup-shortcut-missing")
+            shortcut = builder.powershell(r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$shell = New-Object -ComObject WScript.Shell
+$link = $shell.CreateShortcut($env:COLLECTOR_INSTALLER_SHORTCUT)
+@{ target = $link.TargetPath; arguments = $link.Arguments; working_directory = $link.WorkingDirectory } | ConvertTo-Json -Compress
+''', env=dict(os.environ, COLLECTOR_INSTALLER_SHORTCUT=str(startup)))
+            if shortcut.returncode:
+                raise RuntimeError("installed-startup-shortcut-unreadable")
+            link = json.loads(shortcut.stdout.lstrip("\ufeff"))
+            if (Path(link["target"]).resolve() != launcher.resolve() or link["arguments"] != "--background"
+                    or Path(link["working_directory"]).resolve() != launcher.parent.resolve()):
+                raise RuntimeError("installed-startup-shortcut-contract-mismatch")
+            report["checks"]["startup_targets_native_launcher_in_background"] = True
             report["checks"]["opens_at_windows_sign_in_by_default"] = True
             uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                                        capture_output=True, timeout=150)
