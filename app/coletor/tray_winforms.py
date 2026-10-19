@@ -3,6 +3,7 @@
 Reuses the existing fox icons and animation controller. Idle/error have no timer.
 Only an actual local read may animate, at 600 ms or slower. Imports are lazy.
 """
+import threading
 from .tray_animation import AnimationController, AnimationPolicy, TrayState, resolve_icon_paths
 TEXT = {"idle": "Aguardando arquivo", "reading": "Lendo arquivo local", "error": "Arquivo precisa de atenção"}
 COLLECTOR_TEXT = {"ready": "Coleta ativa", "reserve": "Reserva", "collecting": "Coletando",
@@ -31,6 +32,9 @@ class WindowsFormsTray:
         self._icons = {}
         self._notify = self._menu = self._timer = self._poll = None
         self.status_provider = None
+        # Set by the desktop bridge: actions run off the UI thread.
+        self.collect_action = self.pause_action = None
+        self.theme_provider = None
         self._current_activity = "idle"
         self._disposed = False
         self._last_icon = self._window_icon = None
@@ -63,16 +67,27 @@ class WindowsFormsTray:
                 self._icons[key] = by_path[path]
             # A neutral icon keeps window controls available when the fox is hidden.
             self._neutral = Drawing.SystemIcons.Application.Clone()
+            # Drawn like the Atualizador's menu, in the fox's colours.
+            from .tray_menu import FoxMenu
             self._menu = ContextMenuStrip()
+            self._fox_menu = FoxMenu(self._menu)
             self._status_item = ToolStripMenuItem(); self._status_item.Enabled = False
-            self._open_item = ToolStripMenuItem("Mostrar janela")
-            self._hide_item = ToolStripMenuItem("Ocultar janela")
-            self._quit_item = ToolStripMenuItem("Sair")
+            self._open_item = ToolStripMenuItem("Abrir painel")
+            self._hide_item = ToolStripMenuItem("Ocultar painel")
+            self._collect_item = ToolStripMenuItem("Coletar agora")
+            self._pause_item = ToolStripMenuItem("Pausar a coleta")
+            self._quit_item = ToolStripMenuItem("Sair do Coletor")
             self._open_item.Click += self._open
             self._hide_item.Click += self._hide
+            self._collect_item.Click += self._collect
+            self._pause_item.Click += self._toggle_pause
             self._quit_item.Click += self._quit
-            for item in (self._status_item, ToolStripSeparator(), self._open_item, self._hide_item, ToolStripSeparator(), self._quit_item):
-                self._menu.Items.Add(item)
+            for item, kind, icon in ((self._status_item, "header", ""), (ToolStripSeparator(), "separator", ""),
+                                     (self._open_item, "item", "open"), (self._hide_item, "item", "hide"),
+                                     (self._collect_item, "item", "sync"), (self._pause_item, "item", "pause"),
+                                     (ToolStripSeparator(), "separator", ""), (self._quit_item, "danger", "power")):
+                self._fox_menu.add(item, kind, icon)
+            self._menu.Opening += self._menu_opening
             self._notify = NotifyIcon()
             from System.Reflection import BindingFlags
             # Visible is only a requested state. On the targeted .NET Framework
@@ -128,6 +143,26 @@ class WindowsFormsTray:
         if activity == "idle" and state in {"error", "login-required"}: return "error"
         return activity
 
+    def _menu_opening(self, *_):
+        if self.theme_provider: self._fox_menu.set_theme(self.theme_provider())
+        status = self._collector_status() or {}
+        active, paused = bool(status.get("active")), bool(status.get("localPaused"))
+        text = COLLECTOR_TEXT.get(status.get("state"), "Coleta desligada") if active else "Coleta desligada"
+        if active and paused: text = "Pausada neste computador"
+        trouble = (not active) or status.get("state") in {"error", "login-required"}
+        self._status_item.Text = "Coletor de Frequência\n" +("!" if trouble else "") + text
+        self._collect_item.Enabled = active and not paused and status.get("state") != "collecting" and self.collect_action is not None
+        self._pause_item.Text = "Retomar a coleta" if paused else "Pausar a coleta"
+        self._pause_item.Enabled = active and self.pause_action is not None
+        self._fox_menu.set_icon(self._pause_item, "play" if paused else "pause")
+
+    def _collect(self, *_):
+        if self.collect_action: threading.Thread(target=self.collect_action, daemon=True, name="tray-collect").start()
+
+    def _toggle_pause(self, *_):
+        paused = bool((self._collector_status() or {}).get("localPaused"))
+        if self.pause_action: threading.Thread(target=self.pause_action, args=(not paused,), daemon=True, name="tray-pause").start()
+
     def _collector_status(self):
         try:
             return self.status_provider() if self.status_provider else None
@@ -138,7 +173,7 @@ class WindowsFormsTray:
         text = tray_text(self._collector_status(), self._current_activity)
         if self._notify.Text != text:
             self._notify.Text = text
-            self._status_item.Text = text
+            pass  # The header reads the live status when the menu opens.
 
     def _poll_tick(self, *_):
         if self._disposed or self._notify is None: return
@@ -252,6 +287,9 @@ class WindowsFormsTray:
             self._open_item.Click -= self._open
             self._hide_item.Click -= self._hide
             self._quit_item.Click -= self._quit
+            self._collect_item.Click -= self._collect
+            self._pause_item.Click -= self._toggle_pause
+            self._menu.Opening -= self._menu_opening
         if self._notify is not None and self._timer is not None: resources.append(detach_events)
         if self._timer: resources += [self._timer.Stop, self._timer.Dispose]
         if self._poll: resources += [self._poll.Stop, self._poll.Dispose]

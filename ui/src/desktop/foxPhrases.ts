@@ -13,7 +13,7 @@ const POOLS: Record<FoxMood, (string | (() => string))[]> = {
     'Só mando faltas e faltas justificadas. Nada além disso.',
     'Minhas orelhas ficam em pé quando chega a hora da coleta.',
     'Psiu… clique em mim.',
-    'Dica: em Ajustes dá para ver o navegador trabalhando.',
+    'Dica: em Ajustes, ligue “Mostrar o navegador” para ver a coleta acontecendo.',
     'Frequência em dia, raposa tranquila.',
     'Tô aqui, só observando.',
   ],

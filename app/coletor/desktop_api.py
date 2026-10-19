@@ -94,8 +94,15 @@ class DesktopApi(PreviewApi):
         """Python-only: the tray shows the collector state and pending balloons."""
         self._tray = tray
         tray.status_provider = self._collector.public_status
+        tray.collect_action = self.collect_now
+        tray.pause_action = self.pause_collector
+        tray.theme_provider = self._tray_theme
         message, self._pending_alert = self._pending_alert, None
         if message: tray.notify(*message)
+
+    def _tray_theme(self):
+        try: return self._settings.read().get("theme", "system")
+        except (OSError, ValueError, TypeError): return "system"
 
     def _resume_collection(self, attempts=30, interval=60):
         """Python-only. Reopening the program (or Windows) keeps collecting when the
