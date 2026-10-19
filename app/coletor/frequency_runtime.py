@@ -709,9 +709,14 @@ class FrequencyRuntime:
             if receipt is not None:
                 self._storage.acknowledge(payload['requestId'])
                 continue
-            # A takeover or changed CAS requires a fresh capture and visible
-            # operator action. Never silently rewrite queued signed payloads.
-            if payload.get('fencingToken') != self._lease['fencingToken']: raise FrequencyError('lease-fenced')
+            # A batch from an older concession that the server confirms it never
+            # committed (no receipt) is superseded, not lost: Smecel is the
+            # source and this run re-reads the class. It is dropped, never
+            # rewritten or re-signed, so nobody has to discard it by hand.
+            if payload.get('fencingToken') != self._lease['fencingToken']:
+                self._storage.acknowledge(payload['requestId'])
+                self._history.record('superseded', label=payload.get('sourceClassLabel'))
+                continue
             self._send(payload, epoch)
 
     def save_settings(self, expected_revision, schedule):

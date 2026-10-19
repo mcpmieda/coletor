@@ -536,14 +536,19 @@ class RuntimeTests(unittest.TestCase):
         self.runtime._heartbeat(self.runtime._epoch)
         self.assertLessEqual(self.runtime._lease['deadline'], old_deadline)
 
-    def test_old_pending_fence_queries_receipt_then_requires_recapture(self):
+    def test_old_uncommitted_fence_is_superseded_by_a_fresh_read_without_anyone(self):
         payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
                                      {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 500, DEVICE)
         self.storage.enqueue(payload)
         result = self.runtime.collect()
-        self.assertEqual(result['code'], 'lease-fenced')
-        self.assertEqual(self.source.reads, 0)
-        self.assertEqual(self.storage.queue()[0]['payload'], payload)
+        self.assertEqual(result['state'], 'ready')
+        self.assertIsNone(result['code'])
+        # The server was asked for a receipt first; nothing re-signed or resent.
+        self.assertTrue(any(p['operation'] == 'receipt' and p['requestId'] == payload['requestId'] for p in self.provider.requests))
+        self.assertFalse(any(p['operation'] == 'collect' and p['requestId'] == payload['requestId'] for p in self.provider.requests))
+        self.assertEqual(self.source.reads, 1)  # The class was read again from Smecel.
+        self.assertEqual(self.storage.queue(), [])
+        self.assertTrue(any(e['kind'] == 'superseded' for e in self.runtime.recent_history(20)))
 
     def test_settings_conflict_preserves_shared_schedule(self):
         before = copy.deepcopy(self.provider.shared_schedule)
