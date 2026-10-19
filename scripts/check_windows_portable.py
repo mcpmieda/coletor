@@ -102,9 +102,9 @@ LABELS = ["Coleta da frequência", "Prévia da turma",
 REQUIRED_CHECKS = ["bundled_interpreter", "bundled_application", "bundled_pywebview",
                    "institutional_entry_visible", "native_denial_before_work", "fixture_authorized_only_python",
                    "native_window_visible", "native_window_centered", "edgechromium_control", "loopback_ui",
-                   "dom_and_bridge_ready", "real_demo_button_clicked", "bridge_demo_verified",
-                   "demo_rendered", "three_synthetic_options", "student_filter_works",
-                   "clear_preview_works", "repeat_demo_works", "window_closed"]
+                   "dom_and_bridge_ready", "no_demo_in_native_window", "four_pages_navigated",
+                   "bridge_status_verified", "window_closed"]
+PAGES = ["Tarefas", "Histórico", "Registros", "Ajustes"]
 
 
 class SmokeFailure(RuntimeError):
@@ -375,7 +375,7 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
     checks = evidence["checks"]
     try:
         evidence["stage"] = "dom_and_bridge"
-        wait_js(window, "document.readyState === 'complete' && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled) && typeof window.pywebview?.api?.load_demo === 'function'")
+        wait_js(window, "document.readyState === 'complete' && !!document.querySelector('nav[aria-label=\"Navegação principal\"]') && typeof window.pywebview?.api?.get_collector_status === 'function'")
         checks["dom_and_bridge_ready"] = True
         info, handle = native_info(window)
         checks["native_window_visible"] = info["visible"]
@@ -390,46 +390,29 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
         checks["loopback_ui"] = location.scheme == "http" and location.hostname in ("127.0.0.1", "localhost", "::1")
         if not checks["loopback_ui"]:
             fail("trusted_local_ui_required")
-        if not window.evaluate_js(INSTALL_OBSERVER_JS):
-            fail("bridge_observer_failed")
-        evidence["stage"] = "demo_button"
-        click_button(window, "Usar dados de exemplo")
-        checks["real_demo_button_clicked"] = True
-        wait_js(window, rendered_js(1))
-        checks["bridge_demo_verified"] = checks["demo_rendered"] = True
-        evidence["synthetic_student_count"] = 3
-        evidence["labels_verified"] = list(LABELS)
-
-        evidence["stage"] = "student_filter"
-        if not window.evaluate_js("""(() => {
-          const button = document.querySelector('.filters button');
-          if (!button) return false;
-          button.click(); return true;
-        })()"""):
-            fail("student_filter_unavailable")
-        wait_js(window, """(() => {
-          const names = [...document.querySelectorAll('[role=option]')].map(node => node.textContent.trim());
-          return %s.every(name => names.includes(name));
-        })()""" % json.dumps(EXPECTED_NAMES))
-        checks["three_synthetic_options"] = True
-        if not window.evaluate_js("""(() => {
-          const option = [...document.querySelectorAll('[role=option]')].find(node => node.textContent.trim() === 'Aluno sintético 002');
-          if (!option) return false;
-          option.click(); return true;
-        })()"""):
-            fail("student_option_unavailable")
-        wait_js(window, "document.querySelectorAll('tbody tr').length === 24 && [...document.querySelectorAll('tbody tr')].every(row => row.textContent.includes('Aluno sintético 002'))")
-        checks["student_filter_works"] = True
-
-        evidence["stage"] = "clear_and_repeat"
-        click_button(window, "Fechar diário")
-        wait_js(window, "!document.querySelector('.preview-panel') && !document.querySelector('.summary-grid') && [...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo'&&!n.disabled)")
-        checks["clear_preview_works"] = True
-        click_button(window, "Usar dados de exemplo")
-        wait_js(window, rendered_js(2))
-        checks["repeat_demo_works"] = True
-        evidence["bridge_demo_calls"] = 2
-        evidence["http_api_calls"] = 0
+        # The demo diary is a browser-preview feature; the native window opens the panel.
+        checks["no_demo_in_native_window"] = not window.evaluate_js("[...document.querySelectorAll('button')].some(n=>n.textContent.trim()==='Usar dados de exemplo')")
+        if not checks["no_demo_in_native_window"]:
+            fail("demo_visible_in_native_window")
+        evidence["stage"] = "navigate_pages"
+        for label in PAGES[1:] + PAGES[:1]:
+            if not window.evaluate_js("""(() => {
+              const nav = document.querySelector('nav[aria-label="Navegação principal"]');
+              const button = [...(nav?.querySelectorAll('button') || [])].find(node => node.textContent.trim().startsWith(%s));
+              if (!button) return false;
+              button.click(); return true;
+            })()""" % json.dumps(label)):
+                fail("navigation_button_unavailable")
+            wait_js(window, "[...document.querySelectorAll('h1')].some(n => n.textContent.trim() === %s)" % json.dumps(label))
+        checks["four_pages_navigated"] = True
+        evidence["pages_verified"] = PAGES
+        evidence["stage"] = "bridge_status"
+        window.evaluate_js("window.__statusProbe=null;window.pywebview.api.get_collector_status().then(r=>window.__statusProbe=r);true")
+        wait_js(window, "!!window.__statusProbe")
+        probe = window.evaluate_js("window.__statusProbe")
+        checks["bridge_status_verified"] = isinstance(probe, dict) and "state" in probe and "error" not in probe
+        if not checks["bridge_status_verified"]:
+            fail("bridge_status_unavailable")
         evidence["stage"] = "screenshot"
         try:
             evidence["screenshot"] = capture_window(handle, screenshot)
