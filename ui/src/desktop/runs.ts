@@ -98,6 +98,11 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
       ].filter(Boolean).join(' · ');
       return { id, at: e.at, level: e.unresolved || e.conflicts ? 'warn' : 'info', message: `${e.label ?? 'Turma'} enviada · ${e.sent ?? 0} aluno(s)`, detail: extra || undefined };
     }
+    if (e.kind === 'unknown-mark') {
+      // Logged once per mark (owner request 20/10/2026): the mark itself and where it first appeared.
+      return { id, at: e.at, level: 'warn', message: `Marcação desconhecida no Smecel: ${e.code ?? '?'}`,
+        detail: [e.label ? `Vista primeiro em ${e.label}` : '', 'Essa posição não entra nas contas até o coletor ser atualizado'].filter(Boolean).join(' · ') };
+    }
     if (e.kind === 'failure') {
       const level: Level = QUIET.has(e.code ?? '') ? 'info' : TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
       const cause = e.code ? FAILURE_CAUSE[e.code] : undefined;

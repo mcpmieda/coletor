@@ -60,3 +60,11 @@ test('one 24 h failure count for the badge and the tile, including failures outs
   ];
   expect(failures24h(entries, 2_000_000)).toBe(1);
 });
+
+test('an unknown Smecel mark is one warning that names it and is not a failure', () => {
+  const entries: HistoryEntry[] = [{ at: 200, kind: 'unknown-mark', code: 'X [ls-color-info]', label: '6A 2026 - MATUTINO' }];
+  const [event] = logEvents(entries);
+  expect(event).toMatchObject({ level: 'warn', message: 'Marcação desconhecida no Smecel: X [ls-color-info]' });
+  expect(event!.detail).toContain('Vista primeiro em 6A 2026 - MATUTINO');
+  expect(failures24h(entries, 201_000)).toBe(0);
+});
