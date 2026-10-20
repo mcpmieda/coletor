@@ -73,14 +73,14 @@ class AnimationTests(unittest.TestCase):
         # Only head frames exist at icon size; every frame has a real asset.
         self.assertTrue(set(frames) <= {"fox-idle", "fox-blink", "fox-ear", "fox-ear-right",
                                         "fox-ears", "fox-bob"})
-        # Lively, not frantic: about half the beats rest on the neutral face.
-        self.assertGreaterEqual(frames.count("fox-idle") / len(frames), 0.4)
-        # The owner wants frequent gestures: at most 1.2 seconds of rest,
+        # Lively, not frantic: more than half the beats rest on the neutral face.
+        self.assertGreaterEqual(frames.count("fox-idle") / len(frames), 0.5)
+        # Frequent but calm gestures: at most 1.8 seconds of rest,
         # including the loop boundary, without speeding up individual frames.
         rest = 0
         for frame in frames + frames:
             rest = rest + 1 if frame == "fox-idle" else 0
-            self.assertLessEqual(rest, 2)
+            self.assertLessEqual(rest, 3)
         self.assertEqual(frames.index("fox-blink"), 2)
         self.assertEqual(self.controller.snapshot().frame_key, "fox-idle")
 
