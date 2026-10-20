@@ -139,7 +139,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([m['mark'] for m in payload['marks']], ['X', 'J'])
         self.assertEqual(payload['marks'][0]['slot'], 6)
         self.assertFalse(payload['rosterComplete'])
-        self.assertTrue(all(not c['complete'] for c in payload['coverage']))
+        # Lesson days (owner decision 20/10/2026): every lesson position up to the capture, the point
+        # of 25/02 included, each day complete; the future 25/12 is never sent.
+        self.assertEqual([(c['date'], c['slots'], c['complete']) for c in payload['coverage']],
+                         [('2026-02-23', [6], True), ('2026-02-24', [1], True), ('2026-02-25', [1], True)])
         self.assertNotIn('studentUid', json.dumps(payload))
         self.assertEqual(self.storage.queue(), [])
         # Every server request and the source read run inside a verified
@@ -457,6 +460,21 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(self.storage.directory.exists())
         self.source.remember_if_ready.assert_called_once_with(self.storage)
 
+    def test_blue_x_goes_as_justified_and_days_off_never_become_absences(self):
+        # Owner decision 20/10/2026: the blue X is a justified absence, like the yellow icon; the
+        # calendar icon (dia não letivo) and every other non-absence state are never sent as marks.
+        source = preview()
+        source['snapshot']['records'] = [
+            {'source_student_ref': 'row:1', 'date': '2026-02-23', 'lesson': 1, 'state': 'excused_absent', 'source_symbol': 'X:ls-color-info'},
+            {'source_student_ref': 'row:1', 'date': '2026-02-23', 'lesson': 2, 'state': 'non_school_day'},
+            {'source_student_ref': 'row:1', 'date': '2026-02-23', 'lesson': 3, 'state': 'outside_enrollment'},
+            {'source_student_ref': 'row:1', 'date': '2026-02-23', 'lesson': 4, 'state': 'planned_unknown'},
+            {'source_student_ref': 'row:1', 'date': '2026-02-23', 'lesson': 5, 'state': 'unmarked'},
+        ]
+        payload = collection_payload(source, {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                     {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 99, DEVICE)
+        self.assertEqual([(m['slot'], m['mark']) for m in payload['marks']], [(1, 'J')])
+
     def test_discard_reconciles_receipt_first_and_requires_native_confirmation(self):
         payload = collection_payload(preview(), {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
                                      {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 99, DEVICE)
@@ -676,6 +694,65 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result['state'], 'error')
         self.assertIsNone(result['lastReceipt'])
         self.assertFalse(any(p['operation'] == 'collect' for p in self.provider.requests))
+
+    def test_lesson_days_from_a_real_shaped_diary(self):
+        # Owner decision 20/10/2026, end to end inside the collector: real-shaped HTML -> parser ->
+        # payload. Every lesson position goes with its day; days off and blanks never count.
+        from test_manual_session import raw_fixture
+        from coletor.manual_session import captured_preview, source_url
+        html = raw_fixture()
+        def put(day, lesson, content):
+            nonlocal html
+            target = f'data-day="{day}" data-lesson="{lesson}"></div>'
+            self.assertIn(target, html)
+            html = html.replace(target, f'data-day="{day}" data-lesson="{lesson}">{content}</div>', 1)
+        point, red = '•', '<strong><span class="ls-color-danger">X</span></strong>'
+        # A blue X with its legend replaces the fixture's first original red X (before any injection).
+        html = html.replace(red, '<strong><span class="ls-color-info">X</span></strong>', 1)
+        for lesson in (1, 2, 4, 5): put(2, lesson, point)          # 02/02: five lessons...
+        put(2, 3, red)                                             # ...one of them an absence
+        for lesson in range(1, 7): put(3, lesson, '<span class="ls-ico-calendar"></span>')  # 03/02: day off
+        put(4, 1, point); put(4, 2, '?')                           # 04/02: a lesson and an unknown mark
+        html = html.replace('X = falta não justificada; ', 'X = falta não justificada; '
+                            '<span class="ls-color-info"><strong>X</strong></span> = falta com motivo informado (não abona); ', 1)
+        result = captured_preview({'url': source_url('13331', 2026), 'password_form': False, 'html': html},
+                                  '13331', 2026, allow_partial=True)
+        label = result['snapshot']['students'][0]['original_class']
+        payload = collection_payload(result, {'class_id': '13331', 'name': label},
+                                     {'classId': 10, 'sourceClassLabel': label, 'revision': 0}, 1, DEVICE)
+        first = sorted({c['recordKey'] for c in payload['coverage']} | {r['recordKey'] for r in payload['records']})
+        key = payload['records'][0]['recordKey']
+        days = {c['date']: c for c in payload['coverage'] if c['recordKey'] == key}
+        self.assertEqual((days['2026-02-02']['slots'], days['2026-02-02']['complete']), ([1, 2, 3, 4, 5], True))
+        self.assertNotIn('2026-02-03', days)                       # the calendar icon is never a lesson
+        self.assertEqual((days['2026-02-04']['slots'], days['2026-02-04']['complete']), ([1], False))
+        marks = {(m['recordKey'], m['date'], m['slot']): m['mark'] for m in payload['marks']}
+        self.assertEqual(marks[(key, '2026-02-02', 3)], 'X')
+        self.assertEqual(sorted(marks.values()), ['J', 'X', 'X'])  # the blue X goes as justified
+        # The server rejects a mark outside its day's lessons: none may exist.
+        lessons = {(c['recordKey'], c['date']): set(c['slots']) for c in payload['coverage']}
+        self.assertTrue(all(slot in lessons[(k, d)] for (k, d, slot) in marks))
+        self.assertTrue(first)
+
+    def test_an_unknown_smecel_mark_is_logged_once_with_what_it_is(self):
+        # Owner request 20/10/2026: one log entry per unknown mark, naming it, never repeated.
+        from test_manual_session import raw_fixture
+        from coletor.manual_session import captured_preview, source_url
+        html = raw_fixture().replace('<strong><span class="ls-color-danger">X</span></strong>',
+                                     '<strong><span class="ls-color-danger">?</span></strong>', 1)
+        preview = captured_preview({'url': source_url('13331', 2026), 'password_form': False, 'html': html},
+                                   '13331', 2026, allow_partial=True)
+        self.assertIn('? [ls-color-danger]', {r['source_symbol'] for r in preview['snapshot']['records'] if r['state'] == 'unknown'})
+        self.runtime._note_unknown_marks(preview, '6A 2026 - MATUTINO')
+        self.runtime._note_unknown_marks(preview, '7B 2026 - MATUTINO')   # same mark elsewhere: not again
+        logged = [e for e in self.runtime._history.recent(100) if e['kind'] == 'unknown-mark']
+        self.assertEqual([(e['code'], e['label']) for e in logged], [('? [ls-color-danger]', '6A 2026 - MATUTINO')])
+        other = {'snapshot': {'records': [{'state': 'unknown', 'source_symbol': '[ls-ico-star]'},
+                                          {'state': 'absent', 'source_symbol': 'X'}]}}
+        self.runtime._note_unknown_marks(other, '8C 2026 - VESPERTINO')
+        self.runtime._note_unknown_marks({'snapshot': {'records': []}}, '9A 2026 - VESPERTINO')
+        logged = [e['code'] for e in self.runtime._history.recent(100) if e['kind'] == 'unknown-mark']
+        self.assertEqual(sorted(logged), ['? [ls-color-danger]', '[ls-ico-star]'])
 
     def test_unknown_symbols_keep_known_sparse_marks_without_completeness(self):
         from test_manual_session import raw_fixture

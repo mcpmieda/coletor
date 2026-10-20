@@ -401,11 +401,29 @@ def _source_state(symbol, slot, legend):
                 return "absent", "X"
             if not symbol and _has_class(span, "ls-color-warning") and _has_class(span, "ls-ico-info") and "falta justificada" in legend:
                 return "excused_absent", "icon:ls-color-warning.ls-ico-info"
+            # Blue X, "falta com motivo informado" (owner decision 20/10/2026): for the school it is
+            # a justified absence, like the yellow icon. Matched by its shape and the start of its
+            # legend only, never by "(nao abona)": if Smecel ever changes whether it excuses the
+            # absence, our own classification and counts stay the same.
+            if symbol == "X" and _has_class(span, "ls-color-info") and "falta com motivo informado" in legend:
+                return "excused_absent", "X:ls-color-info"
     if len(direct) == 1 and direct[0].tag == "span" and not symbol:
         span = direct[0]
         if _has_class(span, "ls-ico-calendar") and "dia nao letivo" in legend:
             return "non_school_day", "icon:ls-ico-calendar"
         if _has_class(span, "ls-ico-minus") and "fora do periodo de matricula" in legend:
             return "outside_enrollment", "icon:ls-ico-minus"
-    # Empty unsupported markup must not silently disappear as an empty cell.
-    return "unknown", symbol or "icon:unrecognized"
+    # Empty unsupported markup must not silently disappear as an empty cell. The description says
+    # what the mark shows (its text and visual classes, never anything personal), so the collector's
+    # log can name it: "X [ls-color-info]" or "[ls-ico-star]".
+    return "unknown", _describe_unknown(symbol, slot)
+
+
+def _describe_unknown(symbol: str, slot: "_Node") -> str:
+    classes = []
+    for node in slot.walk():
+        for name in node.attrs.get("class", "").split():
+            if name not in classes and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", name):
+                classes.append(name)
+    description = " ".join(part for part in (symbol, f"[{' '.join(classes)}]" if classes else "") if part)
+    return description[:32] or "icon:unrecognized"

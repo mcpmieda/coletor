@@ -102,6 +102,14 @@ def validate_schedule(schedule):
     return copy.deepcopy(schedule)
 
 
+# Positions of the Smecel diary that had a lesson: a point ("aula prevista/presença", given up to the
+# capture), an absence (red X) or a justified absence (yellow icon or blue X). The calendar icon,
+# "fora do período de matrícula" and blank positions never count as a lesson.
+LESSON_STATES = frozenset({'planned_unknown', 'absent', 'excused_absent'})
+# The whole local history (it keeps at most 2000 entries) when checking a mark was already logged.
+MAX_HISTORY_SCAN = 2000
+
+
 def collection_payload(preview, source_class, server_class, fencing, request_id, timezone_name='America/Bahia'):
     """Input is a Python worker result, never a bridged/user imported preview."""
     snapshot, capture = preview['snapshot'], preview['capture']
@@ -128,25 +136,34 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
         keys[student['source_student_ref']] = 'source:' + hashlib.sha256(canonical_frequency(reference)).hexdigest()
     records = [{'recordKey': keys[s['source_student_ref']], 'originalName': s['display_name'],
                 'originalClass': s['original_class']} for s in students]
-    marks, coverage = [], {}
+    marks, coverage, unresolved_days = [], {}, set()
     cutoff = datetime.fromtimestamp(stamp(capture['captured_at']), ZoneInfo(timezone_name)).date().isoformat()
     for record in snapshot['records']:
-        if record['state'] not in {'absent', 'excused_absent'} or record['date'] > cutoff: continue
+        if record['date'] > cutoff: continue
+        state = record['state']
+        if state not in LESSON_STATES and state != 'unknown': continue
         if record['source_student_ref'] not in keys or not 1 <= record['lesson'] <= 6: raise FrequencyError('source-invalid')
         key = keys[record['source_student_ref']]
-        marks.append({'recordKey': key, 'date': record['date'], 'slot': record['lesson'],
-                      'mark': 'X' if record['state'] == 'absent' else 'J'})
+        if state == 'unknown':
+            # A position without a confirmed meaning: the day is sent, but never as complete.
+            unresolved_days.add((key, record['date']))
+            continue
+        # Lesson days (owner decision 20/10/2026): every position of the Smecel diary with a lesson
+        # (a point, an X or a justified mark) up to the capture, so 5- or 6-lesson days, weekends,
+        # holidays (calendar icon) and days outside the enrolment need no configuration.
         coverage.setdefault((key, record['date']), set()).add(record['lesson'])
-    # Points, missing roster evidence and empty cells cannot certify coverage.
+        if state in ('absent', 'excused_absent'):
+            marks.append({'recordKey': key, 'date': record['date'], 'slot': record['lesson'],
+                          'mark': 'X' if state == 'absent' else 'J'})
     version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'sourceClassId': source_class['class_id'],
-        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v1'})).hexdigest()
+        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v2'})).hexdigest()
     return {'operation': 'collect', 'academicYear': 2026, 'requestId': request_id, 'fencingToken': fencing,
             'classId': server_class['classId'], 'expectedRevision': server_class['revision'],
             'sourceVersion': 'sha256:' + version, 'sourceClassId': source_class['class_id'],
             'sourceClassLabel': source_class['name'], 'observedAt': capture['captured_at'], 'rosterComplete': False,
             'records': records, 'marks': marks,
-            'coverage': [{'recordKey': k, 'date': d, 'slots': sorted(slots), 'complete': False}
-                         for (k, d), slots in coverage.items()]}
+            'coverage': [{'recordKey': k, 'date': d, 'slots': sorted(slots), 'complete': (k, d) not in unresolved_days}
+                         for (k, d), slots in sorted(coverage.items())]}
 
 
 class FrequencyRuntime:
@@ -546,6 +563,19 @@ class FrequencyRuntime:
                 self._operation.release()
                 raise
 
+    def _note_unknown_marks(self, preview, class_label):
+        """One log entry per unknown Smecel mark, ever: which mark it is and where it was first seen.
+
+        The position is not counted until the collector learns the mark (owner request 20/10/2026);
+        the same mark in other classes or later collections is not logged again.
+        """
+        symbols = sorted({r.get('source_symbol') or 'icon:unrecognized'
+                          for r in preview['snapshot']['records'] if r['state'] == 'unknown'})
+        if not symbols: return
+        seen = {e.get('code') for e in self._history.recent(MAX_HISTORY_SCAN) if e['kind'] == 'unknown-mark'}
+        for symbol in symbols:
+            if symbol not in seen: self._history.record('unknown-mark', code=symbol, label=class_label)
+
     def _note_busy_slot(self):
         """Remember a scheduled minute that found the previous collection busy."""
         schedule = self._last_schedule
@@ -661,6 +691,7 @@ class FrequencyRuntime:
                 send_started = time.monotonic()
                 school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
+                self._note_unknown_marks(preview, source['name'])
                 del preview
                 with self._lock:
                     self._check(epoch)

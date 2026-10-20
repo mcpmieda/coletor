@@ -207,6 +207,44 @@ class AnnualParserTests(unittest.TestCase):
         missing_legend = re.sub(r'<p style="margin:8px 0 0 0;">.*?</p>', '', self.clean_html)
         self.assertIn("LEGEND_UNVERIFIED", self.codes(parse_annual_html(missing_legend, "TESTE-A", 2026)))
 
+    def blue_x(self, legend_entry):
+        """The clean fixture with its first red X turned into Smecel's blue X and a legend entry."""
+        red = '<strong><span class="ls-color-danger">X</span></strong>'
+        html = self.clean_html.replace(red, '<strong><span class="ls-color-info">X</span></strong>', 1)
+        if legend_entry:
+            html = html.replace('X = falta não justificada; ', 'X = falta não justificada; ' + legend_entry, 1)
+        first = next(r for r in self.clean.records if r.state == "absent")
+        snapshot = parse_annual_html(html, "TESTE-A", 2026)
+        return snapshot, next(r for r in snapshot.records
+                              if (r.source_student_ref, r.date, r.lesson) == (first.source_student_ref, first.date, first.lesson))
+
+    def test_blue_x_is_a_justified_absence_whatever_smecel_says_about_excusing_it(self):
+        # Owner decision 20/10/2026: the blue X ("falta com motivo informado") counts like the yellow
+        # icon. Smecel's "(não abona)" today, or an "(abona)" tomorrow, must not change it.
+        for entry in ('<span class="ls-color-info"><strong>X</strong></span> = falta com motivo informado (não abona); ',
+                      '<span class="ls-color-info"><strong>X</strong></span> = falta com motivo informado (abona); ',
+                      '<span class="ls-color-info"><strong>X</strong></span> = falta com motivo informado; '):
+            snapshot, record = self.blue_x(entry)
+            self.assertEqual(record.state, "excused_absent")
+            self.assertEqual(record.source_symbol, "X:ls-color-info")
+            self.assertNotIn("SOURCE_SYMBOL_UNKNOWN", self.codes(snapshot))
+            self.assertEqual(Counter(r.state for r in snapshot.records)["absent"],
+                             Counter(r.state for r in self.clean.records)["absent"] - 1)
+
+    def test_blue_x_without_its_legend_is_not_guessed(self):
+        snapshot, record = self.blue_x(None)
+        self.assertEqual(record.state, "unknown")
+        self.assertIn("SOURCE_SYMBOL_UNKNOWN", self.codes(snapshot))
+
+    def test_calendar_icon_is_a_non_school_day_only_with_its_legend(self):
+        records = {r.lesson: r for r in self.edge.records if r.source_student_ref == "row:1" and r.date == "2026-02-02"}
+        self.assertEqual(records[4].state, "non_school_day")
+        self.assertEqual(records[4].source_symbol, "icon:ls-ico-calendar")
+        # Without "dia não letivo" in the legend the icon is not trusted as a day off.
+        edge = parse_annual_html(self.edge_html.replace("dia não letivo", "evento"), "TESTE-A", 2026)
+        changed = next(r for r in edge.records if r.source_student_ref == "row:1" and r.date == "2026-02-02" and r.lesson == 4)
+        self.assertEqual(changed.state, "unknown")
+
     def test_empty_month_cell_and_nbsp_stay_unmarked(self):
         empty_cell = '<td>\n' + ''.join(f'<div style="{fixture_module.SLOT_STYLE}" data-day="1" data-lesson="{i}"></div>\n' for i in range(1, 7)) + '</td>'
         html = self.clean_html.replace(empty_cell, '<td></td>', 1)

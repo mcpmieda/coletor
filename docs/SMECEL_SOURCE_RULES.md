@@ -26,6 +26,7 @@ Os parâmetros ct identificam turmas, não alunos. Links dependem da sessão e d
 | Texto • em DIV direto da célula | Aula prevista/presença, conforme legenda | Posição elegível; presença derivada se não há falta |
 | DIV > strong > span.ls-color-danger com X | Falta | Exceção de falta não justificada |
 | DIV > strong > span.ls-color-warning.ls-ico-info | Falta justificada | Exceção separada, sem motivo clínico |
+| DIV > strong > span.ls-color-info com X (azul) | Falta com motivo informado; o Smecel diz "não abona" | **Falta justificada** (J), como o ícone amarelo. Decisão do responsável em 20/10/2026. Reconhecida pela estrutura e pelo início da legenda ("falta com motivo informado"), nunca por "(não abona)": se o Smecel passar a abonar, a nossa contagem não muda |
 | DIV > span.ls-ico-calendar | Dia não letivo | Bloquear posição |
 | DIV > span.ls-ico-minus | Fora do período de matrícula | Bloquear posição para o vínculo |
 | DIV vazio ou espaço não separável | Vazio | Não converter em presença |
@@ -66,3 +67,7 @@ Não usar somente cor, classe calendar-day-disabled, rótulo de evento, interval
 ## Limites de conclusão
 
 Conciliação detalhada de uma turma principal e de um único caso transferido. Não auditados: todas as turmas, regras de todos os segmentos, ingresso tardio que reduza denominador durante período letivo, todas as modalidades de transferência, calendário histórico alterado, toda combinação de carga horária e correções de falta. A pesquisa não prova comportamento universal. A planilha externa e o calendário Smecel devem manter suas próprias fontes e vigências até reconciliação explícita.
+
+## Atualização de 20/10/2026: X azul
+
+O Smecel passou a exibir o **X azul** ("falta com motivo informado (não abona)"), ausente na leitura de 10/10/2026. Na turma principal havia 399 dessas marcas. Antes desta correção o coletor as tratava como marca desconhecida: na coleta automática (que tolera marcas desconhecidas) elas eram **descartadas**, e as faltas não chegavam ao ecossistema. Agora entram como falta justificada (J). O ícone de calendário continua exigindo a legenda "dia não letivo" e nunca é enviado como falta.
