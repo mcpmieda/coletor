@@ -18,9 +18,10 @@ export interface PeriodDraft {
   weekdays: number[];
   finalCheck: string;
   timezone: string;
-  /** The saved schedule had different times per day or shift, or a day with only one
-   *  shift enabled (made in the Ecossistema): saving here makes them all equal. */
+  /** Different rules require the per-day/shift editor; the original stays intact. */
   custom: boolean;
+  source?: SharedSchedule;
+  initial?: string;
 }
 
 export const DEFAULT_DRAFT: PeriodDraft = {
@@ -47,6 +48,7 @@ export function dayTimes(draft: PeriodDraft): string[] {
 
 /** A sentence for the task card ("A cada 30 min, das 07:00 às 17:30 · seg a sex"). */
 export function scheduleText(draft: PeriodDraft): string {
+  if (draft.custom) return 'Horários por dia e turno — consultar agenda';
   if (draft.mode === 'off' || !draft.weekdays.length) return 'Sem coletas automáticas';
   const days = daysText(draft.weekdays);
   const when = draft.mode === 'interval'
@@ -66,7 +68,14 @@ function daysText(days: number[]): string {
 
 /** Problems that block saving, in plain words. */
 export function draftProblem(draft: PeriodDraft): string | null {
+  const timezoneError = timezoneProblem(draft.timezone);
+  if (timezoneError) return timezoneError;
   if (draft.mode === 'off') return null;
+  if (draft.mode === 'times') {
+    const invalid = draft.times.findIndex(t => !isTime(t));
+    if (invalid >= 0) return `Horário ${invalid + 1}: preencha ou remova este horário.`;
+    if (new Set(draft.times).size !== draft.times.length) return 'Horário repetido: remova a duplicata.';
+  }
   if (!draft.weekdays.length) return 'Escolha pelo menos um dia.';
   if (draft.mode === 'interval') {
     if (!isTime(draft.from) || !isTime(draft.to)) return 'Informe o início e o fim do período.';
@@ -88,6 +97,8 @@ export function draftProblem(draft: PeriodDraft): string | null {
 }
 
 export function toShared(draft: PeriodDraft): SharedSchedule {
+  if (draft.source && draft.initial === draftSignature(draft)) return { ...cloneSchedule(draft.source), timezone: draft.timezone };
+  if (draft.custom) throw new Error('Edite esta agenda por dia e turno.');
   const times = dayTimes(draft);
   const rules: SharedSchedule['rules'] = [];
   for (let day = 0; day < 7; day++) {
@@ -102,39 +113,68 @@ export function toShared(draft: PeriodDraft): SharedSchedule {
 export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   if (!schedule) return { ...DEFAULT_DRAFT };
   const enabled = schedule.rules.filter(r => r.enabled && (r.times.length || r.recheck));
-  if (!enabled.length) return { ...DEFAULT_DRAFT, mode: 'off', timezone: schedule.timezone };
+  if (!enabled.length) {
+    const draft: PeriodDraft = { ...DEFAULT_DRAFT, mode: 'off', timezone: schedule.timezone };
+    return { ...draft, source: cloneSchedule(schedule), initial: draftSignature(draft) };
+  }
   const signature = (r: SharedSchedule['rules'][number]) => `${[...r.times].sort().join(',')}|${r.recheck ?? ''}`;
   const days = new Set(enabled.map(r => r.weekday));
   const oneShiftOnly = [...days].some(d => enabled.filter(r => r.weekday === d).length !== SHIFTS.length);
   const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly;
-  // The whole day in one list (both shifts): every time of the enabled rules;
-  // the last recheck of the day, when after every time, is the final check.
-  const rechecks = [...new Set(enabled.map(r => r.recheck).filter((t): t is string => !!t))].sort();
-  const regular = [...new Set(enabled.flatMap(r => r.times))].sort();
-  const last = rechecks.at(-1);
-  const finalCheck = last && (!regular.length || last > regular[regular.length - 1]) ? last : '';
-  const times = [...new Set([...regular, ...rechecks.filter(t => t !== finalCheck)])].sort();
-  const weekdays = [...new Set(enabled.map(r => editorDay(r.weekday)))].sort();
-  // The saved times travel in every mode, so switching to fixed times never
-  // shows (and saves) the defaults instead of the school's agenda.
-  const base = { ...DEFAULT_DRAFT, times, weekdays, finalCheck, timezone: schedule.timezone, custom };
+  // A heterogeneous agenda is never flattened. Its complete source travels
+  // unchanged; the per-rule editor handles explicit edits without widening shifts.
+  const rule = enabled[0];
+  const times = [...rule.times].sort();
+  const weekdays = custom ? [editorDay(rule.weekday)] : [...new Set(enabled.map(r => editorDay(r.weekday)))].sort();
+  const base: PeriodDraft = { ...DEFAULT_DRAFT, times, weekdays, finalCheck: rule.recheck ?? '', timezone: schedule.timezone, custom };
   const steps = times.slice(1).map((t, i) => toMinutes(t) - toMinutes(times[i]));
-  if (times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= 5)
-    return { ...base, mode: 'interval', every: steps[0], from: times[0], to: times[times.length - 1] };
-  return { ...base, mode: 'times', times };
+  const result: PeriodDraft = times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= 5
+    ? { ...base, mode: 'interval', every: steps[0], from: times[0], to: times[times.length - 1] }
+    : { ...base, mode: 'times' };
+  return { ...result, source: cloneSchedule(schedule), initial: draftSignature(result) };
 }
 
-/** Reads the typed list of fixed times; anything unreadable or repeated is reported, never dropped. */
-export function parseTimesText(text: string): { times: string[]; invalid: string[]; repeated: string[] } {
-  const tokens = text.split(/[,;\s]+/).map(t => t.trim()).filter(Boolean);
-  const times: string[] = [], invalid: string[] = [], repeated: string[] = [];
-  for (const token of tokens) {
-    const value = /^\d:\d{2}$/.test(token) ? `0${token}` : token;
-    if (!isTime(value)) invalid.push(token);
-    else if (times.includes(value)) repeated.push(token);
-    else times.push(value);
+export const cloneSchedule = (schedule: SharedSchedule): SharedSchedule => ({ timezone: schedule.timezone,
+  rules: schedule.rules.map(rule => ({ ...rule, times: [...rule.times] })) });
+export const draftSignature = (draft: PeriodDraft) => JSON.stringify([draft.mode, draft.every, draft.from, draft.to,
+  draft.times, draft.weekdays, draft.finalCheck]);
+export function timezoneProblem(timezone: string): string | null {
+  try {
+    if (timezone.length > 80 || new Intl.DateTimeFormat('pt-BR', { timeZone: timezone }).resolvedOptions().timeZone !== timezone)
+      return 'Informe um fuso horário IANA reconhecido, por exemplo America/Bahia.';
+  } catch { return 'Fuso horário não reconhecido.'; }
+  return null;
+}
+export function nextTimeField(times: string[]): { allowed: boolean; value: string } {
+  if (times.length >= MAX_PER_DAY || times.some(t => !isTime(t))) return { allowed: false, value: '' };
+  const latest = [...times].sort().at(-1);
+  if (!latest) return { allowed: true, value: '07:00' };
+  const minute = toMinutes(latest);
+  if (minute + MIN_GAP_MINUTES > 1439) return { allowed: false, value: '' };
+  return { allowed: true, value: minute + 30 <= 1439 ? toTime(minute + 30) : '' };
+}
+/** Mirrors only the existing schedule-write contract: no cross-day union. */
+export function sharedScheduleProblem(schedule: SharedSchedule): string | null {
+  const timezoneError = timezoneProblem(schedule.timezone);
+  if (timezoneError) return timezoneError;
+  for (const rule of schedule.rules) {
+    const label = `${DAY_NAMES[editorDay(rule.weekday)]} / ${rule.shift === 'matutino' ? 'Matutino' : 'Vespertino'}`;
+    const invalid = rule.times.findIndex(t => !isTime(t));
+    if (invalid >= 0) return `${label}: preencha ou remova o Horário ${invalid + 1}.`;
+    if (new Set(rule.times).size !== rule.times.length) return `${label}: horário repetido.`;
+    if (rule.recheck !== null && (!isTime(rule.recheck) || rule.times.some(t => t >= rule.recheck!)))
+      return `${label}: a conferência deve ocorrer depois das coletas.`;
+    if (rule.times.length + (rule.recheck ? 1 : 0) > MAX_PER_DAY) return `${label}: limite de ${MAX_PER_DAY} horários.`;
+    if (rule.enabled && !rule.times.length && !rule.recheck) return `${label}: inclua um horário ou desative o turno.`;
   }
-  return { times: times.sort(), invalid, repeated };
+  for (let day = 0; day < 7; day++) {
+    const times = [...new Set(schedule.rules.filter(r => r.weekday === day && r.enabled)
+      .flatMap(r => [...r.times, ...(r.recheck ? [r.recheck] : [])]))].sort();
+    if (times.length > MAX_PER_DAY) return `${DAY_NAMES[editorDay(day)]}: limite de ${MAX_PER_DAY} coletas por dia.`;
+    if (times.some((t, i) => i > 0 && toMinutes(t) - toMinutes(times[i - 1]) < MIN_GAP_MINUTES))
+      return `${DAY_NAMES[editorDay(day)]}: deixe pelo menos ${MIN_GAP_MINUTES} minutos entre as coletas.`;
+  }
+  return null;
 }
 
 /** Next moment from `now` among per-day minutes (index 0 = Monday), in a time zone. */
@@ -174,6 +214,7 @@ function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: 
 
 /** Next collection time from now, in the school's time zone; null when none. */
 export function nextRun(draft: PeriodDraft, now = new Date()): Date | null {
+  if (draft.custom && draft.source) return nextSharedRun(draft.source, now);
   const times = [...dayTimes(draft), ...(draft.finalCheck ? [draft.finalCheck] : [])].map(toMinutes);
   if (!times.length || !draft.weekdays.length) return null;
   return nextFrom(day => (draft.weekdays.includes(day) ? [...times] : []), draft.timezone, now);

@@ -199,10 +199,13 @@ try:
         recovery_page.on('pageerror',lambda error: errors.append(str(error)))
         shared = {'timezone': 'America/Bahia', 'rules': [{'weekday': r['weekday'] % 7, 'shift': r['shift'],
                   'enabled': r['selected'], 'times': r['times'], 'recheck': r['reconciliation'] or None} for r in config['rules']]}
+        # A uniform fixture exercises the simple editor; heterogeneous rules are tested separately below.
+        for rule in shared['rules']:
+            rule.update(times=['07:00', '07:30', '08:00'] if rule['enabled'] else [], recheck=None)
         collector = {'state': 'connect', 'code': None, 'active': False, 'localPaused': False, 'persistent': False,
                      'progress': {'completed': 0, 'total': 0, 'classLabel': None}, 'lastReceipt': None,
                      'settings': {'revision': 2, 'paused': False, 'schedule': shared}}
-        recovery_page.add_init_script('window.syntheticSettings='+json_module.dumps({**prefs,'browser':{'visible':False},'classes':{'mode':'all'}})+';window.syntheticCollector='+json_module.dumps(collector)+''';
+        recovery_init = 'window.syntheticSettings='+json_module.dumps({**prefs,'browser':{'visible':False},'classes':{'mode':'all'}})+';window.syntheticCollector='+json_module.dumps(collector)+''';
           window.syntheticSaves=[];window.syntheticConflict=true;
           window.pywebview={api:{get_institutional_access_status:async()=>({authenticated:true,authorized:true}),
             open_institutional_login:async()=>({ok:true}),logout_institutional_access:async()=>({ok:true}),
@@ -216,7 +219,8 @@ try:
             activate_collector:async()=>window.syntheticCollector,collect_now:async()=>window.syntheticCollector,
             save_shared_schedule:async(revision,schedule)=>{if(window.syntheticConflict)return {error:'Conflito',code:'revision-conflict'};
               if(revision!==window.syntheticCollector.settings.revision)return {error:'Conflito',code:'revision-conflict'};
-              window.syntheticSaves.push(schedule);window.syntheticCollector.settings={revision:revision+1,paused:false,schedule};return window.syntheticCollector;}}};''')
+              window.syntheticSaves.push(schedule);window.syntheticCollector.settings={revision:revision+1,paused:false,schedule};return window.syntheticCollector;}}};'''
+        recovery_page.add_init_script(recovery_init)
         recovery_page.goto(url)
         # Desktop shell: four sidebar pages, agenda edited by periods in Tarefas.
         nav = recovery_page.get_by_role('navigation', name='Navegação principal')
@@ -234,7 +238,23 @@ try:
         for _ in range(3):
             recovery_page.get_by_role('button', name='Adicionar horário').click()
         expect(remove).to_have_count(3)
+        def type_time(target, index, hour, minute):
+            field = target.get_by_role('group', name=f'Horário {index}', exact=True)
+            segments = field.get_by_role('spinbutton')
+            for segment, value in ((segments.nth(0), hour), (segments.nth(1), minute)):
+                segment.click(); segment.press_sequentially(value)
+        for index, hour, minute in ((1, '08', '15'), (2, '09', '00'), (3, '09', '55')):
+            type_time(recovery_page, index, hour, minute)
         save = recovery_page.get_by_role('button', name='Salvar', exact=True)
+        recovery_page.get_by_role('group', name='Horário 2', exact=True).get_by_role('spinbutton').first.press('Backspace')
+        expect(save).to_be_disabled()
+        expect(recovery_page.get_by_text('Preencha ou remova o horário incompleto.', exact=True)).to_be_visible()
+        assert recovery_page.evaluate('window.syntheticSaves.length') == 0
+        type_time(recovery_page, 2, '08', '15')
+        expect(save).to_be_disabled()
+        type_time(recovery_page, 2, '08', '18')
+        expect(save).to_be_disabled()
+        type_time(recovery_page, 2, '09', '00')
         if save.is_disabled():
             raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog').inner_text()[-300:])
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
@@ -244,9 +264,88 @@ try:
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
         recovery_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
         assert recovery_page.evaluate('window.syntheticSaves.length') == 1
-        assert recovery_page.evaluate("window.syntheticSaves[0].rules.filter(r=>r.enabled).every(r=>r.times.join()==='07:00,07:30,08:00')")
+        written = recovery_page.evaluate('window.syntheticSaves[0]')
+        active = [r for r in written['rules'] if r['enabled']]
+        expected_keys = {(r['weekday'], r['shift']) for r in shared['rules'] if r['enabled']}
+        assert len(active) == len(expected_keys) > 0
+        assert {(r['weekday'], r['shift']) for r in active} == expected_keys
+        assert all(r['times'] == ['08:15', '09:00', '09:55'] and r['recheck'] is None for r in active)
+        assert written['timezone'] == shared['timezone']
         recovery_page.screenshot(path=str(out/'schedule-recovery-after-save.png'),full_page=True,animations='disabled')
+        recovery_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        recovery_page.get_by_role('button', name='Adicionar horário', exact=True).click()
+        last_field = recovery_page.get_by_role('group', name='Horário 4', exact=True).get_by_role('spinbutton')
+        last_field.nth(0).press('Backspace'); last_field.nth(0).press('Backspace')
+        last_field.nth(1).press('Backspace'); last_field.nth(1).press('Backspace')
+        expect(recovery_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+        recovery_page.get_by_role('button', name='Cancelar', exact=True).click()
+        assert recovery_page.evaluate('window.syntheticSaves.length') == 1
         recovery_page.close()
+        custom = json_module.loads((root/'fixtures/agenda-heterogeneous.json').read_text(encoding='utf-8'))
+        custom_page = browser.new_page(viewport={'width': 900, 'height': 700}, locale='pt-BR')
+        custom_page.on('pageerror', lambda error: errors.append(str(error)))
+        custom_page.add_init_script(recovery_init + ';window.syntheticConflict=false;window.syntheticCollector.settings.schedule=' + json_module.dumps(custom) + ';')
+        custom_page.goto(url)
+        custom_page.get_by_text('Horários por dia e turno — consultar agenda', exact=True).wait_for()
+        custom_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        custom_page.get_by_role('button', name='Salvar', exact=True).click()
+        custom_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
+        assert custom_page.evaluate('window.syntheticSaves.length') == 0  # No-op must not write anything.
+        custom_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        custom_page.get_by_label('Dia e turno', exact=True).click()
+        custom_page.get_by_role('option', name='Segunda · Matutino', exact=True).click()
+        type_time(custom_page, 1, '08', '15')
+        try:
+            expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_enabled()
+        except AssertionError:
+            raise AssertionError('Custom agenda blocked: ' + custom_page.get_by_role('dialog').inner_text()[-500:])
+        custom_page.get_by_role('button', name='Salvar', exact=True).click()
+        custom_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
+        expected = json_module.loads(json_module.dumps(custom))
+        expected['rules'][2]['times'][0] = '08:15'
+        assert custom_page.evaluate('window.syntheticSaves') == [expected]
+        custom_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        custom_page.get_by_label('Fuso horário', exact=True).fill('America/Invalid')
+        expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+        custom_page.get_by_label('Fuso horário', exact=True).fill('America/Manaus')
+        expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+        confirmation = custom_page.get_by_role('checkbox', name='Confirmo a alteração do fuso e dos horários de execução.')
+        confirmation.focus(); confirmation.press('Space')
+        expect(confirmation).to_be_checked()
+        custom_page.get_by_role('button', name='Salvar', exact=True).click()
+        custom_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
+        expected['timezone'] = 'America/Manaus'
+        assert custom_page.evaluate('window.syntheticSaves[1]') == expected
+        custom_page.set_viewport_size({'width': 375, 'height': 720})
+        custom_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        custom_page.get_by_label('Dia e turno', exact=True).click()
+        custom_page.get_by_role('option', name='Segunda · Matutino', exact=True).click()
+        rows = custom_page.locator('[data-time-row]')
+        last_id = rows.nth(2).get_attribute('data-time-row')
+        custom_page.get_by_role('button', name='Remover horário 1', exact=True).click()
+        expect(rows).to_have_count(2)
+        assert rows.nth(1).get_attribute('data-time-row') == last_id
+        expect(rows.first.get_by_role('spinbutton').first).to_be_focused()
+        assert custom_page.get_by_role('dialog').evaluate('el=>el.scrollWidth<=el.clientWidth+1')
+        custom_page.screenshot(path=str(out/'schedule-lossless-mobile.png'), full_page=True, animations='disabled')
+        custom_page.get_by_role('button', name='Cancelar', exact=True).click()
+        assert custom_page.evaluate('window.syntheticSaves.length') == 2  # Cancelling removal does not write.
+        custom_page.get_by_role('button', name='Editar agenda', exact=True).click()
+        custom_page.get_by_label('Dia e turno', exact=True).click()
+        custom_page.get_by_role('option', name='Segunda · Matutino', exact=True).click()
+        recheck = custom_page.get_by_role('group', name='Conferência do turno (opcional)', exact=True).get_by_role('spinbutton')
+        for segment in (recheck.nth(0), recheck.nth(1)):
+            segment.press('Backspace'); segment.press('Backspace')
+        expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_enabled()
+        recheck.nth(0).click(); recheck.nth(0).press_sequentially('12')
+        expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_disabled()
+        custom_page.get_by_label('Dia e turno', exact=True).click()
+        custom_page.get_by_role('option', name='Terça · Matutino', exact=True).click()
+        expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_enabled()
+        assert all(part.get_attribute('data-placeholder') == 'true' for part in recheck.all())
+        custom_page.get_by_role('button', name='Cancelar', exact=True).click()
+        assert custom_page.evaluate('window.syntheticSaves.length') == 2
+        custom_page.close()
         assert not errors,errors
         print('Audit regressions passed: diagnostics identify separate cards; discarded native result stays hidden and blocks new reads until completion; desktop shell navigates its four pages; agenda conflict keeps the draft and saves once resolved.')
         print(json.dumps({'passed':True,'checks':['empty state','synthetic demo','pagination','student filter','dark theme','view return','clear preview','HTML import','invalid HTML fail-closed','repeat demo','mobile overflow','schedule presets','schedule validation','schedule save and reload','schedule undo and restore','schedule mobile overflow','fox visible','fox always shown','fox pet interaction','one atlas reused without frame fetches','fox reduced-motion','no browser exceptions'],'screenshots':str(out)},ensure_ascii=False))

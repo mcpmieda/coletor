@@ -32,12 +32,15 @@ Mascote escolhido pelo usuário, com quadros próprios e ações discretas: pisc
 orelhas, cauda, curiosidade, pulinho, passeio, descanso e carinho. Reage apenas ao
 processamento local e aos avisos reais. Fica sempre visível; com movimento reduzido
 fica estático e pausa com a janela oculta. A bandeja Windows mostra o estado da coleta
-e controla mostrar/ocultar a mesma janela e sair. Com a coleta ativa, o X esconde a
-janela ao lado do relógio; Sair, no menu do ícone, encerra o programa.
+e controla mostrar/ocultar a mesma janela e sair. O X esconde a janela ao lado do
+relógio mesmo com a coleta desligada ou pausada; Encerrar coletor, no menu do
+ícone, encerra o programa.
 
 ## Agenda pré-configurada e editável
 
-No Windows, Horários de coleta carrega e salva a revisão compartilhada da escola no servidor. Alteração concorrente pede recarregar e comparar, sem sobrescrever. Fuso IANA America/Bahia, horários por dia/turno e fins de semana opcionais são editáveis. Sugestões não confirmam dias letivos nem aula ministrada. A prévia de desenvolvimento mantém seu rascunho local, que não ativa o runtime.
+No Windows, **Tarefas > Editar agenda** carrega e salva a revisão compartilhada da escola no servidor. Alteração concorrente pede recarregar e comparar, sem sobrescrever. Agendas com horários diferentes por dia ou turno abrem no editor das 14 regras: uma edição preserva as outras regras, inclusive os horários de turnos desativados e suas rechecagens. Abrir e salvar sem alterações não envia gravação. Agendas uniformes também oferecem intervalos e horários fixos com campos de hora, adicionar e remover; campos incompletos, duplicados ou próximos demais impedem salvar.
+
+O fuso IANA é editável, com prévia da hora da escola e confirmação quando a mudança altera o fuso persistido. O padrão de uma agenda nova é America/Bahia. Sugestões não confirmam dias letivos nem aula ministrada. No site, a agenda é somente leitura, com revisão, fuso e todos os horários por turno. A prévia de desenvolvimento mantém seu rascunho local, que não ativa o runtime.
 
 ## Executar a prévia no desenvolvimento
 
