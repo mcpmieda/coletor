@@ -114,12 +114,29 @@ jobs:
           npm run build
       - name: Install hash-locked build dependencies
         run: python -m pip install --require-hashes -r requirements-windows-build.txt
+      - name: Derive package paths from the single product version
+        shell: pwsh
+        run: |
+          $Version = python -c "import sys; sys.path.insert(0, 'scripts'); import build_windows_portable as b; print(b.PRODUCT_VERSION)"
+          if ($LASTEXITCODE -ne 0) { throw 'Product version unavailable' }
+          "COLETOR_BUNDLE=dist/windows-portable/ColetorFrequencia-$Version-teste-windows-x64" >> $env:GITHUB_ENV
+          "COLETOR_SETUP=dist/windows-installer/ColetorFrequencia-$Version-windows-x64-setup-candidato.exe" >> $env:GITHUB_ENV
       - name: Assemble official embedded runtime and application
+        env:
+          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 }}
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: python scripts/build_windows_portable.py --source-commit "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Verify launcher compiler diagnostics and version regression tests
+        run: python -m unittest discover -s tests -p test_portable_builder.py -v
+      - name: Verify exact EXE, CMD and shortcut startup, arguments, errors and owned cleanup
+        run: python scripts/check_windows_launcher.py --package-root "${{ env.COLETOR_BUNDLE }}" --output artifacts/windows-launcher/launcher.json
+      - name: Verify launcher entrypoints show the real native window and tray
+        run: python scripts/check_windows_launcher.py --package-root "${{ env.COLETOR_BUNDLE }}" --native --output artifacts/windows-launcher/launcher-native.json
       - name: Verify official Python signatures
         shell: pwsh
         run: |
-          $Runtime = 'dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa'
+          $Runtime = '${{ env.COLETOR_BUNDLE }}/programa'
           foreach ($Name in @('python.exe', 'pythonw.exe')) {
             $Signature = Get-AuthenticodeSignature "$Runtime/$Name"
             if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
@@ -127,21 +144,21 @@ jobs:
             }
           }
       - name: Open real native window from portable runtime
-        run: python scripts/check_windows_portable.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
+        run: python scripts/check_windows_portable.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output-dir artifacts/windows-smoke --timeout 150
       - name: Verify local settings across native close and reopen
-        run: python scripts/check_windows_settings.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-settings --timeout 150
+        run: python scripts/check_windows_settings.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output-dir artifacts/windows-settings --timeout 150
       - name: Verify real notification-area menu, preferences and native shutdown
-        run: python scripts/check_windows_tray.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output-dir artifacts/windows-tray --timeout 150
+        run: python scripts/check_windows_tray.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output-dir artifacts/windows-tray --timeout 150
       - name: Verify isolated external Edge with every request intercepted or blocked
-        run: python scripts/check_manual_browser.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/manual-browser.json
+        run: python scripts/check_manual_browser.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output artifacts/windows-manual/manual-browser.json
       - name: Verify native manual session, consent and cancellation through external worker
-        run: python scripts/check_windows_manual.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-manual/windows-manual.json
+        run: python scripts/check_windows_manual.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output artifacts/windows-manual/windows-manual.json
       - name: Verify anonymous Windows CNG signatures against backend validators
         env:
           PYTHONPATH: app
         run: python scripts/check_windows_device_provider.py --output artifacts/device-auth/provider.json
       - name: Verify bundled frequency runtime, receipts, fencing, cancellation and Windows DPAPI
-        run: python scripts/check_windows_frequency.py --python "dist/windows-portable/ColetorFrequencia-0.4.0-teste-windows-x64/programa/python.exe" --output artifacts/windows-frequency/frequency.json
+        run: python scripts/check_windows_frequency.py --python "${{ env.COLETOR_BUNDLE }}/programa/python.exe" --output artifacts/windows-frequency/frequency.json
       - name: Create portable test ZIP only after native success
         run: python scripts/build_windows_portable.py --package artifacts/windows-smoke/windows-portable-smoke.json --settings-evidence artifacts/windows-settings/windows-settings-smoke.json --tray-evidence artifacts/windows-tray/windows-tray-smoke.json --manual-evidence artifacts/windows-manual/windows-manual.json --browser-evidence artifacts/windows-manual/manual-browser.json --device-evidence artifacts/device-auth/provider.json --frequency-evidence artifacts/windows-frequency/frequency.json
       - name: Install signed Inno Setup compiler for private per-user installer
@@ -170,7 +187,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & "$env:RUNNER_TEMP/InnoCompiler/ISCC.exe" /Qp installer/Coletor.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-          $Setup = 'dist/windows-installer/ColetorFrequencia-0.4.0-windows-x64-setup-candidato.exe'
+          $Setup = '${{ env.COLETOR_SETUP }}'
           if (-not (Test-Path $Setup)) { throw 'Installer output missing' }
           # Signed before hashing and before the real installation test.
           ./installer/sign-installer.ps1 -Path $Setup
@@ -179,7 +196,7 @@ jobs:
       - name: Verify actual per-user installation, runtime and safe uninstall
         shell: pwsh
         run: |
-          python scripts/check_windows_installer.py --installer "dist/windows-installer/ColetorFrequencia-0.4.0-windows-x64-setup-candidato.exe" --commit "${{ github.event.pull_request.head.sha || github.sha }}" --output artifacts/windows-installer/installer.json
+          python scripts/check_windows_installer.py --installer "${{ env.COLETOR_SETUP }}" --commit "${{ github.event.pull_request.head.sha || github.sha }}" --output artifacts/windows-installer/installer.json
       - name: Preserve private installable Windows candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -202,6 +219,7 @@ jobs:
             artifacts/device-auth/
             artifacts/windows-frequency/
             artifacts/windows-installer/
+            artifacts/windows-launcher/
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve private portable test package

@@ -691,6 +691,24 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.tick.assert_called_once()
         self.assertEqual(self.runtime._last_tick, NOW)
 
+    def test_heterogeneous_editor_fixture_preserves_scheduled_shift_scope(self):
+        value = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/agenda-heterogeneous.json').read_text())
+        self.provider.shared_schedule = validate_schedule(value)
+        self.runtime.collect = Mock()
+        for instant, expected in [('2026-10-19T10:55:00+00:00', {'matutino'}),
+                                  ('2026-10-19T15:15:00+00:00', {'matutino'}),
+                                  ('2026-10-19T17:10:00+00:00', {'vespertino'}),
+                                  ('2026-10-19T21:30:00+00:00', {'vespertino'}),
+                                  ('2026-10-20T10:03:00+00:00', {'matutino'})]:
+            with self.subTest(instant=instant):
+                self.provider.now = datetime.fromisoformat(instant).timestamp()
+                self.runtime.collect.reset_mock()
+                self.runtime.tick()
+                deadline = time.monotonic() + 2
+                while self.runtime._operation.locked() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.runtime.collect.assert_called_once_with(expected, _claimed=True)
+
     def test_schedule_tick_consumes_only_current_minute_no_replay(self):
         now = datetime.fromtimestamp(NOW, timezone.utc).astimezone(__import__('zoneinfo').ZoneInfo('America/Bahia'))
         value = schedule()

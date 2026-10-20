@@ -1,5 +1,5 @@
 // Small building blocks on HeroUI v3, the same ones the Atualizador de Planilhas uses.
-import type { ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Button, Chip, Description, Input, Label, NumberField, Switch, TextField, Tooltip } from '@heroui/react';
 import { I18nProvider, TimeField } from '@heroui/react';
 import { parseTime } from '@internationalized/date';
@@ -63,15 +63,41 @@ export function TextInput({ label, value, onChange, placeholder, type = 'text', 
 }
 
 function safeTime(value: string) { try { return parseTime(value); } catch { return null; } }
+export const TimeValidationContext = createContext<((id: string, incomplete: boolean) => void) | null>(null);
 /** "HH:MM" (24 h) with HeroUI's time field. */
 export function TimeInput({ label, value, onChange }: Readonly<{ label: string; value: string; onChange: (v: string) => void }>) {
+  const report = useContext(TimeValidationContext);
+  const id = useId();
+  const field = useRef<HTMLDivElement>(null);
+  const currentValue = useRef(value);
+  currentValue.current = value;
+  const emitted = useRef(value);
+  const [reset, setReset] = useState(0);
+  useEffect(() => {
+    if (value !== emitted.current) { emitted.current = value; setReset(n => n + 1); }
+  }, [value]);
+  // The rendered segments can be incomplete while React Aria retains its last
+  // complete value. Never submit that value in place of the unfinished edit.
+  const inspect = () => {
+    const parts = [...(field.current?.querySelectorAll('[role="spinbutton"]') ?? [])];
+    const empty = parts.filter(part => part.hasAttribute('data-placeholder')).length;
+    report?.(id, empty > 0 && (currentValue.current !== '' || empty < parts.length));
+  };
+  const afterEdit = () => { inspect(); requestAnimationFrame(inspect); };
+  useEffect(inspect, [value, report, id, reset]);
+  useEffect(() => () => report?.(id, false), [report, id]);
   return (
     <I18nProvider locale="pt-BR">
-      <TimeField value={value ? safeTime(value) : null} hourCycle={24} className="w-full"
-        onChange={t => onChange(t ? `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}` : '')}>
+      <div ref={field} className="w-full" onInputCapture={afterEdit} onKeyUpCapture={afterEdit} onBlurCapture={afterEdit}>
+      <TimeField key={reset} defaultValue={value ? safeTime(value) : null} hourCycle={24} className="w-full"
+        onChange={t => {
+          const next = t ? `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}` : '';
+          emitted.current = next; onChange(next);
+        }}>
         <Label>{label}</Label>
         <TimeField.Group fullWidth><TimeField.Input>{segment => <TimeField.Segment segment={segment} />}</TimeField.Input></TimeField.Group>
       </TimeField>
+      </div>
     </I18nProvider>
   );
 }

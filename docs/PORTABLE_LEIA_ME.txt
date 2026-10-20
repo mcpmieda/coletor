@@ -84,5 +84,9 @@ Equivalente técnico: programa\python.exe -B -m coletor --safe-removal.
 COMPATIBILIDADE E LICENÇAS
 O CI testa somente dados e contas sintéticos, incluindo janela Windows, Edge isolado,
 DPAPI e assinaturas CNG anônimas. O responsável valida o uso real após aprovação.
-Python incluído é oficial. O Coletor não tem assinatura digital própria.
+Python incluído é oficial e mantém a assinatura PSF. O launcher ColetorFrequencia.exe
+tem assinatura própria opcional; não herda a assinatura do Python. O MANIFEST.json
+informa o estado efetivo: unsigned/NotSigned quando não há certificado configurado.
+Em falhas de abertura, peça ajuda e consulte o registro local sem dados de alunos:
+%LOCALAPPDATA%\EcossistemaEscolar\ColetorFrequencia\launcher.log
 Licenças: pasta programa; bibliotecas em programa/Lib/site-packages; LICENCAS-UI.txt.

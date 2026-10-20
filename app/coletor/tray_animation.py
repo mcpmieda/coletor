@@ -41,14 +41,15 @@ class AnimationPolicy:
         return self.enabled and not self.reduced_motion
 
 
-# A lively but calm fox beside the clock: a gesture every ~3 s over a 22 s loop
+# Frequent gestures beside the clock: the first blink after 1.2 s, with
+# no resting gap longer than 1.2 s. Keep the 600 ms frame cadence.
 # (blink, a three-beat ear wag, a double blink and a short wag). Only head
 # frames exist at icon size; the tail lives on the full-body sprite.
 IDLE_SEQUENCE = (
-    *("fox-idle",) * 5, "fox-blink", *("fox-idle",) * 5,
-    "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 5,
-    "fox-blink", "fox-idle", "fox-blink", *("fox-idle",) * 4,
-    "fox-ear", "fox-idle", "fox-ear", *("fox-idle",) * 5,
+    "fox-idle", "fox-idle", "fox-blink", "fox-idle", "fox-idle",
+    "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-idle",
+    "fox-blink", "fox-idle", "fox-blink", "fox-idle", "fox-idle",
+    "fox-ear", "fox-idle", "fox-ear",
 )
 WORKING_SEQUENCE = tuple(f"fox-working-{index}" for index in range(1, 5))
 STATIC_FRAMES = {

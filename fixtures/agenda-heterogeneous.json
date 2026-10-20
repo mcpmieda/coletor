@@ -1,0 +1,113 @@
+{
+  "timezone": "America/Bahia",
+  "rules": [
+    {
+      "weekday": 0,
+      "shift": "matutino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 0,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 1,
+      "shift": "matutino",
+      "enabled": true,
+      "times": [
+        "07:55",
+        "08:40",
+        "09:25"
+      ],
+      "recheck": "12:15"
+    },
+    {
+      "weekday": 1,
+      "shift": "vespertino",
+      "enabled": true,
+      "times": [
+        "14:10",
+        "14:55",
+        "15:40"
+      ],
+      "recheck": "18:30"
+    },
+    {
+      "weekday": 2,
+      "shift": "matutino",
+      "enabled": true,
+      "times": [
+        "07:03"
+      ],
+      "recheck": null
+    },
+    {
+      "weekday": 2,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 3,
+      "shift": "matutino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 3,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 4,
+      "shift": "matutino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 4,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 5,
+      "shift": "matutino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 5,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 6,
+      "shift": "matutino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    },
+    {
+      "weekday": 6,
+      "shift": "vespertino",
+      "enabled": false,
+      "times": [],
+      "recheck": null
+    }
+  ]
+}

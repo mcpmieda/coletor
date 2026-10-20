@@ -24,11 +24,11 @@ if ($env:WINDOWS_SIGNING_BUNDLE_BASE64) {
     }
     $pfxBase64, $pfxPassword = $env:WINDOWS_SIGNING_PFX_BASE64, $env:WINDOWS_SIGNING_PFX_PASSWORD
 } else {
-    Write-Warning 'Code-signing certificate not configured: the installer is NOT signed.'
+    Write-Warning 'Code-signing certificate not configured: this binary is NOT signed.'
     exit 0
 }
 $bytes = [Convert]::FromBase64String($pfxBase64)
-$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes, $pfxPassword, $flags)
 if (-not $cert.HasPrivateKey) { throw 'Signing certificate has no private key' }
 $codeSigning = $cert.EnhancedKeyUsageList | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.3' }
@@ -42,7 +42,8 @@ foreach ($server in $servers) {
         if ($result.SignerCertificate -and $result.TimeStamperCertificate) { $signed = $true; break }
     } catch { Write-Warning "Timestamp server unavailable: $server" }
 }
-if (-not $signed) { throw 'Installer signature with timestamp was not applied' }
+if (-not $signed) { throw 'Binary signature with timestamp was not applied' }
 $check = Get-AuthenticodeSignature $Path
-if ($check.SignerCertificate.Thumbprint -ne $cert.Thumbprint) { throw 'Installer signature mismatch' }
-Write-Host "Installer signed by $($cert.Subject) ($($cert.Thumbprint))"
+if ($check.SignerCertificate.Thumbprint -ne $cert.Thumbprint -or -not $check.TimeStamperCertificate -or
+    $check.Status -notin @('Valid', 'UnknownError', 'NotTrusted')) { throw 'Binary signature mismatch' }
+Write-Host "Binary signing status: $($check.Status); publisher: $($cert.Subject)"

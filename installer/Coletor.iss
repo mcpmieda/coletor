@@ -2,14 +2,13 @@
 ; Opening at Windows sign-in is an installer option (checked by default): a Startup
 ; shortcut that opens beside the clock. Distribution only after the native CI gates.
 #define AppName "Coletor de Frequência"
-#define AppVersion "0.4.0"
-#define BundleRoot "..\dist\windows-portable\ColetorFrequencia-0.4.0-teste-windows-x64"
+#include "..\dist\windows-portable\version.iss"
 
 [Setup]
 AppId={{D2471FE4-968A-4E83-AC4C-5A85CC8E651B}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Coletor de Frequência 0.4.0 (candidato)
+AppVerName=Coletor de Frequência {#AppVersion} (candidato)
 AppPublisher=Ecossistema Escolar
 UninstallDisplayName=Coletor de Frequência
 UninstallDisplayIcon={app}\programa\app\assets\fox-icons\fox-idle.ico
@@ -19,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 MinVersion=10.0
 OutputDir=..\dist\windows-installer
-OutputBaseFilename=ColetorFrequencia-0.4.0-windows-x64-setup-candidato
+OutputBaseFilename=ColetorFrequencia-{#AppVersion}-windows-x64-setup-candidato
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -51,14 +50,14 @@ Source: "{#BundleRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "LEIA-ME-INSTALADOR.txt"; DestDir: "{app}"; DestName: "INSTALACAO-E-RETIRADA.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência Escolar"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"
+Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência Escolar"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"
 Name: "{autoprograms}\Retirar acesso deste PC"; Filename: "{app}\Remover acesso deste PC.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\Instruções de instalação e retirada"; Filename: "{app}\INSTALACAO-E-RETIRADA.txt"
-Name: "{userstartup}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable --background"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência ao lado do relógio"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: autostart
-Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: desktopicon
+Name: "{userstartup}\Coletor de Frequência"; Filename: "{app}\programa\ColetorFrequencia.exe"; Parameters: "--background"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência ao lado do relógio"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: autostart
+Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\programa\pythonw.exe"; Parameters: "-B -m coletor.portable"; WorkingDir: "{app}\programa"; Description: "Abrir Coletor de Frequência"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; Description: "Abrir Coletor de Frequência"; Flags: postinstall nowait skipifsilent unchecked
 
 ; The uninstaller does not claim or silently perform access revocation.
 ; Confirm the operator has reviewed pending receipts and the device binding.

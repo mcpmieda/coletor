@@ -1,5 +1,7 @@
 import { expect, test } from 'vitest';
-import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, nextSharedRun, parseTimesText, scheduleText, toShared, type PeriodDraft } from './periods';
+import agendaFixture from '../../../fixtures/agenda-heterogeneous.json';
+import type { SharedSchedule } from '../collector';
+import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, nextSharedRun, nextTimeField, sharedScheduleProblem, timezoneProblem, scheduleText, toShared, type PeriodDraft } from './periods';
 
 const draft = (patch: Partial<PeriodDraft> = {}): PeriodDraft => ({ ...DEFAULT_DRAFT, ...patch });
 
@@ -61,10 +63,6 @@ test('a day with only one shift enabled is not silently widened', () => {
   expect(fromShared({ timezone: 'America/Bahia', rules }).custom).toBe(true);
 });
 
-test('typed fixed times report invalid and repeated entries instead of dropping them', () => {
-  expect(parseTimesText('08:00, 09:xx, 12:00, 8:00, 7:30')).toEqual({ times: ['07:30', '08:00', '12:00'], invalid: ['09:xx'], repeated: ['8:00'] });
-});
-
 test('an agenda read as intervals keeps its own times for the fixed-times mode', () => {
   const interval: PeriodDraft = { ...DEFAULT_DRAFT, every: 30, from: '07:00', to: '08:00' };
   const read = fromShared(toShared(interval));
@@ -121,4 +119,107 @@ test('an agenda with only the final check is kept by the editor', () => {
   const back = toShared(draft);
   expect(back.rules.filter(r => r.enabled).every(r => r.times.length === 0 && r.recheck === '18:30')).toBe(true);
   expect(back.rules.filter(r => r.enabled)).toHaveLength(10);
+});
+
+test('different morning and afternoon times round-trip without widening either shift', () => {
+  const morning = ['07:55', '08:40', '09:25'], afternoon = ['14:10', '14:55', '15:40'];
+  const rules = Array.from({ length: 14 }, (_, i) => {
+    const on = Math.floor(i / 2) >= 1 && Math.floor(i / 2) <= 5;
+    const shift = (i % 2 ? 'vespertino' : 'matutino') as 'matutino' | 'vespertino';
+    return { weekday: Math.floor(i / 2), shift, enabled: on, times: on ? (i % 2 ? afternoon : morning) : [], recheck: on ? (i % 2 ? '18:30' : '12:15') : null };
+  });
+  const draft = fromShared({ timezone: 'America/Bahia', rules });
+  expect(draft.custom).toBe(true);
+  expect(toShared(draft)).toEqual({ timezone: 'America/Bahia', rules });
+  expect(scheduleText(draft)).toMatch(/dia e turno/);
+  expect(sharedScheduleProblem(toShared(draft))).toBeNull();
+});
+
+
+test('heterogeneous days with close times remain valid without a cross-day union', () => {
+  const schedule = toShared(draft({ mode: 'off' }));
+  schedule.rules[2] = { ...schedule.rules[2], enabled: true, times: ['07:00'], recheck: '12:00' };
+  schedule.rules[5] = { ...schedule.rules[5], enabled: true, times: ['07:03'], recheck: '18:00' };
+  const loaded = fromShared(schedule);
+  expect(loaded.custom).toBe(true);
+  expect(sharedScheduleProblem(toShared(loaded))).toBeNull();
+  expect(toShared(loaded)).toEqual(schedule);
+  expect(nextSharedRun(toShared(loaded), new Date('2026-10-19T09:59:00Z'))).toEqual(nextSharedRun(schedule, new Date('2026-10-19T09:59:00Z')));
+});
+
+test('two valid days with thirty disjoint times each never become sixty per day', () => {
+  const schedule = toShared(draft({ mode: 'off' }));
+  const slots = (offset: number) => Array.from({ length: 30 }, (_, i) => {
+    const m = offset + i * 10; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  });
+  schedule.rules[2] = { ...schedule.rules[2], enabled: true, times: slots(420) };
+  schedule.rules[4] = { ...schedule.rules[4], enabled: true, times: slots(421) };
+  expect(sharedScheduleProblem(schedule)).toBeNull();
+  expect(toShared(fromShared(schedule))).toEqual(schedule);
+});
+
+test('disabled rules and both rechecks remain intact when nothing changed', () => {
+  const schedule = toShared(draft({ mode: 'off' }));
+  schedule.rules[2] = { ...schedule.rules[2], times: ['10:00'], recheck: '12:00' };
+  expect(toShared(fromShared(schedule))).toEqual(schedule);
+  schedule.rules[2].enabled = true;
+  schedule.rules[3] = { ...schedule.rules[3], enabled: true, times: ['14:00'], recheck: '18:00' };
+  expect(toShared(fromShared(schedule))).toEqual(schedule);
+  expect(() => toShared({ ...fromShared(schedule), times: ['09:00'] })).toThrow(/dia e turno/);
+});
+
+test('inactive rules retaining times cannot be erased by editing a uniform agenda', () => {
+  const schedule = toShared(draft({ mode: 'times', times: ['08:00', '09:00'] }));
+  const sunday = schedule.rules.find(r => r.weekday === 0 && r.shift === 'matutino')!;
+  sunday.times = ['10:00'];
+  sunday.recheck = '12:00';
+  expect(sunday.enabled).toBe(false);
+  const loaded = fromShared(schedule);
+  expect(loaded.custom).toBe(true);
+  expect(toShared(loaded)).toEqual(schedule);
+  expect(() => toShared({ ...loaded, times: ['08:15', '09:15'] })).toThrow(/dia e turno/);
+});
+
+test('manual-only schedule retains every inactive stored time when reactivated', () => {
+  const schedule = toShared(draft({ mode: 'off' }));
+  const saturday = schedule.rules.find(r => r.weekday === 6 && r.shift === 'matutino')!;
+  saturday.times = ['07:45', '08:30'];
+  saturday.recheck = '09:00';
+  const loaded = fromShared(schedule);
+  expect(loaded.mode).toBe('off');
+  expect(loaded.custom).toBe(true);
+  expect(toShared(loaded)).toEqual(schedule);
+  expect(() => toShared({ ...loaded, mode: 'times', times: ['07:00'] })).toThrow(/dia e turno/);
+});
+
+test('fixed-time lines must be filled or explicitly removed, and must be distinct', () => {
+  expect(draftProblem(draft({ mode: 'times', times: ['07:00', '', '08:00'] }))).toMatch(/Horário 2/);
+  expect(draftProblem(draft({ mode: 'times', times: ['07:00', '07:00'] }))).toMatch(/repetido/);
+  expect(draftProblem(draft({ mode: 'times', times: ['07:00', '07:03'] }))).toMatch(/5 minutos/);
+  expect(draftProblem(draft({ mode: 'times', times: ['07:00', '08:00'] }))).toBeNull();
+});
+
+test('new fields never create repeated midnight slots or silently truncate thirty minutes', () => {
+  for (const [latest, value] of [['23:20', '23:50'], ['23:29', '23:59'], ['23:30', ''], ['23:54', '']])
+    expect(nextTimeField([latest])).toEqual({ allowed: true, value });
+  expect(nextTimeField(['23:55']).allowed).toBe(false);
+  expect(nextTimeField(['23:59']).allowed).toBe(false);
+  expect(nextTimeField(['']).allowed).toBe(false);
+  expect(nextTimeField(Array(48).fill('07:00')).allowed).toBe(false);
+});
+
+test('timezone correction preserves every rule and requires an exact canonical zone', () => {
+  const schedule = toShared(draft({ mode: 'times', times: ['08:00'] }));
+  schedule.rules[3].enabled = false;
+  expect(toShared({ ...fromShared(schedule), timezone: 'America/Manaus' })).toEqual({ ...schedule, timezone: 'America/Manaus' });
+  expect(timezoneProblem('America/Manaus')).toBeNull();
+  expect(timezoneProblem('America/Invalid')).toMatch(/reconhecido/);
+  expect(timezoneProblem('america/bahia')).toMatch(/IANA/);
+});
+
+
+test('the shared runtime fixture keeps every weekday, shift and recheck on round-trip', () => {
+  const schedule = agendaFixture as SharedSchedule;
+  expect(toShared(fromShared(schedule))).toEqual(schedule);
+  expect(sharedScheduleProblem(schedule)).toBeNull();
 });

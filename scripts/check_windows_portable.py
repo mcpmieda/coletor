@@ -426,6 +426,15 @@ def exercise_window(window, evidence: dict, screenshot: Path) -> None:
         evidence["failure_stage"] = evidence["stage"]
     finally:
         write_json(Path(evidence.pop("_worker_output")), evidence)
+        close_window(window)
+
+
+def close_window(window):
+    """QA must request explicit exit: the ordinary X now only hides the panel."""
+    tray = getattr(window, "_coletor_tray", None)
+    if tray is not None and not tray._disposed:
+        tray._invoke(tray._quit)
+    else:
         window.destroy()
 
 
@@ -472,7 +481,7 @@ def run_worker(args) -> int:
                 evidence["failure"] = str(error) if isinstance(error, SmokeFailure) else "institutional_entry_check_failed"
                 evidence["error_type"] = type(error).__name__
                 evidence["status"] = "failed"
-                window.destroy()
+                close_window(window)
 
         desktop.run_desktop(callback=institutional_entry,
                             settings_directory=args.output_dir / "isolated-settings", access=access)

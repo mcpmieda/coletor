@@ -13,7 +13,12 @@ O upload ao OneDrive é uma etapa separada. Um ZIP só de fontes não é o progr
 `LEIA-ME.txt`, `MANIFEST.json`, avisos de licença e a pasta `programa` com runtime,
 bibliotecas, código necessário à execução e UI compilada. O usuário extrai toda
 a pasta e abre o comando. O Python não é instalado globalmente; não há elevação.
-O launcher usa `pythonw.exe -B -m coletor.portable` e perfil privado. A ponte
+`ColetorFrequencia.exe` inicia `pythonw.exe -B -m coletor.portable` e aguarda
+seu encerramento, propagando o código de saída. O pai tem nome e ícone do
+Coletor; o processo filho conserva a identidade Python e a assinatura PSF.
+O launcher tem assinatura própria opcional, sem herdar confiança do filho:
+`MANIFEST.json` identifica explicitamente `unsigned` quando não há certificado.
+O perfil é privado. A ponte
 processa o diário em memória e salva somente agenda, tema e preferências da raposa
 no arquivo próprio do usuário, separado do navegador e do Atualizador.
 Não há instalação automática do WebView2.
@@ -47,6 +52,11 @@ Não empacota diretórios de captura, perfil, dados reais, segredo ou logs.
 O SHA-256 externo cobre o ZIP completo. São evidências de integridade, não uma
 assinatura própria do aplicativo. Se Windows/antivírus bloquear, o LEIA-ME orienta
 parar e pedir ajuda; não desativar proteções. Nenhum bloqueio é contornado.
+
+O gate adicional do launcher passa pelos caminhos EXE/CMD/atalhos, com
+argumentos, falhas, janela/bandeja e limpeza de processos. Sua assinatura e os
+componentes Microsoft usados na compilação ficam no manifesto. Veja a política
+de confiança e os registros locais no [guia do instalador](WINDOWS_INSTALLER.md).
 
 O pacote usa a estratégia de runtime oficial embutido do Atualizador, sem copiar
 o instalador, as credenciais, os agentes nem scripts de segurança dele.

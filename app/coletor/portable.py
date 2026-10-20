@@ -7,7 +7,7 @@ def main():
         from .desktop import run_desktop
         run_desktop(background="--background" in sys.argv[1:])
     except (Exception, SystemExit):
-        if sys.platform == "win32":
+        if sys.platform == "win32" and "--background" not in sys.argv[1:]:
             import ctypes
             ctypes.windll.user32.MessageBoxW(None,
                 "Não foi possível abrir o coletor.\n\n"
