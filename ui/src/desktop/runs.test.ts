@@ -26,7 +26,9 @@ test('history becomes runs, newest first, with partial and running states', () =
 test('log lines are plain and leveled', () => {
   const events = logEvents(history);
   expect(events[0].message).toBe('6A enviada · 30 aluno(s)');
-  expect(events.find(e => e.detail?.includes('lease-fenced'))?.level).toBe('error');
+  const fenced = events.find(e => e.detail?.includes('Outro computador assumiu'));
+  expect(fenced?.level).toBe('error');
+  expect(fenced?.detail).not.toContain('lease-fenced');
   expect(events.find(e => e.message.startsWith('6B'))?.level).toBe('warn');
 });
 

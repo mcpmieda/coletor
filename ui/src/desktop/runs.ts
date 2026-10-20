@@ -70,6 +70,20 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
 };
 const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
+/** Short, plain cause of each failure (Registros detail), instead of the technical code. */
+const FAILURE_CAUSE: Record<string, string> = {
+  ACCESS_UNAVAILABLE: 'Internet ou Ecossistema fora do ar por um tempo.',
+  unavailable: 'Resposta estranha do Ecossistema. Se repetir, avise o suporte.',
+  'lease-fenced': 'Outro computador assumiu ou a conexão caiu no envio.',
+  'revision-conflict': 'Alguém mudou dados no Ecossistema durante o envio.',
+  'not-authorized': 'O acesso deste computador expirou ou foi retirado.',
+  ACCESS_REQUIRED: 'Este computador precisa entrar no Ecossistema de novo.',
+  SOURCE_LOGIN_REQUIRED: 'A sessão do Smecel expirou.',
+  SOURCE_LOGIN_FAILED: 'E-mail ou senha do Smecel não aceitos.',
+  SOURCE_READ_FAILED: 'O Smecel demorou ou falhou ao abrir um diário.',
+  CLOCK_OUT_OF_SYNC: 'Data ou hora do computador erradas.',
+  PROTECTED_STORAGE_UNAVAILABLE: 'O Windows não conseguiu guardar os dados com segurança.',
+};
 // The collector retries these by itself: worth seeing, not counted as failures.
 const TEMPORARY = new Set(['ACCESS_UNAVAILABLE']);
 
@@ -78,12 +92,16 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
   return [...entries].sort((a, b) => b.at - a.at).map((e, i) => {
     const id = `${e.at}:${e.kind}:${i}`;
     if (e.kind === 'class-sent') {
-      const extra = [e.unresolved ? `${e.unresolved} não reconhecido(s)` : '', e.conflicts ? `${e.conflicts} conflito(s)` : ''].filter(Boolean).join(' · ');
+      const extra = [
+        e.unresolved ? `${e.unresolved} não reconhecido(s): nome sem par na Relação` : '',
+        e.conflicts ? `${e.conflicts} conflito(s): marcação mudou no Smecel, decida no Centro` : '',
+      ].filter(Boolean).join(' · ');
       return { id, at: e.at, level: e.unresolved || e.conflicts ? 'warn' : 'info', message: `${e.label ?? 'Turma'} enviada · ${e.sent ?? 0} aluno(s)`, detail: extra || undefined };
     }
     if (e.kind === 'failure') {
       const level: Level = QUIET.has(e.code ?? '') ? 'info' : TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
-      return { id, at: e.at, level, message: problemText(e.code), detail: [e.label, e.code].filter(Boolean).join(' · ') };
+      const cause = e.code ? FAILURE_CAUSE[e.code] : undefined;
+      return { id, at: e.at, level, message: problemText(e.code), detail: [e.label, cause].filter(Boolean).join(' · ') || undefined };
     }
     const [level, message] = EVENT_TEXT[e.kind] ?? ['info', e.kind];
     return { id, at: e.at, level, message, detail: e.label };

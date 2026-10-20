@@ -41,6 +41,10 @@ MAX_DAILY_TIMES = 48
 # NO_CLASSES_IN_SHIFT: a slot of a shift this school (or this PC's choice) has
 # no linked class for. Nothing to do, and nothing wrong.
 QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT'}
+# A network or Ecossistema blip (a PC waking up, Wi-Fi dropping) heals by itself
+# at the next 30 s check; it reaches the history only if it lasts this long.
+TRANSIENT_CODES = {'ACCESS_UNAVAILABLE', 'unavailable'}
+TRANSIENT_GRACE_SECONDS = 600
 
 
 def discard_confirmation():
@@ -161,6 +165,7 @@ class FrequencyRuntime:
         self._school_paused = False
         self._confirm_discard = confirm_discard
         self._state, self._code = 'connect', None
+        self._transient = None  # (code, first seen, already in history)
         self._status, self._lease, self._class, self._last_receipt = None, None, None, None
         self._progress = {'completed': 0, 'total': 0, 'classLabel': None}
         self._minute = None
@@ -294,11 +299,19 @@ class FrequencyRuntime:
             code == 'SOURCE_LOGIN_REQUIRED' and self._storage.load_credential() is None)
         with self._lock:
             changed = self._code != code
+            interrupted_run = self._state == 'collecting'
             self._code = code
             if blocks_source: self._source_blocked = True
             self._state = self._state_for(code)
             if code in {'lease-fenced', 'not-authorized', 'paused'}: self._lease = None
-        if code not in QUIET_CODES and changed: self._history.record('failure', code=code, label=label)
+        if code in TRANSIENT_CODES and not interrupted_run:
+            now = self._clock()
+            if changed or self._transient is None or self._transient[0] != code:
+                self._transient = (code, now, False)
+            if not self._transient[2] and now - self._transient[1] >= TRANSIENT_GRACE_SECONDS:
+                self._transient = (code, self._transient[1], True)
+                self._history.record('failure', code=code, label=label)
+        elif code not in QUIET_CODES and changed: self._history.record('failure', code=code, label=label)
         if code in ALERT_CODES and changed:
             try: self._on_alert(code)
             except Exception: pass
