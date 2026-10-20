@@ -113,17 +113,18 @@ export function toShared(draft: PeriodDraft): SharedSchedule {
 export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   if (!schedule) return { ...DEFAULT_DRAFT };
   const enabled = schedule.rules.filter(r => r.enabled && (r.times.length || r.recheck));
+  // Unscheduled active rules and disabled rules with retained moments cannot be
+  // reconstructed from a global preset without silently changing stored rules.
+  const retained = schedule.rules.some(r => (!r.enabled && (r.times.length > 0 || r.recheck !== null)) ||
+    (r.enabled && r.times.length === 0 && !r.recheck));
   if (!enabled.length) {
-    const draft: PeriodDraft = { ...DEFAULT_DRAFT, mode: 'off', timezone: schedule.timezone };
+    const draft: PeriodDraft = { ...DEFAULT_DRAFT, mode: 'off', timezone: schedule.timezone, custom: retained };
     return { ...draft, source: cloneSchedule(schedule), initial: draftSignature(draft) };
   }
   const signature = (r: SharedSchedule['rules'][number]) => `${[...r.times].sort().join(',')}|${r.recheck ?? ''}`;
   const days = new Set(enabled.map(r => r.weekday));
   const oneShiftOnly = [...days].some(d => enabled.filter(r => r.weekday === d).length !== SHIFTS.length);
-  // Even disabled rules can retain times for later reactivation. A global edit
-  // would erase those stored moments, so offer the lossless rule editor instead.
-  const disabledWithMoments = schedule.rules.some(r => !r.enabled && (r.times.length > 0 || r.recheck !== null));
-  const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly || disabledWithMoments;
+  const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly || retained;
   // A heterogeneous agenda is never flattened. Its complete source travels
   // unchanged; the per-rule editor handles explicit edits without widening shifts.
   const rule = enabled[0];
