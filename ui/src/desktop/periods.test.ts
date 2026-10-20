@@ -168,6 +168,18 @@ test('disabled rules and both rechecks remain intact when nothing changed', () =
   expect(() => toShared({ ...fromShared(schedule), times: ['09:00'] })).toThrow(/dia e turno/);
 });
 
+test('inactive rules retaining times cannot be erased by editing a uniform agenda', () => {
+  const schedule = toShared(draft({ mode: 'times', times: ['08:00', '09:00'] }));
+  const sunday = schedule.rules.find(r => r.weekday === 0 && r.shift === 'matutino')!;
+  sunday.times = ['10:00'];
+  sunday.recheck = '12:00';
+  expect(sunday.enabled).toBe(false);
+  const loaded = fromShared(schedule);
+  expect(loaded.custom).toBe(true);
+  expect(toShared(loaded)).toEqual(schedule);
+  expect(() => toShared({ ...loaded, times: ['08:15', '09:15'] })).toThrow(/dia e turno/);
+});
+
 test('fixed-time lines must be filled or explicitly removed, and must be distinct', () => {
   expect(draftProblem(draft({ mode: 'times', times: ['07:00', '', '08:00'] }))).toMatch(/Horário 2/);
   expect(draftProblem(draft({ mode: 'times', times: ['07:00', '07:00'] }))).toMatch(/repetido/);
