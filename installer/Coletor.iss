@@ -82,16 +82,14 @@ end;
 
 procedure RegisterLogonTask();
 var
-  Lines: TArrayOfString;
-  Path, User, Folder: String;
+  Xml, Path, User, Folder: String;
   Code: Integer;
 begin
   User := GetEnv('USERDOMAIN') + '\' + GetUserNameString();
   Folder := ExpandConstant('{app}\programa');
   Path := ExpandConstant('{tmp}\coletor-logon-task.xml');
-  SetArrayLength(Lines, 1);
-  Lines[0] :=
-    '<?xml version="1.0" encoding="UTF-8"?>' +
+  // schtasks rejects UTF-8 task files; system-ANSI text without an XML declaration is accepted.
+  Xml :=
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' +
     '<RegistrationInfo><Description>Abre o Coletor de Frequência ao lado do relógio ao entrar no Windows.</Description></RegistrationInfo>' +
     '<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>' + XmlText(User) + '</UserId><Delay>PT30S</Delay></LogonTrigger></Triggers>' +
@@ -101,7 +99,7 @@ begin
     '<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings></Settings>' +
     '<Actions Context="Author"><Exec><Command>' + XmlText(Folder + '\ColetorFrequencia.exe') + '</Command>' +
     '<Arguments>--background</Arguments><WorkingDirectory>' + XmlText(Folder) + '</WorkingDirectory></Exec></Actions></Task>';
-  if not SaveStringsToUTF8File(Path, Lines, False) then
+  if not SaveStringToFile(Path, Xml, False) then
     RaiseException('Não foi possível preparar a abertura com o Windows.');
   if not Exec(ExpandConstant('{sys}\schtasks.exe'), '/Create /TN "' + LogonTask + '" /XML "' + Path + '" /F', '',
               SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
