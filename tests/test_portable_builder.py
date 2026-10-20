@@ -16,12 +16,16 @@ spec.loader.exec_module(builder)
 
 class PortableBuildTests(unittest.TestCase):
     def test_version_is_derived_from_product_and_future_version_reaches_inno(self):
-        self.assertEqual(builder.VERSION, builder.product_version() + "-teste")
+        self.assertEqual(builder.VERSION, builder.product_version(build=os.environ.get("COLETOR_BUILD")) + "-teste")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "app/coletor").mkdir(parents=True)
             (root / "app/coletor/__init__.py").write_text('__version__ = "8.12.3"\n', encoding="utf-8")
             self.assertEqual(builder.product_version(root), "8.12.3")
+            # Each CI build replaces the third part, so every merge ships a newer version.
+            self.assertEqual(builder.product_version(root, build="231"), "8.12.231")
+            for bad in ("0", "65536", "12a", "-3"):
+                with self.assertRaises(ValueError): builder.product_version(root, build=bad)
             builder.write_installer_version(root, builder.product_version(root))
             include = (root / "version.iss").read_text()
             self.assertIn('#define AppVersion "8.12.3"', include)

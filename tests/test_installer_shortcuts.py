@@ -17,7 +17,8 @@ class InstallerShortcutTests(unittest.TestCase):
         script = (ROOT / "installer/Coletor.iss").read_text(encoding="utf-8-sig")
         icons = script.split("[Icons]", 1)[1].split("\n[", 1)[0]
         shortcuts = [line for line in icons.splitlines() if 'ColetorFrequencia.exe' in line]
-        self.assertEqual(len(shortcuts), 3)
+        self.assertEqual(len(shortcuts), 2)  # Start menu and desktop; sign-in uses the logon task.
+        self.assertNotIn("{userstartup}\\Coletor de Frequência\";", icons)
         for line in shortcuts:
             self.assertIn(f'AppUserModelID: "{app_id}"', line)
             self.assertIn('fox-idle.ico', line)

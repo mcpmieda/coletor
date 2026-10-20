@@ -42,10 +42,13 @@ no pacote portátil. Não inclui sessões Smecel, tokens, diários ou contas.
 
 Instala apenas no perfil atual em
 `%LOCALAPPDATA%\Programs\ColetorFrequenciaSmecel`, sem UAC,
-serviço Windows ou tarefa agendada. A opção **Abrir o Coletor ao entrar no
-Windows** vem marcada e cria só um atalho em `{userstartup}` que abre o
-programa ao lado do relógio (`--background`); desmarcada, o atalho é
-removido. Reabrir com a coleta ativa retoma a coleta sozinho.
+serviço Windows. A opção **Abrir o Coletor ao entrar no Windows** vem
+marcada e cria uma tarefa de logon do próprio usuário,
+`\EcossistemaEscolar\ColetorFrequencia` (30 s após entrar, sem privilégios),
+que abre o programa ao lado do relógio (`--background`), como o Atualizador.
+O atalho antigo da pasta Inicializar ficava atrás de todos os itens de
+inicialização e às vezes não abria; ele é removido. Desmarcada, a tarefa é
+excluída, e desinstalar também a exclui. Reabrir com a coleta ativa retoma a coleta sozinho.
 Cria entrada no menu Iniciar e pode criar atalho na área de trabalho.
 A janela abre centralizada na área útil do monitor principal e utiliza
 o mesmo ícone de raposa da bandeja.

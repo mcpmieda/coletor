@@ -12,6 +12,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from xml.etree import ElementTree
+
+LOGON_TASK = r"\EcossistemaEscolar\ColetorFrequencia"
 
 
 def sha256(path):
@@ -77,21 +80,21 @@ def run(installer, expected_sha, output):
                 raise RuntimeError("installed-runtime-unavailable")
             report["checks"]["installed_runtime_and_uninstaller"] = True
             startup = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup/Coletor de Frequência.lnk"
-            if not startup.is_file():
-                raise RuntimeError("startup-shortcut-missing")
-            shortcut = builder.powershell(r'''
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$shell = New-Object -ComObject WScript.Shell
-$link = $shell.CreateShortcut($env:COLLECTOR_INSTALLER_SHORTCUT)
-@{ target = $link.TargetPath; arguments = $link.Arguments; working_directory = $link.WorkingDirectory } | ConvertTo-Json -Compress
-''', env=dict(os.environ, COLLECTOR_INSTALLER_SHORTCUT=str(startup)))
-            if shortcut.returncode:
-                raise RuntimeError("installed-startup-shortcut-unreadable")
-            link = json.loads(shortcut.stdout.lstrip("\ufeff"))
-            if (Path(link["target"]).resolve() != launcher.resolve() or link["arguments"] != "--background"
-                    or Path(link["working_directory"]).resolve() != launcher.parent.resolve()):
-                raise RuntimeError("installed-startup-shortcut-contract-mismatch")
+            if startup.exists():
+                raise RuntimeError("legacy-startup-shortcut-left")
+            query = subprocess.run(["schtasks", "/Query", "/TN", LOGON_TASK, "/XML"], capture_output=True, timeout=30)
+            if query.returncode:
+                raise RuntimeError("logon-task-missing")
+            # schtasks prints in the console code page but declares UTF-16; parse the text.
+            text = query.stdout.decode("oem", errors="replace")
+            task = ElementTree.fromstring(text[text.index("<Task"):])
+            ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+            if (Path(task.findtext("t:Actions/t:Exec/t:Command", "", ns)).resolve() != launcher.resolve()
+                    or task.findtext("t:Actions/t:Exec/t:Arguments", "", ns) != "--background"
+                    or Path(task.findtext("t:Actions/t:Exec/t:WorkingDirectory", "", ns)).resolve() != launcher.parent.resolve()
+                    or task.find("t:Triggers/t:LogonTrigger", ns) is None
+                    or task.findtext("t:Principals/t:Principal/t:RunLevel", "LeastPrivilege", ns) != "LeastPrivilege"):
+                raise RuntimeError("installed-logon-task-contract-mismatch")
             report["checks"]["startup_targets_native_launcher_in_background"] = True
             report["checks"]["opens_at_windows_sign_in_by_default"] = True
             uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
@@ -100,8 +103,8 @@ $link = $shell.CreateShortcut($env:COLLECTOR_INSTALLER_SHORTCUT)
                 raise RuntimeError("uninstall-failed")
             if (installed / "programa" / "python.exe").exists():
                 raise RuntimeError("uninstall-left-program")
-            if startup.exists():
-                raise RuntimeError("uninstall-left-startup-shortcut")
+            if subprocess.run(["schtasks", "/Query", "/TN", LOGON_TASK], capture_output=True, timeout=30).returncode == 0:
+                raise RuntimeError("uninstall-left-logon-task")
             if sentinel.read_text(encoding="utf-8") != "synthetic-sentinel":
                 raise RuntimeError("uninstall-affected-other-data")
             report["checks"]["uninstall_preserves_unrelated_data"] = True
