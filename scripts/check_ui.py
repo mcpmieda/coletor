@@ -256,7 +256,7 @@ try:
         expect(save).to_be_disabled()
         type_time(recovery_page, 2, '09', '00')
         if save.is_disabled():
-            raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog').inner_text()[-300:])
+            raise AssertionError('Agenda save blocked: ' + recovery_page.get_by_role('dialog', name='Agenda de coleta', exact=True).inner_text()[-300:])
         recovery_page.get_by_role('button', name='Salvar', exact=True).click()
         expect(recovery_page.get_by_text('A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.', exact=True)).to_be_visible()
         expect(remove).to_have_count(3)  # The draft survives the conflict.
@@ -298,7 +298,7 @@ try:
         try:
             expect(custom_page.get_by_role('button', name='Salvar', exact=True)).to_be_enabled()
         except AssertionError:
-            raise AssertionError('Custom agenda blocked: ' + custom_page.get_by_role('dialog').inner_text()[-500:])
+            raise AssertionError('Custom agenda blocked: ' + custom_page.get_by_role('dialog', name='Agenda de coleta', exact=True).inner_text()[-500:])
         custom_page.get_by_role('button', name='Salvar', exact=True).click()
         custom_page.get_by_role('heading', name='Agenda de coleta').wait_for(state='hidden')
         expected = json_module.loads(json_module.dumps(custom))
@@ -326,7 +326,7 @@ try:
         expect(rows).to_have_count(2)
         assert rows.nth(1).get_attribute('data-time-row') == last_id
         expect(rows.first.get_by_role('spinbutton').first).to_be_focused()
-        assert custom_page.get_by_role('dialog').evaluate('el=>el.scrollWidth<=el.clientWidth+1')
+        assert custom_page.get_by_role('dialog', name='Agenda de coleta', exact=True).evaluate('el=>el.scrollWidth<=el.clientWidth+1')
         custom_page.screenshot(path=str(out/'schedule-lossless-mobile.png'), full_page=True, animations='disabled')
         custom_page.get_by_role('button', name='Cancelar', exact=True).click()
         assert custom_page.evaluate('window.syntheticSaves.length') == 2  # Cancelling removal does not write.
