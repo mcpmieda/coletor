@@ -618,6 +618,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual((result['code'], result['state']), ('NO_CLASSES_IN_SHIFT', 'reserve'))
         self.assertFalse(any(e['kind'] == 'failure' for e in self.runtime.recent_history(20)))
 
+    def test_connection_blip_reaches_history_only_if_it_lasts(self):
+        failures = lambda: [e for e in self.runtime.recent_history(20) if e['kind'] == 'failure']
+        self.runtime._error(FrequencyError('ACCESS_UNAVAILABLE'))
+        self.provider.now += 300
+        self.runtime._error(FrequencyError('ACCESS_UNAVAILABLE'))
+        self.assertEqual(failures(), [])  # Healed by the next 30 s check: nothing to show.
+        self.provider.now += 301
+        self.runtime._error(FrequencyError('ACCESS_UNAVAILABLE'))
+        self.runtime._error(FrequencyError('ACCESS_UNAVAILABLE'))
+        self.assertEqual([e['code'] for e in failures()], ['ACCESS_UNAVAILABLE'])
+        self.runtime._state = 'collecting'  # A run cut short is always explained at once.
+        self.runtime._error(FrequencyError('unavailable'))
+        self.assertEqual([e['code'] for e in failures()], ['unavailable', 'ACCESS_UNAVAILABLE'])
+
     def test_paused_run_gets_a_closing_fact(self):
         self.source.on_capture = lambda: self.runtime.local_pause(True)
         self.runtime.collect()
