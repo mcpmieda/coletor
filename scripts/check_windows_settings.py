@@ -24,16 +24,51 @@ def page(window,label):
     smoke.wait_js(window,"[...document.querySelectorAll('h1')].some(n=>n.textContent.trim()===%s)" % json.dumps(label))
 
 
+def select_saturday_morning(window):
+    """Select Saturday/morning without flattening the per-shift shared agenda."""
+    smoke.wait_js(window, "!!document.querySelector('[role=dialog] [role=combobox]')")
+    selected = window.evaluate_js("""(() => {
+        const trigger=document.querySelector('[role=dialog] [role=combobox]');
+        if (!trigger) return false;
+        trigger.click(); return true;
+    })()""")
+    if not selected: smoke.fail("schedule_day_turn_selector_unavailable")
+    smoke.wait_js(window, """[...document.querySelectorAll('[role=option]')].some(
+        n=>n.textContent.includes('Sábado') && n.textContent.includes('Matutino'))""")
+    selected = window.evaluate_js("""(() => {
+        const option=[...document.querySelectorAll('[role=option]')].find(
+            n=>n.textContent.includes('Sábado') && n.textContent.includes('Matutino'));
+        if (!option) return false;
+        option.click(); return true;
+    })()""")
+    if not selected: smoke.fail("schedule_saturday_morning_option_unavailable")
+    smoke.wait_js(window, """document.querySelector('[role=dialog] [role=combobox]')?.textContent.includes('Sábado')""")
+
+
 def saturday_js(selected):
-    # Saturday toggle inside the agenda dialog (HeroUI ToggleButton exposes aria-pressed).
-    return """(() => {const n=document.querySelector('[role=dialog] button[aria-label="Sábado"]');return !!n && (n.getAttribute('aria-pressed')==='true')===%s;})()""" % json.dumps(selected)
+    # HeroUI Switch exposes aria-checked or checked, not the old aria-pressed.
+    return """(() => {
+        const n=document.querySelector('[role=dialog] [role=switch]');
+        return !!n && (n.getAttribute('aria-checked')==='true' || n.checked===true)===%s;
+    })()""" % json.dumps(selected)
+
+
+def toggle_saturday(window, selected):
+    pressed = window.evaluate_js("""(() => {
+        const n=document.querySelector('[role=dialog] [role=switch]');
+        if (!n || n.disabled) return false;
+        n.click(); return true;
+    })()""")
+    if not pressed: smoke.fail("schedule_saturday_switch_unavailable")
+    smoke.wait_js(window,saturday_js(selected))
 
 
 def open_agenda(window):
     page(window,"Tarefas")
     smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.getAttribute('aria-label')==='Editar agenda'&&!n.disabled)")
     click(window,"Editar agenda")
-    smoke.wait_js(window,"!!document.querySelector('[role=dialog] button[aria-label=\"Sábado\"]')")
+    smoke.wait_js(window,"!!document.querySelector('[role=dialog] [role=combobox]')")
+    select_saturday_morning(window)
 
 
 def save_agenda(window):
@@ -69,10 +104,14 @@ def exercise(window,args,result):
         info,handle=smoke.native_info(window)
         require("native_window_visible",info["visible"] and info["edgechromium"])
         if args.scenario=="save":
+            result["stage"]="open_per_shift_agenda"
             open_agenda(window)
             require("fresh_default_schedule_weekdays_only",window.evaluate_js(saturday_js(False)))
-            click(window,"Sábado")
-            smoke.wait_js(window,saturday_js(True))
+            click(window,"Adicionar horário","document.querySelector('[role=dialog]')")
+            smoke.wait_js(window,"!!document.querySelector('[role=dialog] [data-time-row]')")
+            result["stage"]="enable_saturday_morning"
+            toggle_saturday(window,True)
+            result["stage"]="save_shared_agenda"
             save_agenda(window)
             page(window,"Ajustes")
             click(window,"Escuro")
@@ -84,8 +123,7 @@ def exercise(window,args,result):
             require("fox_always_shown",window.evaluate_js("!!document.querySelector('.fox-stage')"))
             open_agenda(window)
             require("agenda_survives_normal_close",window.evaluate_js(saturday_js(True)))
-            click(window,"Sábado")
-            smoke.wait_js(window,saturday_js(False))
+            toggle_saturday(window,False)
             stored(window,saturday_stored)
             require("toggle_does_not_save_implicitly")
             save_agenda(window)
@@ -108,8 +146,10 @@ def exercise(window,args,result):
         window.evaluate_js("window.scrollTo(0,0)")
         result["screenshot"]=smoke.capture_window(handle,args.output_dir/("settings-"+args.scenario+".png"))
         result["status"]="passed"
+        result["stage"]="complete"
     except Exception as error:
         result["status"]="failed"
+        result.setdefault("stage","other")
         result["failure"]=str(error) if isinstance(error,smoke.SmokeFailure) else "settings_window_check_failed"
         result["error_type"]=type(error).__name__
     finally:
