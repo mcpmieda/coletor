@@ -180,6 +180,18 @@ test('inactive rules retaining times cannot be erased by editing a uniform agend
   expect(() => toShared({ ...loaded, times: ['08:15', '09:15'] })).toThrow(/dia e turno/);
 });
 
+test('manual-only schedule retains every inactive stored time when reactivated', () => {
+  const schedule = toShared(draft({ mode: 'off' }));
+  const saturday = schedule.rules.find(r => r.weekday === 6 && r.shift === 'matutino')!;
+  saturday.times = ['07:45', '08:30'];
+  saturday.recheck = '09:00';
+  const loaded = fromShared(schedule);
+  expect(loaded.mode).toBe('off');
+  expect(loaded.custom).toBe(true);
+  expect(toShared(loaded)).toEqual(schedule);
+  expect(() => toShared({ ...loaded, mode: 'times', times: ['07:00'] })).toThrow(/dia e turno/);
+});
+
 test('fixed-time lines must be filled or explicitly removed, and must be distinct', () => {
   expect(draftProblem(draft({ mode: 'times', times: ['07:00', '', '08:00'] }))).toMatch(/Horário 2/);
   expect(draftProblem(draft({ mode: 'times', times: ['07:00', '07:00'] }))).toMatch(/repetido/);
