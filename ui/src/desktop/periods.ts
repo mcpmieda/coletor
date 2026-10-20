@@ -120,7 +120,10 @@ export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   const signature = (r: SharedSchedule['rules'][number]) => `${[...r.times].sort().join(',')}|${r.recheck ?? ''}`;
   const days = new Set(enabled.map(r => r.weekday));
   const oneShiftOnly = [...days].some(d => enabled.filter(r => r.weekday === d).length !== SHIFTS.length);
-  const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly;
+  // Even disabled rules can retain times for later reactivation. A global edit
+  // would erase those stored moments, so offer the lossless rule editor instead.
+  const disabledWithMoments = schedule.rules.some(r => !r.enabled && (r.times.length > 0 || r.recheck !== null));
+  const custom = new Set(enabled.map(signature)).size > 1 || oneShiftOnly || disabledWithMoments;
   // A heterogeneous agenda is never flattened. Its complete source travels
   // unchanged; the per-rule editor handles explicit edits without widening shifts.
   const rule = enabled[0];
