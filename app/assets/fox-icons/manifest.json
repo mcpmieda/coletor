@@ -23,10 +23,28 @@
       "file": "fox-blink.ico"
     },
     "fox-ear": {
-      "expression": "attentive",
+      "expression": "ear-left",
       "status": "attentive",
       "phase": 0,
       "file": "fox-ear.ico"
+    },
+    "fox-ear-right": {
+      "expression": "ear-right",
+      "status": "attentive",
+      "phase": 0,
+      "file": "fox-ear-right.ico"
+    },
+    "fox-ears": {
+      "expression": "ears",
+      "status": "attentive",
+      "phase": 0,
+      "file": "fox-ears.ico"
+    },
+    "fox-bob": {
+      "expression": "nod",
+      "status": "attentive",
+      "phase": 0,
+      "file": "fox-bob.ico"
     },
     "fox-paused": {
       "expression": "resting",
@@ -65,5 +83,5 @@
       "file": "fox-working-4.ico"
     }
   },
-  "note": "Status assets only; the host must select them based on verified application state. fox-ear is an attentive expression, not a tail frame. No tail ICO is fabricated."
+  "note": "Status assets only; the host must select them based on verified application state. fox-ear, fox-ear-right, fox-ears and fox-bob are head gestures, not a tail frame. No tail ICO is fabricated."
 }

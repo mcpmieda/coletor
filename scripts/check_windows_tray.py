@@ -103,8 +103,8 @@ def exercise(window,args,result):
         require("unregistered_tray_cannot_hide","error" in tray.hide() and inspect(tray)["window_visible"] and not tray.available())
         tray._invoke(lambda:setattr(tray._notify,"Visible",True))
         wait(lambda:inspect(tray)["registered"])
-        # Resting fox: a gesture every few seconds (blinks, ear wags), at most
-        # 14 frame changes in any 13 s window.
+        # Resting fox: a gesture on almost every 600 ms beat (blinks, ear
+        # droops, nods); 13 s holds at most 22 beats.
         # CI images often disable Windows animations (prefers-reduced-motion),
         # which correctly keeps the fox still; measure motion with it allowed.
         media(window,tray,False)
@@ -113,7 +113,7 @@ def exercise(window,args,result):
         result["idle_frame_updates"]=after["frame_updates"]-before
         require("idle_motion_gentle",8<=after["frame_updates"]-before<=22)
         require("window_icon_follows_fox",after["window_icon_matches"])
-        require("fox_icon_shown",data["icon"] in {"fox-idle","fox-blink","fox-ear"})
+        require("fox_icon_shown",data["icon"] in {"fox-idle","fox-blink","fox-ear","fox-ear-right","fox-ears","fox-bob"})
         for _ in range(6):
             tray._invoke(tray._hide); require("same_window_after_repeated_show_hide",not inspect(tray)["window_visible"])
             menu(tray._open_item); menu(tray._open_item)

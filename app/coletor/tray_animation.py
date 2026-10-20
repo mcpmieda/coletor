@@ -41,15 +41,16 @@ class AnimationPolicy:
         return self.enabled and not self.reduced_motion
 
 
-# Frequent gestures beside the clock: the first blink after 1.2 s, with
-# no resting gap longer than 1.2 s. Keep the 600 ms frame cadence.
-# (blink, a three-beat ear wag, a double blink and a short wag). Only head
-# frames exist at icon size; the tail lives on the full-body sprite.
+# A lively fox beside the clock, like the Atualizador's dragon: some gesture on
+# almost every 600 ms beat (blinks, ear droops on either or both sides, a nod),
+# never more than 1.2 s at rest. Frames come from scripts/make_fox_gestures.py.
 IDLE_SEQUENCE = (
-    "fox-idle", "fox-idle", "fox-blink", "fox-idle", "fox-idle",
-    "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-ear", "fox-idle", "fox-idle",
-    "fox-blink", "fox-idle", "fox-blink", "fox-idle", "fox-idle",
-    "fox-ear", "fox-idle", "fox-ear",
+    "fox-idle", "fox-idle", "fox-blink", "fox-idle", "fox-ear", "fox-idle",
+    "fox-ear", "fox-idle", "fox-ear-right", "fox-idle", "fox-ear-right", "fox-idle",
+    "fox-idle", "fox-blink", "fox-idle", "fox-blink", "fox-idle", "fox-ears",
+    "fox-ears", "fox-idle", "fox-bob", "fox-idle", "fox-bob", "fox-idle",
+    "fox-idle", "fox-ear", "fox-ear-right", "fox-ear", "fox-ear-right", "fox-idle",
+    "fox-blink",
 )
 WORKING_SEQUENCE = tuple(f"fox-working-{index}" for index in range(1, 5))
 STATIC_FRAMES = {

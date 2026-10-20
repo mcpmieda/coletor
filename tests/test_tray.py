@@ -67,11 +67,14 @@ class AnimationTests(unittest.TestCase):
             frames.append(self.controller.snapshot().frame_key)
             self.clock.advance(.6)
         self.assertEqual(tuple(frames), IDLE_SEQUENCE)
-        self.assertEqual(frames.count("fox-blink"), 3)  # one blink, then a double blink
-        ear = frames.index("fox-ear")
-        self.assertEqual(frames[ear:ear + 3], ["fox-ear", "fox-idle", "fox-ear"])  # ear twitch
+        self.assertGreaterEqual(frames.count("fox-blink"), 4)
+        for gesture in ("fox-ear", "fox-ear-right", "fox-ears", "fox-bob"):
+            self.assertIn(gesture, frames)
         # Only head frames exist at icon size; every frame has a real asset.
-        self.assertTrue(set(frames) <= {"fox-idle", "fox-blink", "fox-ear"})
+        self.assertTrue(set(frames) <= {"fox-idle", "fox-blink", "fox-ear", "fox-ear-right",
+                                        "fox-ears", "fox-bob"})
+        # Lively, not frantic: about half the beats rest on the neutral face.
+        self.assertGreaterEqual(frames.count("fox-idle") / len(frames), 0.4)
         # The owner wants frequent gestures: at most 1.2 seconds of rest,
         # including the loop boundary, without speeding up individual frames.
         rest = 0
@@ -184,6 +187,7 @@ class AnimationTests(unittest.TestCase):
             resolved = resolve_icon_paths(Path(directory))
             self.assertEqual(resolved["fox-blink"], paths["fox-idle"])
             self.assertEqual(resolved["fox-ear"], paths["fox-idle"])
+            self.assertEqual(resolved["fox-bob"], paths["fox-idle"])
             self.assertEqual(resolved["fox-working-4"], paths["fox-working-1"])
             self.assertEqual(resolved["fox-error"], paths["fox-error"])
             self.assertEqual(resolved["fox-paused"], paths["fox-paused"])
