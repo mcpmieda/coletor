@@ -26,9 +26,9 @@ def page(window,label):
 
 def select_saturday_morning(window):
     """Select Saturday/morning without flattening the per-shift shared agenda."""
-    smoke.wait_js(window, "!!document.querySelector('[role=dialog] button[aria-haspopup="listbox"], [role=dialog] [role=combobox]')")
+    smoke.wait_js(window, "!!document.querySelector('[role=dialog] button[aria-haspopup=listbox], [role=dialog] [role=combobox]')")
     selected = window.evaluate_js("""(() => {
-        const trigger=document.querySelector('[role=dialog] button[aria-haspopup="listbox"], [role=dialog] [role=combobox]');
+        const trigger=document.querySelector('[role=dialog] button[aria-haspopup=listbox], [role=dialog] [role=combobox]');
         if (!trigger) return false;
         trigger.click(); return true;
     })()""")
@@ -42,7 +42,7 @@ def select_saturday_morning(window):
         option.click(); return true;
     })()""")
     if not selected: smoke.fail("schedule_saturday_morning_option_unavailable")
-    smoke.wait_js(window, """document.querySelector('[role=dialog] button[aria-haspopup="listbox"], [role=dialog] [role=combobox]')?.textContent.includes('Sábado')""")
+    smoke.wait_js(window, """document.querySelector('[role=dialog] button[aria-haspopup=listbox], [role=dialog] [role=combobox]')?.textContent.includes('Sábado')""")
 
 
 def saturday_js(selected):
@@ -67,7 +67,7 @@ def open_agenda(window):
     page(window,"Tarefas")
     smoke.wait_js(window,"[...document.querySelectorAll('button')].some(n=>n.getAttribute('aria-label')==='Editar agenda'&&!n.disabled)")
     click(window,"Editar agenda")
-    smoke.wait_js(window,"!!document.querySelector('[role=dialog] button[aria-haspopup="listbox"], [role=dialog] [role=combobox]')")
+    smoke.wait_js(window,"!!document.querySelector('[role=dialog] button[aria-haspopup=listbox], [role=dialog] [role=combobox]')")
     select_saturday_morning(window)
 
 
