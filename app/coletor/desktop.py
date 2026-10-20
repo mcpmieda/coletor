@@ -5,6 +5,7 @@ The trusted local UI is the only page ever loaded into the privileged webview.
 """
 from pathlib import Path
 import sys
+from . import __version__
 from .service import ROOT
 from .desktop_api import DesktopApi
 
@@ -82,7 +83,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     show_requests = ShowRequests()
     api = DesktopApi(settings_directory, access=access)
     geometry = centered_window_geometry(primary_work_area())
-    window = webview.create_window("Coletor de Frequência · 0.4.0", str(entry) + "#coletor-desktop", js_api=api,
+    window = webview.create_window(f"Coletor de Frequência · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):

@@ -35,12 +35,18 @@ ALERTS = {
 }
 
 
+LOGON_TASK = r'\EcossistemaEscolar\ColetorFrequencia'
+
+
 def starts_with_windows():
-    """The installer's Startup shortcut opens the Coletor beside the clock at logon."""
-    base = os.environ.get('APPDATA')
-    if not base: return False
-    from pathlib import Path
-    return (Path(base) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Startup' / 'Coletor de Frequência.lnk').is_file()
+    """The installer's per-user logon task opens the Coletor beside the clock."""
+    if os.name != 'nt': return False
+    import subprocess
+    try:
+        return subprocess.run(['schtasks', '/Query', '/TN', LOGON_TASK], capture_output=True, timeout=10,
+                              creationflags=subprocess.CREATE_NO_WINDOW).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def native_local_recovery_confirmation(summary):
@@ -64,6 +70,15 @@ def native_local_recovery_confirmation(summary):
         'CONFIRMAR descarte local de frequencia — Coletor',0x4 | 0x30 | 0x100)==6
 
 
+def windows_reduced_motion():
+    """Windows' own "Animation effects" switch, the source the WebView's
+    prefers-reduced-motion follows. The fox starts right even if the window is late."""
+    if os.name != 'nt': return True
+    enabled = ctypes.c_bool(True)
+    if not ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(enabled), 0): return True
+    return not enabled.value
+
+
 class DesktopApi(PreviewApi):
     def __init__(self, settings_directory=None, access=None):
         self._settings = LocalSettings(settings_directory)
@@ -71,7 +86,8 @@ class DesktopApi(PreviewApi):
         self._resume_stop = threading.Event()  # Set on exit or logout.
         # The fox is part of the program's identity: always shown, animated unless the
         # system asks for reduced motion.
-        self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True})
+        self._desktop_state = DesktopState({"version": 1, "show": True, "animate": True},
+                                           reduced_motion=windows_reduced_motion())
         self._tray = None
         self._manual_session = ManualSession(settings_directory=settings_directory)
         self._provider = getattr(access, '_provider', None) if access else DeviceProvider(settings_directory)

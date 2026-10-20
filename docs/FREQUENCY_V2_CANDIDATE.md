@@ -11,8 +11,8 @@ Login Ecossistema, autorização nativa da chave Windows, login Smecel diretamen
 no Edge, carregar turmas, seleção por nomes e ativar coleta. A agenda vem do
 servidor e é compartilhada por escola/ano com revisão CAS. O rascunho local de
 desenvolvimento nunca serve como agenda do runtime Windows. Tema, raposa e
-seleções sem alunos continuam locais. Sem tarefa ou serviço: o instalador
-oferece (marcado) um atalho na pasta Inicializar que abre o Coletor ao lado do
+seleções sem alunos continuam locais. Sem serviço: o instalador oferece
+(marcado) uma tarefa de logon do usuário que abre o Coletor ao lado do
 relógio, e a coleta ativa é retomada ao reabrir. Histórico operacional sem
 nomes de alunos fica neste PC por 30 dias.
 

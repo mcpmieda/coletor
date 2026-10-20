@@ -5,12 +5,13 @@ ACTIVITIES = {"idle", "reading", "error"}
 
 
 class DesktopState:
-    def __init__(self, fox):
+    def __init__(self, fox, reduced_motion=True):
         self._lock = threading.RLock()
         self._fox = validate_fox(fox)
         self._ui_activity = "idle"
         self._reads = 0
-        self._reduced = True  # Static until the real media query arrives.
+        # Until the window reports its media query: static unless the caller knows better.
+        self._reduced = reduced_motion is not False
         self._changed = lambda: None
 
     def snapshot(self):

@@ -26,12 +26,22 @@ export function useDesktopTray(activity: DesktopActivity) {
     return () => { alive = false; window.removeEventListener('coletortrayready', read); };
   }, []);
   useEffect(() => {
-    const api = window.pywebview?.api;
-    if (!isDesktopSettings() || !api?.set_tray_context) return;
+    if (!isDesktopSettings()) return;
     const media = matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => { void syncTrayContext(api as TrayBridge, activity, media.matches).catch(() => setNotice('Não foi possível atualizar o estado da bandeja.')); };
+    // The bridge may arrive after this mounts (busy sign-in): report again when it does.
+    const update = () => {
+      const api = window.pywebview?.api;
+      if (!api?.set_tray_context) return;
+      void syncTrayContext(api as TrayBridge, activity, media.matches).catch(() => setNotice('Não foi possível atualizar o estado da bandeja.'));
+    };
     update(); media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
+    window.addEventListener('pywebviewready', update);
+    window.addEventListener('coletortrayready', update);
+    return () => {
+      media.removeEventListener('change', update);
+      window.removeEventListener('pywebviewready', update);
+      window.removeEventListener('coletortrayready', update);
+    };
   }, [activity]);
   async function hide() {
     const api = window.pywebview?.api;

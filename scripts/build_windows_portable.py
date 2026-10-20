@@ -22,15 +22,22 @@ import urllib.request
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-def product_version(root=ROOT):
+def product_version(root=ROOT, build=None):
+    """major.minor come from app/coletor/__init__.py; CI's build number becomes the
+    third part, so every published build carries a newer version."""
     text = (root / "app/coletor/__init__.py").read_text(encoding="utf-8")
     match = re.search(r'^__version__ = "(\d+\.\d+\.\d+)"$', text, re.M)
     if not match or any(int(part) > 65535 for part in match[1].split(".")):
         raise ValueError("Product version must be a three-part Windows-compatible version")
-    return match[1]
+    if not build:
+        return match[1]
+    if not re.fullmatch(r"[1-9]\d{0,4}", build) or int(build) > 65535:
+        raise ValueError("Build number must be 1-65535")
+    major, minor, _ = match[1].split(".")
+    return f"{major}.{minor}.{build}"
 
 
-PRODUCT_VERSION = product_version()
+PRODUCT_VERSION = product_version(build=os.environ.get("COLETOR_BUILD"))
 VERSION = PRODUCT_VERSION + "-teste"
 NAME = f"ColetorFrequencia-{VERSION}-windows-x64"
 PYTHON_VERSION = "3.13.16"
@@ -242,6 +249,9 @@ def build(output, source_commit):
     app.mkdir(parents=True)
     for p in sorted((ROOT / "app/coletor").glob("*.py")):
         shutil.copyfile(p, app / p.name)
+    init = app / "__init__.py"
+    init.write_text(re.sub(r'^__version__ = ".*"$', f'__version__ = "{PRODUCT_VERSION}"',
+                           init.read_text(encoding="utf-8"), count=1, flags=re.M), encoding="utf-8")
     shutil.copyfile(ROOT / "app/coletor/preview-limits.json", app / "preview-limits.json")
     shutil.copytree(ROOT / "app/assets", runtime / "app/assets")
     shutil.copytree(ROOT / "ui/dist", runtime / "ui/dist")

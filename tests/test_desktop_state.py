@@ -42,6 +42,10 @@ class DesktopStateTests(unittest.TestCase):
         state.set_context("idle", False)
         self.assertEqual(state.snapshot()["activity"], "idle")
 
+    def test_system_motion_setting_animates_before_the_window_reports(self):
+        self.assertFalse(DesktopState(default_settings()["fox"], reduced_motion=False).snapshot()["reduced_motion"])
+        self.assertTrue(DesktopState(default_settings()["fox"], reduced_motion=None).snapshot()["reduced_motion"])
+
     def test_no_collection_state_or_arbitrary_details_are_accepted(self):
         state = DesktopState(default_settings()["fox"])
         for activity, reduced in [("collected", False), ("DO_NOT_ECHO", False), ([], False), ("idle", 0)]:
