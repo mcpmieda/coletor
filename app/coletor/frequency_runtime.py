@@ -254,6 +254,11 @@ class FrequencyRuntime:
         with self._lock:
             self._status = value
             self._school_paused = value['settings']['paused']
+            # The Ecossistema answered: a "no connection" notice left by an earlier attempt (the
+            # computer woke up before its network) no longer holds until the next scheduled time.
+            if self._code == 'ACCESS_UNAVAILABLE' and self._state == 'reserve':
+                self._code = None
+                self._transient = None
         return value
 
     def _committed(self, reply, payload):
@@ -416,6 +421,9 @@ class FrequencyRuntime:
             self._lease = {**reply, 'deadline': deadline}
             if self._source_blocked: self._state, self._code = 'login-required', 'SOURCE_LOGIN_REQUIRED'
             elif self._code not in {None, 'lease-busy', 'unavailable', 'CANCELLED', 'paused'}: self._state = 'error'
+            # Each class renews the lease: a run in progress stays 'collecting', so the window keeps
+            # its progress bar and the heartbeat reports the run (21/10/2026: it showed 'ready').
+            elif self._state == 'collecting': self._code = None
             else: self._state, self._code = 'ready', None
 
     def _has_saved_selection(self):
