@@ -68,6 +68,24 @@ class QuitForUpdateTests(unittest.TestCase):
         tray._invoke.assert_called_once_with(tray._quit)
         window.destroy.assert_not_called()
 
+    def test_a_request_during_opening_waits_for_the_clock_icon(self):
+        # 21/10/2026 CI: destroying the window before the icon existed left the
+        # icon's message loop running and the uninstaller waited forever.
+        ready = threading.Event()
+        tray = Mock()
+        api = self.api(None)
+        window = Window(closes=True)
+        worker = threading.Thread(target=desktop.quit_for_update, args=(window, api, 0, ready))
+        worker.start()
+        worker.join(.2)
+        self.assertTrue(worker.is_alive())  # Still opening: nothing destroyed yet.
+        window.destroy.assert_not_called()
+        api._tray = tray  # The icon is now in place.
+        ready.set()
+        worker.join(2)
+        tray._invoke.assert_called_once_with(tray._quit)
+        window.destroy.assert_not_called()
+
     def test_without_tray_or_if_it_does_not_close_the_window_is_destroyed(self):
         window = Window(closes=False)
         desktop.quit_for_update(window, self.api(None), wait=0)

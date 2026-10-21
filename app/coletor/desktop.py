@@ -5,6 +5,7 @@ The trusted local UI is the only page ever loaded into the privileged webview.
 """
 from pathlib import Path
 import sys
+import threading
 from . import __version__
 from .service import ROOT
 from .desktop_api import DesktopApi
@@ -64,10 +65,16 @@ def finish_native_form(window):
     window.native.Invoke(Action(place_and_brand))
 
 
-def quit_for_update(window, api, wait=EXIT_COLLECTION_WAIT):
-    """Installer request: let the collection in flight end, then quit like Encerrar coletor."""
+def quit_for_update(window, api, wait=EXIT_COLLECTION_WAIT, ready=None):
+    """Installer request: let the collection in flight end, then quit like Encerrar coletor.
+
+    A request that arrives while the program is still opening waits for the
+    opening to end (ready): destroying the window before the clock icon exists
+    left the icon's message loop running and the process never exited.
+    """
     api._collector.finish_for_exit(wait)
-    window.events.shown.wait(60)
+    if ready is not None: ready.wait(90)
+    else: window.events.shown.wait(60)
     tray = api._tray
     if tray is not None:
         tray._invoke(tray._quit)
@@ -100,9 +107,14 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     window = webview.create_window(f"Coletor de Frequência · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
     quit_requests = QuitRequests()
-    quit_requests.listen(lambda: quit_for_update(window, api))
+    ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).
+    quit_requests.listen(lambda: quit_for_update(window, api, ready=ready))
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):
+        try: open_window(window)
+        finally: ready.set()
+
+    def open_window(window):
         # pywebview starts func before creating the native form. Wait for its
         # public shown event; otherwise tray setup races window.native=None.
         if not window.events.shown.wait(20) or window.events.closed.is_set(): return
