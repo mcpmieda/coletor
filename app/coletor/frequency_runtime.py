@@ -110,6 +110,54 @@ LESSON_STATES = frozenset({'planned_unknown', 'absent', 'excused_absent'})
 MAX_HISTORY_SCAN = 2000
 
 
+# How far around a day the class's marks still tell how many lessons that weekday has.
+LESSON_EVIDENCE_DAYS = 28
+# A whole-day absence covers at least this many lessons (school days have five or six).
+WHOLE_DAY_MIN_LESSONS = 4
+
+
+def lessons_per_day(records):
+    """How many lessons each school day really had, from the whole class's diary.
+
+    The Smecel shows six positions with a point on every school day, but a day of five lessons has
+    no sixth lesson: in 2026 every class had its 6th lesson only on Tuesdays and Thursdays, and not
+    one mark ever fell on a Monday, Wednesday or Friday 6th position (owner request 21/10/2026).
+
+    Only direct evidence drops a position: on that day, or on the same weekday within four weeks
+    either side, a student missed every lesson before it (from the first) but has no mark in it,
+    and no student of the class has a mark in it. That is the whole-day absence of a five-lesson
+    day ("XXXXX."). A position with any mark always counts. A day whose weekday has no mark at all
+    nearby takes the class's most common answer; otherwise every position stays (None).
+    """
+    days, marked = set(), {}
+    for record in records:
+        if record['state'] in LESSON_STATES:
+            days.add(record['date'])
+        if record['state'] in ('absent', 'excused_absent'):
+            marked.setdefault((record['date'], record['source_student_ref']), set()).add(record['lesson'])
+    by_weekday = {}
+    for (date, _), slots in marked.items():
+        by_weekday.setdefault(datetime.fromisoformat(date).weekday(), []).append((date, slots))
+    window = timedelta(days=LESSON_EVIDENCE_DAYS)
+    counts, evidence = {}, {}
+    for date in days:
+        day = datetime.fromisoformat(date)
+        near = [slots for other, slots in by_weekday.get(day.weekday(), ())
+                if abs(datetime.fromisoformat(other) - day) <= window]
+        evidence[date] = bool(near)
+        used = set().union(*near) if near else set()
+        # A student missed lessons 1..k and nothing else: lesson k+1, if nobody ever has a mark in
+        # it there, did not happen.
+        # At least four lessons missed: a late arrival (missed only 1..2) is never read as the day.
+        phantom = [max(slots) + 1 for slots in near
+                   if len(slots) >= WHOLE_DAY_MIN_LESSONS and slots == set(range(1, max(slots) + 1))
+                   and max(slots) < 6 and max(slots) + 1 not in used]
+        counts[date] = min(phantom) - 1 if phantom else None
+    known = [n for n in counts.values() if n is not None]
+    typical = max(sorted(set(known)), key=known.count) if known else None
+    return {date: (n if n is not None or evidence[date] else typical) for date, n in counts.items()}
+
+
 def collection_payload(preview, source_class, server_class, fencing, request_id, timezone_name='America/Bahia'):
     """Input is a Python worker result, never a bridged/user imported preview."""
     snapshot, capture = preview['snapshot'], preview['capture']
@@ -152,12 +200,16 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
                 'originalClass': s['original_class']} for s in students]
     marks, coverage, unresolved_days = [], {}, set()
     cutoff = datetime.fromtimestamp(stamp(capture['captured_at']), ZoneInfo(timezone_name)).date().isoformat()
+    day_lessons = lessons_per_day(snapshot['records'])
     for record in snapshot['records']:
         if record['date'] > cutoff: continue
         state = record['state']
         if state not in LESSON_STATES and state != 'unknown': continue
         if record['source_student_ref'] not in keys or not 1 <= record['lesson'] <= 6: raise FrequencyError('source-invalid')
         key = keys[record['source_student_ref']]
+        # A point past the day's last real lesson (the "6th lesson" of a five-lesson day) is no lesson.
+        last = day_lessons.get(record['date'])
+        if state == 'planned_unknown' and last is not None and record['lesson'] > last: continue
         if state == 'unknown':
             # A position without a confirmed meaning: the day is sent, but never as complete.
             unresolved_days.add((key, record['date']))
@@ -170,7 +222,7 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
             marks.append({'recordKey': key, 'date': record['date'], 'slot': record['lesson'],
                           'mark': 'X' if state == 'absent' else 'J'})
     version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'sourceClassId': source_class['class_id'],
-        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v2'})).hexdigest()
+        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v3'})).hexdigest()
     return {'operation': 'collect', 'academicYear': 2026, 'requestId': request_id, 'fencingToken': fencing,
             'classId': server_class['classId'], 'expectedRevision': server_class['revision'],
             'sourceVersion': 'sha256:' + version, 'sourceClassId': source_class['class_id'],
