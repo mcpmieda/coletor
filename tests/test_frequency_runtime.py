@@ -871,6 +871,30 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime.collect.call_count, 1)
         self.assertTrue(any(e['kind'] == 'late-cancelled' for e in self.runtime.recent_history(20)))
 
+    def test_same_name_twice_keeps_each_card_key_when_the_page_swaps_them(self):
+        # 21/10/2026: one student with two enrolments in 7A/8A; the Smecel swapped the two cards
+        # between captures and every collection moved all their days from one key to the other.
+        source = {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'}
+        central = {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}
+        old = [('2026-03-02', 'planned_unknown'), ('2026-05-20', 'absent')]   # first enrolment
+        new = [('2026-06-22', 'planned_unknown'), ('2026-10-20', 'excused_absent')]  # current one
+        def capture(first, second):
+            value = preview()
+            value['snapshot']['students'] = [
+                {'source_student_ref': ref, 'display_name': 'ALUNO REPETIDO', 'original_class': 'TURMA SINTÉTICA A'}
+                for ref in ('row:1', 'row:2')]
+            value['snapshot']['records'] = [
+                {'source_student_ref': ref, 'date': date, 'lesson': 1, 'state': state}
+                for ref, days in (('row:1', first), ('row:2', second)) for date, state in days]
+            # Only the ordinal differs between the two cards: an outside-enrolment position is ignored.
+            value['snapshot']['records'].append({'source_student_ref': 'row:1', 'date': '2026-01-05',
+                                                 'lesson': 1, 'state': 'outside_enrollment'})
+            payload = collection_payload(value, source, central, 1, DEVICE)
+            return {c['date']: c['recordKey'] for c in payload['coverage']}
+        before, after = capture(old, new), capture(new, old)
+        self.assertEqual(before, after)
+        self.assertNotEqual(before['2026-03-02'], before['2026-06-22'])
+
     def test_preview_or_different_header_cannot_be_promoted(self):
         value = preview(); value['mode'] = 'demo'
         source = {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'}

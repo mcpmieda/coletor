@@ -123,7 +123,21 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
     if any(class_key(s.get('original_class')) != expected for s in students): raise FrequencyError('source-invalid')
     if len({s['source_student_ref'] for s in students}) != len(students): raise FrequencyError('source-invalid')
     keys, duplicates = {}, {}
-    for student in students:
+    # The same name twice in a class (two enrolments of one student) is told apart by its ordinal.
+    # The Smecel page may swap the two cards between captures, so the ordinal follows each card's
+    # lesson period (first, then last lesson date), not its position on the page; the position only
+    # breaks a tie. Otherwise every capture moved all their days from one card to the other
+    # (owner request 21/10/2026).
+    period = {}
+    for record in snapshot['records']:
+        if record['state'] in LESSON_STATES:
+            first, last = period.get(record['source_student_ref'], (record['date'], record['date']))
+            period[record['source_student_ref']] = (min(first, record['date']), max(last, record['date']))
+    order = {s['source_student_ref']: index for index, s in enumerate(students)}
+    def stable(student):
+        first, last = period.get(student['source_student_ref'], ('9999-12-31', '9999-12-31'))
+        return (first, last, order[student['source_student_ref']])
+    for student in sorted(students, key=stable):
         normalized_name = unicodedata.normalize('NFC', label(student['display_name'])).casefold()
         normalized_class = unicodedata.normalize('NFC', label(student['original_class'])).casefold()
         signature = (normalized_name, normalized_class)
