@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Chip, Spinner, Toast } from '@heroui/react';
+import { Button, Chip, Spinner } from '@heroui/react';
 import { History, LayoutList, Minimize2, ScrollText, Settings } from 'lucide-react';
 import { version } from '../../package.json';
 import { useDesktopTray } from '../desktop';
@@ -100,7 +100,6 @@ export default function DesktopApp() {
           {page === 'settings' && <SettingsPage state={state} version={version} />}
         </div>
       </main>
-      <Toast.Provider placement="bottom end" />
     </div>
   );
 }
