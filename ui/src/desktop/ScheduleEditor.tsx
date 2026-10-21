@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
+import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup } from '@heroui/react';
+import { notify } from './foxSay';
 import { Save } from 'lucide-react';
 import type { SharedSchedule } from '../collector';
 import { call, type Status } from './bridge';
@@ -57,7 +58,7 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
     setSaving(true); setError('');
     try {
       const saved = await call(api => api.save_shared_schedule(baseRevision, candidate));
-      toast.success('Agenda salva para todos os computadores da escola'); onSaved(saved);
+      notify.success('Agenda salva para todos os computadores da escola'); onSaved(saved);
     } catch (e) {
       const code = (e as Error & { code?: string }).code;
       setError(code === 'revision-conflict' ? 'A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.' : (e instanceof Error ? e.message : 'Não foi possível salvar.'));

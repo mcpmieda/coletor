@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Chip, ProgressBar, toast } from '@heroui/react';
+import { Alert, Button, Card, Chip, ProgressBar } from '@heroui/react';
+import { notify } from './foxSay';
 import { Activity, CalendarClock, CalendarDays, KeyRound, LayoutList, Pause, Pencil, Play, RefreshCw, School, Settings, ShieldCheck } from 'lucide-react';
 import { COLLECTOR_CODES } from '../collector';
 import { call, type Status } from './bridge';
@@ -36,19 +37,19 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   // page busy, so Pause stays available, and show what really happened at the end.
   function collectNow() {
     setStarting(true);
-    toast('Coleta iniciada');
+    notify('Coleta iniciada');
     window.setTimeout(() => { setStarting(false); void refresh(); }, 1500);
     void call(api => api.collect_now()).then(final => {
       setStatus(final);
-      if (final.code && !QUIET_CODES.has(final.code)) toast.danger(COLLECTOR_CODES[final.code] ?? 'A coleta não terminou.');
-    }).catch(e => { toast.danger(e instanceof Error ? e.message : 'Não foi possível coletar.'); }).finally(() => { void refresh(); });
+      if (final.code && !QUIET_CODES.has(final.code)) notify.danger(COLLECTOR_CODES[final.code] ?? 'A coleta não terminou.');
+    }).catch(e => { notify.danger(e instanceof Error ? e.message : 'Não foi possível coletar.'); }).finally(() => { void refresh(); });
   }
 
   async function act(work: Parameters<typeof call<Status>>[0], message?: string) {
     if (busy) return;
     setBusy(true);
-    try { setStatus(await call(work)); if (message) toast(message); }
-    catch (e) { toast.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
+    try { setStatus(await call(work)); if (message) notify(message); }
+    catch (e) { notify.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { setBusy(false); void refresh(); }
   }
 
@@ -79,7 +80,10 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
 
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Turmas coletadas" value={classes} icon={<School size={20} />} />
-        <Stat label="Coletando agora" value={collecting ? `${status!.progress?.completed ?? 0}/${status!.progress?.total ?? 0}` : '—'} icon={<Activity size={20} />} />
+        {/* "Coletando agora" only while a run is in progress; otherwise it read as if one were (owner, 21/10/2026). */}
+        {collecting
+          ? <Stat label="Coletando agora" value={`${status!.progress?.completed ?? 0}/${status!.progress?.total ?? 0}`} icon={<Activity size={20} />} />
+          : <Stat label="Agora" value={status?.localPaused || status?.settings?.paused ? 'Pausado' : 'Aguardando'} icon={<Activity size={20} />} />}
         <Stat label="Próxima coleta" value={fmtCountdown(next, nowMs)} icon={<CalendarClock size={20} />} />
         <Stat label="Falhas nas últimas 24 h" value={errors24h} icon={<ShieldCheck size={20} />} />
       </div>

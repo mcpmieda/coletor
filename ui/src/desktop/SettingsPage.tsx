@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, Chip, Modal, ToggleButton, ToggleButtonGroup, toast } from '@heroui/react';
+import { Button, Card, Chip, Modal, ToggleButton, ToggleButtonGroup } from '@heroui/react';
+import { notify } from './foxSay';
 import { CheckCircle2, KeyRound, ListChecks, LogOut, Monitor, Moon, Sun, Trash2, XCircle } from 'lucide-react';
 import ManualSource from '../components/ManualSource';
 import { paintTheme, type ThemeMode } from '../theme';
@@ -38,8 +39,8 @@ export default function SettingsPage({ state, version }: Readonly<{ state: Colet
   async function run<T>(work: Parameters<typeof call<T>>[0], done?: (value: T) => void, message?: string) {
     if (busy) return;
     setBusy(true);
-    try { const value = await call(work); done?.(value); if (message) toast.success(message); }
-    catch (e) { toast.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
+    try { const value = await call(work); done?.(value); if (message) notify.success(message); }
+    catch (e) { notify.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
     finally { setBusy(false); }
   }
   // Closing the choice ends the Smecel session it opened (and resumes collection).
