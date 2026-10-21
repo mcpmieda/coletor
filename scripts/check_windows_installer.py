@@ -172,7 +172,9 @@ def run(installer, expected_sha, output):
             report["checks"]["opens_at_windows_sign_in_by_default"] = True
             check_upgrade_over_running_app(installer, installed, root, report)
             # The uninstaller closes the reopened Coletor before removing its files.
-            uninstall_log = root / "uninstall.log"
+            # Outside the temporary folder: the uninstaller's own copy may still hold its log for a moment
+            # after unins000.exe returns, and that must not fail the folder cleanup.
+            uninstall_log = Path(tempfile.gettempdir()) / f"collector-installer-qa-uninstall-{os.getpid()}.log"
             try:
                 uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
                                             "/LOG=" + str(uninstall_log)], capture_output=True, timeout=150)
