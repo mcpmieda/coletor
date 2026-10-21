@@ -172,8 +172,16 @@ def run(installer, expected_sha, output):
             report["checks"]["opens_at_windows_sign_in_by_default"] = True
             check_upgrade_over_running_app(installer, installed, root, report)
             # The uninstaller closes the reopened Coletor before removing its files.
-            uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-                                       capture_output=True, timeout=150)
+            uninstall_log = root / "uninstall.log"
+            try:
+                uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                                            "/LOG=" + str(uninstall_log)], capture_output=True, timeout=150)
+            except subprocess.TimeoutExpired:
+                # Diagnose a stuck uninstall (CI only; synthetic paths, no accounts).
+                if uninstall_log.exists():
+                    print(uninstall_log.read_text(encoding="utf-8", errors="replace")[-4000:], file=sys.stderr)
+                print("collector processes still running:", sorted(installed_processes(installed)), file=sys.stderr)
+                raise RuntimeError("uninstall-timed-out") from None
             if uninstall.returncode != 0:
                 raise RuntimeError("uninstall-failed")
             if (installed / "programa" / "python.exe").exists():
