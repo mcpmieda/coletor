@@ -124,8 +124,10 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
                 <span className="truncate">Coletando {status!.progress?.classLabel ?? '…'}</span>
                 <span className="text-muted">{status!.progress?.completed ?? 0}/{status!.progress?.total ?? 0}</span>
               </div>
-              <ProgressBar aria-label="Progresso" size="sm" value={status!.progress?.total ? Math.round(((status!.progress.completed ?? 0) / status!.progress.total) * 100) : 0}>
-                <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
+              <ProgressBar aria-label="Progresso" size="md" value={status!.progress?.total ? Math.round(((status!.progress.completed ?? 0) / status!.progress.total) * 100) : 0}>
+                {/* A stripe keeps moving while the run goes on, so the bar shows life from the first
+                    class on (owner request 21/10/2026): at 0/15 the fill alone is an empty grey track. */}
+                <ProgressBar.Track className="collect-track"><ProgressBar.Fill /><span className="collect-sweep" aria-hidden="true" /></ProgressBar.Track>
               </ProgressBar>
             </div>
           ) : (
