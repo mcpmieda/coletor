@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from coletor.device_provider import FrequencyError
 import coletor.frequency_runtime as frequency_runtime
-from coletor.frequency_runtime import FrequencyRuntime, collection_payload, validate_schedule
+from coletor.frequency_runtime import FrequencyRuntime, collection_payload, lessons_per_day, validate_schedule
 from coletor.institutional_access import AccessDenied
 from coletor.protected_storage import Dpapi, ProtectedStorage, StorageError
 from coletor.instance_lock import CollectorInstance
@@ -974,6 +974,70 @@ class RuntimeTests(unittest.TestCase):
         finally: self.runtime._operation.release()
 
 
+class LessonsPerDayTests(unittest.TestCase):
+    """The Smecel's phantom 6th lesson (owner request 21/10/2026): six positions every day, but the
+    6th only happens on some weekdays. Evidence: a whole-day absence that stops before it."""
+
+    @staticmethod
+    def day(date, marks=None, lessons=6):
+        marks = marks or {}
+        return [{'source_student_ref': ref, 'date': date, 'lesson': lesson,
+                 'state': {'X': 'absent', 'J': 'excused_absent'}.get(marks.get(ref, {}).get(lesson), 'planned_unknown')}
+                for ref in ('row:1', 'row:2') for lesson in range(1, lessons + 1)]
+
+    def records(self):
+        five = {lesson: 'X' for lesson in range(1, 6)}
+        six = {lesson: 'X' for lesson in range(1, 7)}
+        return (self.day('2026-03-02', {'row:1': five})          # Monday, whole day missed: 1..5 only
+                + self.day('2026-03-03', {'row:2': six})         # Tuesday, whole day missed: 1..6
+                + self.day('2026-03-09')                         # quiet Monday
+                + self.day('2026-03-10')                         # quiet Tuesday
+                + self.day('2026-03-16', {'row:2': {3: 'J'}})    # Monday, one lesson in the middle
+                + self.day('2026-03-14')                         # a school Saturday with no evidence
+                + self.day('2026-03-23', {'row:1': {1: 'X', 2: 'X'}}))  # Monday, arrived late
+
+    def test_five_lesson_weekday_loses_only_its_phantom_6th_position(self):
+        counts = lessons_per_day(self.records())
+        self.assertEqual(counts['2026-03-02'], 5)
+        self.assertEqual(counts['2026-03-09'], 5)   # quiet day: its weekday's timetable
+        self.assertEqual(counts['2026-03-16'], 5)   # a lone mark on the 3rd never cuts lessons 4 and 5
+        self.assertEqual(counts['2026-03-23'], 5)   # missing 1..2 is not a "day ends at 2"
+        self.assertIsNone(counts['2026-03-03'])     # Tuesday: the 6th has marks, every position stays
+        self.assertIsNone(counts['2026-03-10'])
+        self.assertEqual(counts['2026-03-14'], 5)   # no evidence nearby: the class's usual day
+
+    def test_a_mark_on_the_6th_keeps_it_even_on_a_five_lesson_weekday(self):
+        records = self.records() + self.day('2026-03-30', {'row:1': {6: 'X'}})
+        self.assertIsNone(lessons_per_day(records)['2026-03-30'])
+
+    def test_evidence_is_local_so_a_timetable_change_is_followed(self):
+        # Mondays had a 6th lesson in February and stopped in March.
+        records = (self.day('2026-02-02', {'row:1': {lesson: 'X' for lesson in range(1, 7)}})
+                   + self.day('2026-04-06', {'row:1': {lesson: 'X' for lesson in range(1, 6)}}))
+        counts = lessons_per_day(records)
+        self.assertIsNone(counts['2026-02-02'])
+        self.assertEqual(counts['2026-04-06'], 5)
+
+    def test_a_late_arrival_alone_never_shortens_the_day(self):
+        records = self.day('2026-05-04', {'row:1': {1: 'X', 2: 'X'}})
+        self.assertIsNone(lessons_per_day(records)['2026-05-04'])
+
+    def test_payload_counts_five_lessons_on_a_quiet_five_lesson_day(self):
+        value = preview()
+        value['snapshot']['students'] = [
+            {'source_student_ref': ref, 'display_name': name, 'original_class': 'TURMA SINTÉTICA A'}
+            for ref, name in (('row:1', 'ALUNO UM'), ('row:2', 'ALUNO DOIS'))]
+        value['snapshot']['records'] = self.records()
+        payload = collection_payload(value, {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                     {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 1, DEVICE)
+        slots = {c['date']: c['slots'] for c in payload['coverage']}
+        self.assertEqual(slots['2026-03-09'], [1, 2, 3, 4, 5])
+        self.assertEqual(slots['2026-03-10'], [1, 2, 3, 4, 5, 6])
+        # Every mark still sits on a lesson of its day (the server rejects any other).
+        lessons = {(c['recordKey'], c['date']): set(c['slots']) for c in payload['coverage']}
+        self.assertTrue(all(m['slot'] in lessons[(m['recordKey'], m['date'])] for m in payload['marks']))
+
+
 class StorageTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(); self.addCleanup(self.directory.cleanup)
@@ -988,7 +1052,7 @@ class StorageTests(unittest.TestCase):
         self.storage.enable(); self.storage.enqueue({'requestId': 'second', 'marks': ['PRIVATE SYNTHETIC']})
         raw = (self.storage.directory / 'queue.dpapi').read_bytes()
         self.assertNotIn(b'PRIVATE SYNTHETIC', raw)
-        restored = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto()); restored.bind(DEVICE, 1)
+        restored = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto(), clock=lambda: self.now); restored.bind(DEVICE, 1)  # same fixed clock: the real one aged the batches out (21/10/2026)
         self.assertEqual(len(restored.queue()), 2)
         before = (restored.directory / 'queue.dpapi').read_bytes()
         with self.assertRaises(StorageError) as prevented:
@@ -1041,7 +1105,7 @@ class StorageTests(unittest.TestCase):
 
     def test_wrong_device_and_corrupt_dpapi_fail_closed(self):
         self.storage.enable(); self.storage.enqueue({'requestId': DEVICE})
-        wrong = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto()); wrong.bind('another-device', 1)
+        wrong = ProtectedStorage(self.directory.name, crypto=SyntheticCrypto(), clock=lambda: self.now); wrong.bind('another-device', 1)
         with self.assertRaises(StorageError): wrong.queue()
         (self.storage.directory / 'queue.dpapi').write_bytes(b'corrupt')
         with self.assertRaises(StorageError): self.storage.queue()

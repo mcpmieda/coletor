@@ -71,3 +71,9 @@ Conciliação detalhada de uma turma principal e de um único caso transferido. 
 ## Atualização de 20/10/2026: X azul
 
 O Smecel passou a exibir o **X azul** ("falta com motivo informado (não abona)"), ausente na leitura de 10/10/2026. Na turma principal havia 399 dessas marcas. Antes desta correção o coletor as tratava como marca desconhecida: na coleta automática (que tolera marcas desconhecidas) elas eram **descartadas**, e as faltas não chegavam ao ecossistema. Agora entram como falta justificada (J). O ícone de calendário continua exigindo a legenda "dia não letivo" e nunca é enviado como falta.
+
+## Atualização de 21/10/2026: a 6ª aula fantasma
+
+O Smecel mostra **6 posições com ponto em todos os dias letivos**, mas em 2026 a 6ª aula só existe às **terças e quintas**, em todas as 15 turmas. No banco havia 0 marcas na 6ª posição de qualquer segunda, quarta ou sexta, e 3.788 dias de aluno com falta da 1ª à 5ª e a 6ª "sem falta". Contar essa posição somava 3 aulas inexistentes por semana: em outubro, o total por aluno ia de ~60 para ~66 e o número de alunos abaixo de 75% caía de 43 para 29.
+
+Regra do coletor (`lessons_per_day`, leitor `smecel-annual-v3`): uma posição só deixa de ser aula com **prova direta**. Nesse dia, ou no mesmo dia da semana até 4 semanas antes ou depois, algum aluno precisa ter faltado em todas as aulas anteriores a ela (pelo menos 4, contadas desde a 1ª) e não nela, e nenhum aluno da turma pode ter marca nela. Posição com qualquer marca sempre conta. Um dia sem nenhuma marca no seu dia da semana por perto usa o tamanho de dia mais comum da turma. Mudança de grade ao longo do ano é seguida pela janela de 4 semanas. Nada é configurado à mão.
