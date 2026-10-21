@@ -12,9 +12,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from xml.etree import ElementTree
 
 LOGON_TASK = r"\EcossistemaEscolar\ColetorFrequencia"
+QUIT_EVENT = r"Local\EcossistemaEscolar.ColetorFrequencia.Encerrar"  # app/coletor/instance_lock.py
+INSTALL_FLAGS = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/NOICONS"]
 
 
 def sha256(path):
@@ -23,6 +26,77 @@ def sha256(path):
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def installed_processes(folder):
+    """PIDs of processes started from the installed folder (launcher, pythonw, workers)."""
+    script = ("$f = $env:COLETOR_QA_FOLDER.TrimEnd('\\') + '\\'; Get-CimInstance Win32_Process | "
+              "Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($f, 'OrdinalIgnoreCase') } | "
+              "ForEach-Object { $_.ProcessId }")
+    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True,
+                            text=True, timeout=60, env={**os.environ, "COLETOR_QA_FOLDER": str(folder)})
+    if result.returncode:
+        raise RuntimeError("process-listing-failed")
+    return {int(x) for x in result.stdout.split()}
+
+
+def quit_event_ready():
+    import ctypes
+    kernel = ctypes.windll.kernel32
+    handle = kernel.OpenEventW(0x00100000, False, QUIT_EVENT)  # SYNCHRONIZE: open only, never signal.
+    if handle: kernel.CloseHandle(handle)
+    return bool(handle)
+
+
+def wait_until(condition, seconds, code):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition(): return
+        time.sleep(1)
+    raise RuntimeError(code)
+
+
+def upgrade(installer, installed, log, report, name):
+    started = time.monotonic()
+    result = subprocess.run([str(installer), *INSTALL_FLAGS, "/DIR=" + str(installed), "/LOG=" + str(log)],
+                            capture_output=True, timeout=600, check=False)
+    report["upgrade_seconds"][name] = round(time.monotonic() - started, 1)
+    if result.returncode != 0:
+        raise RuntimeError(f"upgrade-over-running-{name}-exit-{result.returncode}")
+    return log.read_text(encoding="utf-8", errors="replace")
+
+
+def check_upgrade_over_running_app(installer, installed, root, report):
+    """Schools get updates while the Coletor runs beside the clock (20/10/2026: exit 5)."""
+    report["upgrade_seconds"] = {}
+    programa = installed / "programa"
+    if installed_processes(installed) or quit_event_ready():
+        raise RuntimeError("unexpected-collector-before-upgrade")
+    # 1. A Coletor up to 0.4.245 has no quit event and ignores WM_CLOSE: stopped after a short wait.
+    legacy = subprocess.Popen([str(programa / "python.exe"), "-B", "-c", "import time; time.sleep(900)"],
+                              cwd=programa)
+    try:
+        wait_until(lambda: legacy.pid in installed_processes(installed), 30, "legacy-process-not-started")
+        text = upgrade(installer, installed, root / "upgrade-legacy.log", report, "legacy")
+        legacy.wait(timeout=30)
+        if "quit event answered: 0" not in text:
+            raise RuntimeError("legacy-collector-not-stopped")
+    finally:
+        if legacy.poll() is None: legacy.kill()
+    # The installer reopens what it closed, beside the clock (--background).
+    wait_until(quit_event_ready, 120, "collector-not-reopened-after-legacy-upgrade")
+    report["checks"]["upgrade_stops_legacy_collector_and_reopens"] = True
+    # 2. The real current Coletor, with its tray: asked to quit, it exits by itself.
+    before = installed_processes(installed)
+    if not before:
+        raise RuntimeError("reopened-collector-not-running")
+    text = upgrade(installer, installed, root / "upgrade-running.log", report, "running")
+    if "quit event answered: 1" not in text or "did not quit in time" in text:
+        raise RuntimeError("running-collector-not-closed-cooperatively")
+    if before & installed_processes(installed):
+        raise RuntimeError("old-collector-process-survived-upgrade")
+    wait_until(quit_event_ready, 120, "collector-not-reopened-after-upgrade")
+    report["checks"]["upgrade_over_running_app_exits_0_and_reopens"] = True
 
 
 def run(installer, expected_sha, output):
@@ -42,8 +116,7 @@ def run(installer, expected_sha, output):
         report = {"status": "failed", "checks": {}, "real_accounts": False, "real_network": False}
         uninstaller = installed / "unins000.exe"
         try:
-            command = [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-                       "/CURRENTUSER", "/NOICONS", "/DIR=" + str(installed)]
+            command = [str(installer), *INSTALL_FLAGS, "/DIR=" + str(installed)]
             result = subprocess.run(command, capture_output=True, timeout=150, check=False)
             if result.returncode != 0:
                 raise RuntimeError("installer-failed")
@@ -97,12 +170,16 @@ def run(installer, expected_sha, output):
                 raise RuntimeError("installed-logon-task-contract-mismatch")
             report["checks"]["startup_targets_native_launcher_in_background"] = True
             report["checks"]["opens_at_windows_sign_in_by_default"] = True
+            check_upgrade_over_running_app(installer, installed, root, report)
+            # The uninstaller closes the reopened Coletor before removing its files.
             uninstall = subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                                        capture_output=True, timeout=150)
             if uninstall.returncode != 0:
                 raise RuntimeError("uninstall-failed")
             if (installed / "programa" / "python.exe").exists():
                 raise RuntimeError("uninstall-left-program")
+            if installed_processes(installed):
+                raise RuntimeError("uninstall-left-collector-running")
             if subprocess.run(["schtasks", "/Query", "/TN", LOGON_TASK], capture_output=True, timeout=30).returncode == 0:
                 raise RuntimeError("uninstall-left-logon-task")
             if sentinel.read_text(encoding="utf-8") != "synthetic-sentinel":
@@ -110,6 +187,9 @@ def run(installer, expected_sha, output):
             report["checks"]["uninstall_preserves_unrelated_data"] = True
             report["status"] = "passed"
         finally:
+            if installed.exists():
+                for pid in installed_processes(installed):
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=30)
             if uninstaller.exists():
                 subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                                capture_output=True, timeout=60, check=False)

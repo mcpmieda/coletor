@@ -10,6 +10,9 @@ from .service import ROOT
 from .desktop_api import DesktopApi
 
 APP_USER_MODEL_ID = "EcossistemaEscolar.ColetorFrequenciaSmecel"
+# An update waits this long for the collection in flight (installer/Coletor.iss
+# waits a little longer before stopping the processes as a last resort).
+EXIT_COLLECTION_WAIT = 15 * 60
 
 
 def centered_window_geometry(work_area, width=1240, height=820, minimum=(900, 620)):
@@ -61,6 +64,17 @@ def finish_native_form(window):
     window.native.Invoke(Action(place_and_brand))
 
 
+def quit_for_update(window, api, wait=EXIT_COLLECTION_WAIT):
+    """Installer request: let the collection in flight end, then quit like Encerrar coletor."""
+    api._collector.finish_for_exit(wait)
+    window.events.shown.wait(60)
+    tray = api._tray
+    if tray is not None:
+        tray._invoke(tray._quit)
+        if window.events.closed.wait(10): return
+    window.destroy()
+
+
 def run_desktop(callback=None, settings_directory=None, *, access=None, background=False):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
@@ -73,7 +87,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
         raise SystemExit("Instale a dependência de desenvolvimento desktop indicada no README.") from None
     import ctypes
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    from .instance_lock import CollectorInstance, ShowRequests, signal_running_instance
+    from .instance_lock import CollectorInstance, QuitRequests, ShowRequests, signal_running_instance
     try:
         instance = CollectorInstance(settings_directory).acquire()
     except RuntimeError:
@@ -85,6 +99,8 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     geometry = centered_window_geometry(primary_work_area())
     window = webview.create_window(f"Coletor de Frequência · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
+    quit_requests = QuitRequests()
+    quit_requests.listen(lambda: quit_for_update(window, api))
     # Ephemeral browser profile. Only the separate validated settings JSON persists.
     def opened(window):
         # pywebview starts func before creating the native form. Wait for its
@@ -121,5 +137,6 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
                     if api._tray is not None: api._tray.stop()
                 finally:
                     show_requests.close()
+                    quit_requests.close()
                     instance.close()
 

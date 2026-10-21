@@ -179,6 +179,7 @@ class FrequencyRuntime:
         self._operation = threading.Lock()
         self._epoch = 0
         self._active, self._paused, self._closed = False, False, False
+        self._exiting = False  # An update asked the app to quit: start nothing new.
         self._school_paused = False
         self._confirm_discard = confirm_discard
         self._state, self._code = 'connect', None
@@ -468,7 +469,7 @@ class FrequencyRuntime:
 
     def tick(self):
         with self._lock:
-            if self._closed or not self._active or self._paused: return
+            if self._closed or self._exiting or not self._active or self._paused: return
             epoch = self._epoch
         if self._operation.locked():
             self._note_busy_slot()
@@ -591,6 +592,10 @@ class FrequencyRuntime:
         # A scheduled invocation already owns the operation lock so its minute
         # cannot be marked fired before a capture is accepted.
         if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
+        if self._exiting:
+            # The installer is replacing the program: no capture starts now.
+            if not _claimed: self._operation.release()
+            return self.public_status()
         self._on_started()
         heartbeat_stop = threading.Event()
         heartbeat, started = None, False
@@ -916,6 +921,17 @@ class FrequencyRuntime:
         for request_id in pending: self._storage.acknowledge(request_id)
         with self._lock: self._code = None
         return self.public_status()
+
+    def finish_for_exit(self, timeout):
+        """Update request: start no new collection and wait for the one in flight.
+
+        Returns False when it is still running after timeout; the caller then
+        quits anyway and shutdown() cancels it cooperatively (lease released).
+        """
+        with self._lock: self._exiting = True
+        if not self._operation.acquire(timeout=timeout): return False
+        self._operation.release()
+        return True
 
     def shutdown(self):
         self._stop.set()

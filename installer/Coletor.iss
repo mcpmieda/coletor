@@ -64,6 +64,155 @@ Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; 
 [Code]
 const
   LogonTask = '\EcossistemaEscolar\ColetorFrequencia';
+  // Same name as QUIT_EVENT in app/coletor/instance_lock.py. The Coletor
+  // ignores WM_CLOSE (it hides beside the clock), so Restart Manager cannot
+  // close it: it is asked to quit, finishes the collection in flight and exits.
+  QuitEvent = 'Local\EcossistemaEscolar.ColetorFrequencia.Encerrar';
+  // Longer than EXIT_COLLECTION_WAIT in app/coletor/desktop.py (15 min).
+  QuitWaitSeconds = 17 * 60;
+  // Versions up to 0.4.245 have no quit event: they are stopped after this.
+  LegacyWaitSeconds = 5;
+  EVENT_MODIFY_STATE = $0002;
+
+var
+  CollectorWasRunning: Boolean;
+
+function OpenEvent(Access: DWORD; Inherit: BOOL; Name: String): THandle;
+  external 'OpenEventW@kernel32.dll stdcall';
+function SetEvent(Handle: THandle): BOOL;
+  external 'SetEvent@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+function GetTickCount(): DWORD;
+  external 'GetTickCount@kernel32.dll stdcall';
+
+// Coletor processes started from this installation folder only (the launcher,
+// pythonw and its python workers), never another Python on the computer.
+// Terminate stops them (launcher first, so it shows no start-failure message).
+function CollectorProcesses(Folder: String; Terminate: Boolean): Integer;
+var
+  Locator, Service, Items, Item: Variant;
+  Names: array of String;
+  N, I: Integer;
+  Path: String;
+begin
+  Result := 0;
+  Folder := Lowercase(AddBackslash(Folder));
+  SetArrayLength(Names, 2);
+  Names[0] := 'Name = ''ColetorFrequencia.exe''';
+  Names[1] := 'Name = ''pythonw.exe'' OR Name = ''python.exe''';
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    for N := 0 to GetArrayLength(Names) - 1 do
+    begin
+      Items := Service.ExecQuery('SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE ' + Names[N]);
+      for I := 0 to Items.Count - 1 do
+      begin
+        Item := Items.ItemIndex(I);
+        Path := '';
+        if not VarIsNull(Item.ExecutablePath) then Path := Item.ExecutablePath;
+        Path := Lowercase(Path);
+        if (Path <> '') and (Pos(Folder, Path) = 1) then
+        begin
+          Result := Result + 1;
+          if Terminate then
+            try
+              Item.Terminate();
+            except
+              Log('Coletor process could not be stopped: ' + GetExceptionMessage);
+            end;
+        end;
+      end;
+    end;
+  except
+    Log('Coletor processes could not be listed: ' + GetExceptionMessage);
+    Result := -1;
+  end;
+end;
+
+function AskCollectorToQuit(): Boolean;
+var
+  Handle: THandle;
+begin
+  Result := False;
+  Handle := OpenEvent(EVENT_MODIFY_STATE, False, QuitEvent);
+  if Handle <> 0 then
+  begin
+    Result := SetEvent(Handle);
+    CloseHandle(Handle);
+  end;
+end;
+
+function WaitForCollectorExit(Folder: String; Seconds: Integer; Page: TOutputProgressWizardPage): Boolean;
+var
+  Started, Elapsed: DWORD;
+begin
+  // Wall-clock time: each process query itself can take over a second.
+  Started := GetTickCount();
+  repeat
+    if CollectorProcesses(Folder, False) = 0 then
+    begin
+      Result := True;
+      exit;
+    end;
+    Elapsed := GetTickCount() - Started;
+    if Page <> nil then Page.SetProgress(Elapsed div 1000, Seconds);
+    Sleep(500);
+  until Elapsed >= Seconds * 1000;
+  Result := CollectorProcesses(Folder, False) = 0;
+end;
+
+// Closes a running Coletor before its files are replaced or removed. It never
+// interrupts a collection: the app finishes it first (up to 15 min). Only an
+// unresponsive or older Coletor is stopped, and its saved queue is kept.
+function CloseCollector(Folder: String; Page: TOutputProgressWizardPage): String;
+var
+  Seconds: Integer;
+begin
+  Result := '';
+  if CollectorProcesses(Folder, False) = 0 then exit;
+  CollectorWasRunning := True;
+  if AskCollectorToQuit() then Seconds := QuitWaitSeconds else Seconds := LegacyWaitSeconds;
+  Log('Closing the running Coletor; quit event answered: ' + IntToStr(Ord(Seconds = QuitWaitSeconds)));
+  if Page <> nil then
+  begin
+    Page.SetText('Fechando o Coletor de Frequência…',
+                 'Se uma coleta estiver em andamento, o Coletor termina essa coleta antes de fechar.');
+    Page.Show;
+  end;
+  try
+    if not WaitForCollectorExit(Folder, Seconds, Page) then
+    begin
+      Log('Coletor did not quit in time; stopping its processes.');
+      CollectorProcesses(Folder, True);
+      if not WaitForCollectorExit(Folder, 15, nil) then
+        Result := 'Não foi possível fechar o Coletor de Frequência. Use "Encerrar coletor" no ícone ao lado do relógio e tente de novo.';
+    end;
+  finally
+    if Page <> nil then Page.Hide;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Page: TOutputProgressWizardPage;
+begin
+  Page := nil;
+  if not WizardSilent then
+    Page := CreateOutputProgressPage('Preparando a atualização', 'Fechando o Coletor de Frequência.');
+  Result := CloseCollector(ExpandConstant('{app}'), Page);
+end;
+
+procedure ReopenCollector();
+var
+  Code: Integer;
+begin
+  // Reopened beside the clock, as it was before the update.
+  if not ExecAsOriginalUser(ExpandConstant('{app}\programa\ColetorFrequencia.exe'), '--background',
+                            ExpandConstant('{app}\programa'), SW_SHOWNORMAL, ewNoWait, Code) then
+    Log('Coletor could not be reopened: ' + SysErrorMessage(Code));
+end;
 
 function XmlText(Value: String): String;
 begin
@@ -111,12 +260,22 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     if WizardIsTaskSelected('autostart') then RegisterLogonTask() else DeleteLogonTask();
+    if CollectorWasRunning then ReopenCollector();
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Error: String;
 begin
-  if CurUninstallStep = usUninstall then DeleteLogonTask();
+  if CurUninstallStep = usUninstall then
+  begin
+    DeleteLogonTask();
+    Error := CloseCollector(ExpandConstant('{app}'), nil);
+    if Error <> '' then Log(Error);
+  end;
 end;
 
 function InitializeUninstall(): Boolean;
