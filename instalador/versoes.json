@@ -3,6 +3,15 @@
   "limite": 5,
   "versoes": [
     {
+      "arquivo": "ColetorFrequencia-v0.4.255-build000255-c1c9111bf16b-windows-x64-setup.exe",
+      "sha256": "efd5ec66b06a3dec1f79ce4ad77eccddaf332ce0816a3a67788ee9fddae21d9c",
+      "versao": "0.4.255",
+      "commit": "c1c9111bf16bdd45b9b0bc6972e51fb3fef2a01a",
+      "run_id": 39586054181,
+      "run_number": 255,
+      "publicado_em": "2026-10-21T10:45:46+00:00"
+    },
+    {
       "arquivo": "ColetorFrequencia-v0.4.251-build000251-bbba050608ce-windows-x64-setup.exe",
       "sha256": "2e45121852538f9b682f20b8476c77b1dc10e50541c0e2820c25e8d0c0fd9aa4",
       "versao": "0.4.251",
@@ -37,15 +46,6 @@
       "run_id": 39409243075,
       "run_number": 238,
       "publicado_em": "2026-10-20T10:43:53+00:00"
-    },
-    {
-      "arquivo": "ColetorFrequencia-v0.4.0-build000232-9dfc9221a8b5-windows-x64-setup.exe",
-      "sha256": "b6cc02f80e1cef0f94291a71a579bc08c4d2d08aa0a79840355f5110293a672d",
-      "versao": "0.4.0",
-      "commit": "9dfc9221a8b5d106d9002b70f49bf72114088084",
-      "run_id": 39355770365,
-      "run_number": 232,
-      "publicado_em": "2026-10-20T01:59:24+00:00"
     }
   ]
 }
