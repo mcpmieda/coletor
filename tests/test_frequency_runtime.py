@@ -896,6 +896,33 @@ class RuntimeTests(unittest.TestCase):
         value = preview(); value['snapshot']['students'][0]['original_class'] = 'OUTRA TURMA'
         with self.assertRaises(FrequencyError): collection_payload(value, source, central, 1, DEVICE)
 
+    def test_a_run_stays_collecting_after_each_class_lease_for_the_progress_bar(self):
+        # 21/10/2026: each class renews the lease and that set 'ready', so the window hid its
+        # progress bar for the whole run and the heartbeat reported 'ready'.
+        seen = []
+        def during_capture():
+            seen.append(self.runtime.public_status())
+            self.runtime._heartbeat(self.runtime._epoch)
+        self.source.on_capture = during_capture
+        self.assertEqual(self.runtime.collect()['state'], 'ready')
+        self.assertEqual(seen[0]['state'], 'collecting')
+        self.assertEqual(seen[0]['progress']['total'], 1)
+        self.assertTrue(seen[0]['progress']['classLabel'])
+        beat = next(r for r in self.provider.requests if r['operation'] == 'heartbeat')
+        self.assertEqual(beat['status'], 'collecting')
+
+    def test_a_successful_status_clears_a_stale_no_connection_notice(self):
+        # The computer woke up before its network: the notice must not stay until the next time.
+        self.runtime._error(AccessDenied('ACCESS_UNAVAILABLE'))
+        self.assertEqual(self.runtime.public_status()['code'], 'ACCESS_UNAVAILABLE')
+        status = self.runtime.refresh()
+        self.assertIsNone(status['code'])
+        self.assertEqual(status['state'], 'reserve')
+
+    def test_a_successful_status_keeps_other_alerts(self):
+        self.runtime._error(FrequencyError('identity-review'))
+        self.assertEqual(self.runtime.refresh()['code'], 'identity-review')
+
     def test_update_exit_waits_for_the_collection_in_flight_and_starts_none(self):
         # The installer asks the app to quit: the running capture ends normally,
         # never cancelled; nothing new starts while the program is replaced.
