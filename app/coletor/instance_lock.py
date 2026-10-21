@@ -7,26 +7,30 @@ from .local_settings import user_settings_directory
 # Per-session event: a second launch (shortcut, Start menu, Windows sign-in)
 # asks the running Coletor to show its window instead of failing.
 SHOW_EVENT = 'Local\\EcossistemaEscolar.ColetorFrequencia.Mostrar'
+# Set by the installer (installer/Coletor.iss) before replacing the program:
+# the running Coletor finishes the collection in flight and quits by itself.
+QUIT_EVENT = 'Local\\EcossistemaEscolar.ColetorFrequencia.Encerrar'
 
 
-def signal_running_instance():
+def signal_running_instance(name=SHOW_EVENT):
     if os.name != 'nt': return False
     import ctypes
     kernel = ctypes.windll.kernel32
-    handle = kernel.OpenEventW(0x0002, False, SHOW_EVENT)  # EVENT_MODIFY_STATE
+    handle = kernel.OpenEventW(0x0002, False, name)  # EVENT_MODIFY_STATE
     if not handle: return False
     try: return bool(kernel.SetEvent(handle))
     finally: kernel.CloseHandle(handle)
 
 
 class ShowRequests:
-    def __init__(self):
+    def __init__(self, name=SHOW_EVENT):
         self._handle = None
         self._stopped = False
+        self._name = name
         if os.name == 'nt':
             import ctypes
             self._kernel = ctypes.windll.kernel32
-            self._handle = self._kernel.CreateEventW(None, False, False, SHOW_EVENT)
+            self._handle = self._kernel.CreateEventW(None, False, False, name)
 
     def listen(self, show):
         if not self._handle: return
@@ -36,12 +40,17 @@ class ShowRequests:
                 if self._stopped: break
                 try: show()
                 except Exception: pass
-        threading.Thread(target=wait, name='collector-show-requests', daemon=True).start()
+        threading.Thread(target=wait, name='collector-requests-' + self._name.rsplit('.', 1)[-1].lower(),
+                         daemon=True).start()
 
     def close(self):
         if not self._handle: return
         self._stopped = True
         self._kernel.SetEvent(self._handle)
+
+
+def QuitRequests():
+    return ShowRequests(QUIT_EVENT)
 
 
 class CollectorInstance:

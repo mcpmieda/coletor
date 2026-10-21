@@ -896,6 +896,32 @@ class RuntimeTests(unittest.TestCase):
         value = preview(); value['snapshot']['students'][0]['original_class'] = 'OUTRA TURMA'
         with self.assertRaises(FrequencyError): collection_payload(value, source, central, 1, DEVICE)
 
+    def test_update_exit_waits_for_the_collection_in_flight_and_starts_none(self):
+        # The installer asks the app to quit: the running capture ends normally,
+        # never cancelled; nothing new starts while the program is replaced.
+        self.runtime._operation.acquire()  # A collection is running.
+        finished = []
+        waiter = threading.Thread(target=lambda: finished.append(self.runtime.finish_for_exit(5)))
+        waiter.start()
+        time.sleep(.1)
+        self.assertEqual(finished, [])
+        self.assertEqual(self.runtime._epoch, 0)  # Not cancelled.
+        self.runtime._operation.release()  # The collection ends by itself.
+        waiter.join(2)
+        self.assertEqual(finished, [True])
+        self.runtime._on_started = Mock()
+        self.runtime.collect()
+        self.runtime._on_started.assert_not_called()
+        self.assertFalse(self.runtime._operation.locked())
+        self.runtime._fresh = Mock()
+        self.runtime.tick()
+        self.runtime._fresh.assert_not_called()
+
+    def test_update_exit_gives_up_waiting_after_the_timeout(self):
+        self.runtime._operation.acquire()
+        try: self.assertFalse(self.runtime.finish_for_exit(.05))
+        finally: self.runtime._operation.release()
+
 
 class StorageTests(unittest.TestCase):
     def setUp(self):
