@@ -8,6 +8,7 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import threading
 import time
@@ -23,6 +24,10 @@ UNREADABLE_GRACE_SECONDS = 10 * 60
 MAX_SESSION_BYTES = 1024 * 1024
 MAX_SMALL_BYTES = 8 * 1024
 PURPOSES = ('session', 'queue', 'consent', 'credential')
+# What this computer last sent, one file per class diary and one for the school's weekly grid
+# (owner decision 22/10/2026). Only a comparison aid: lost or unreadable means "send in full".
+COPY_PURPOSE = re.compile(r'copy:(?:frequency-[1-9][0-9]{0,9}|schedule)')
+MAX_COPY_BYTES = 32 * 1024 * 1024
 
 
 class StorageError(ValueError):
@@ -132,12 +137,16 @@ class ProtectedStorage:
     def persistent(self): return self._enabled
 
     def _entropy(self, purpose):
-        if self._binding is None or purpose not in PURPOSES: raise StorageError()
+        if self._binding is None or not (purpose in PURPOSES or COPY_PURPOSE.fullmatch(purpose)): raise StorageError()
         return ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + self._binding).encode('utf-8')
+
+    def _path(self, purpose):
+        # "copy:frequency-13331" is stored as copy-frequency-13331.dpapi (no colon in Windows names).
+        return self.directory / (purpose.replace(':', '-') + '.dpapi')
 
     def _read(self, purpose, path=None):
         if path is None and purpose in self._memory: return self._memory[purpose]
-        path = path or self.directory / (purpose + '.dpapi')
+        path = path or self._path(purpose)
         limit = self._limit(purpose)
         try:
             if path.is_symlink(): raise StorageError()
@@ -155,6 +164,7 @@ class ProtectedStorage:
     @staticmethod
     def _limit(purpose):
         if purpose == 'session': return MAX_SESSION_BYTES
+        if purpose.startswith('copy:'): return MAX_COPY_BYTES
         return MAX_QUEUE_BYTES if purpose == 'queue' else MAX_SMALL_BYTES
 
     def _write(self, purpose, value):
@@ -181,7 +191,7 @@ class ProtectedStorage:
                 file.write(encrypted)
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(name, self.directory / (purpose + '.dpapi'))
+            os.replace(name, self._path(purpose))
             self._memory.pop(purpose, None)
         finally: Path(name).unlink(missing_ok=True)
 
@@ -381,6 +391,24 @@ class ProtectedStorage:
                 # atomic and failures propagate; never remove nonempty queues.
                 self.discard_confirmed_local_queue()
 
+    def load_copy(self, name):
+        """The last copy saved under this name, or None when there is none or it cannot be read
+        (formatted or restored computer, cleared data, another Windows user or device generation):
+        the caller then sends in full and saves a new one."""
+        purpose = 'copy:' + name
+        if not COPY_PURPOSE.fullmatch(purpose): raise StorageError()
+        with self._lock:
+            try: value = self._read(purpose)
+            except StorageError: return None
+            return value if isinstance(value, dict) else None
+
+    def save_copy(self, name, value):
+        """Replace the copy with the data just confirmed by the server. Memory only when the operator
+        did not allow persistence; too large raises PROTECTED_STORAGE_LIMIT."""
+        purpose = 'copy:' + name
+        if not COPY_PURPOSE.fullmatch(purpose) or not isinstance(value, dict): raise StorageError()
+        with self._lock: self._write(purpose, value)
+
     def save_credential(self, email, password):
         """Explicit operator action: the Smecel login is written cifrado by
         Windows for this user and device, and never returned to the window."""
@@ -432,5 +460,8 @@ class ProtectedStorage:
             # Only the owned files; no recursive deletion or other app paths.
             for purpose in PURPOSES:
                 (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)
+            try: copies = [p for p in self.directory.glob('copy-*.dpapi') if not p.is_symlink()]
+            except OSError: copies = []
+            for item in copies: item.unlink(missing_ok=True)
             # Set-aside queues are NOT removed here: logout is no proof they were
             # receipted. They come back if readable, or expire with the retention.

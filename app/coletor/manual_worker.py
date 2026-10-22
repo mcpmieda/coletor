@@ -48,7 +48,7 @@ LIST_SETTLED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vi
 # Reading pages need no pictures, fonts or media. Aborting them keeps the six
 # HTTP/1.1 connections free for the list request and the diary itself. This
 # only refuses more: the allowed origin and every other block stay unchanged.
-READ_PATHS = ("/sistema/escola/turmaListar.php", "/sistema/escola/diario_frequencia.php")
+READ_PATHS = ("/sistema/escola/turmaListar.php", "/sistema/escola/diario_frequencia.php", "/sistema/escola/grade.php")
 READ_SKIPPED_TYPES = {"image", "font", "media"}
 # A list validated in this session is reused for the following diaries while
 # the worker alone navigated the window, and for at most this many seconds.
@@ -276,6 +276,10 @@ class BrowserWorker:
     def capture(self):
         return self._rpc({"command": "capture"})
 
+    def schedule(self):
+        # The school's weekly grid (owner decision 22/10/2026): one page, every class.
+        return self._rpc({"command": "schedule"})
+
     def login(self, email, password):
         # Same private pipe as captures; the reply carries only a boolean.
         return self._rpc({"command": "login", "email": email, "password": password}, timeout=60).get("logged_in") is True
@@ -339,6 +343,7 @@ class BrowserWorker:
 async def browser_session(initial):
     from .manual_session import matches_source, source_url
     from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
+    from .class_schedule import grade_url, matches_grade, SCHEDULE_JS
     from urllib.parse import parse_qsl, urlsplit
     from playwright.async_api import async_playwright
     url = initial.get("url", "")
@@ -439,6 +444,26 @@ async def browser_session(initial):
                             payload = await read_catalog(command["year"])
                             print(json.dumps(payload, ensure_ascii=False), flush=True)
                             return
+                        if command["command"] == "schedule":
+                            # Only from the class list's session (the operational one); the grid
+                            # page is read like the list: structured fields, never its HTML.
+                            if not listing_mode:
+                                raise ValueError("schedule_outside_list")
+                            target = grade_url()
+                            await load(target)
+                            before = page.url
+                            if not matches_grade(before):
+                                payload = {"error": "schedule_unavailable"}  # Login redirect.
+                            else:
+                                payload = await page.evaluate(SCHEDULE_JS)
+                                if page.url != before or payload.get("url") != before:
+                                    payload = {"error": "page_changed"}
+                            owned["url"] = None  # The list is loaded again when needed.
+                            encoded = json.dumps(payload, ensure_ascii=False)
+                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
+                                encoded = '{"error":"transport_limit"}'
+                            print(encoded, flush=True)
+                            return
                         class_id, year = params.get("ct"), params.get("ano")
                         if listing_mode:
                             class_id, year = command.get("class_id"), command.get("year")
@@ -479,7 +504,7 @@ async def browser_session(initial):
                             if not line:
                                 break
                             command = json.loads(line)
-                            if command.get("command") not in {"capture", "list", "state", "login"}:
+                            if command.get("command") not in {"capture", "list", "state", "login", "schedule"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")

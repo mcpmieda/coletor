@@ -19,6 +19,7 @@ import ctypes
 import os
 from .history import CollectorHistory
 from .institutional_access import AccessDenied
+from .local_copy import content_hash, is_current, schedule_hash, unchanged_payload
 from .manual_session import SessionError
 from .protected_storage import ProtectedStorage, StorageError
 
@@ -28,7 +29,7 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
               'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
-              'PENDING_BATCHES', 'SOURCE_READ_FAILED'}
+              'PENDING_BATCHES', 'SOURCE_READ_FAILED', 'payload-required'}
 # Problems an operator must see even with the window hidden in the tray.
 ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
@@ -45,6 +46,8 @@ QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT'}
 # at the next 30 s check; it reaches the history only if it lasts this long.
 TRANSIENT_CODES = {'ACCESS_UNAVAILABLE', 'unavailable'}
 TRANSIENT_GRACE_SECONDS = 600
+# The weekly grid rarely changes: it is read at most this often, at the end of a collection run.
+SCHEDULE_READ_SECONDS = 3600
 
 
 def discard_confirmation():
@@ -256,6 +259,7 @@ class FrequencyRuntime:
         self._fired = set()
         self._pending_slots, self._last_schedule = set(), None
         self._stale = {}  # Fenced, uncommitted batches by source class (see _drain).
+        self._schedule_read_at = None  # When the weekly grid was last read (this session).
         self._source_blocked = False
         self._last_tick = 0
         self._thread = None
@@ -772,10 +776,7 @@ class FrequencyRuntime:
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
                 self._note_unknown_marks(preview, source['name'])
                 del preview
-                with self._lock:
-                    self._check(epoch)
-                    self._storage.enqueue(payload)
-                self._send(payload, epoch)
+                self._deliver(payload, epoch, school_zone)
                 self._supersede(source['class_id'])
                 with self._lock:
                     self._progress['completed'] += 1
@@ -785,6 +786,7 @@ class FrequencyRuntime:
                                      read_ms=round((send_started - read_started) * 1000),
                                      send_ms=round((time.monotonic() - send_started) * 1000))
             self._check(epoch)
+            self._collect_schedule(epoch, catalog, status, (status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone'])
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
                 self._state, self._class = 'ready', None
@@ -872,9 +874,99 @@ class FrequencyRuntime:
             result = self._receipt(payload)
             if result is not None: self._storage.acknowledge(payload['requestId'])
 
-    def _send(self, payload, epoch):
+    def _deliver(self, payload, epoch, zone):
+        """Send the class's diary only when it changed (owner decision 22/10/2026).
+
+        The copy of what this computer last sent says whether the diary is the same; then only the
+        short message goes (students and the content's hash, every guard of a collection kept). The
+        server compares with what it holds and may answer 'payload-required' (its data was restored,
+        a student's link changed in the Centro...): then, and whenever there is no usable copy
+        (formatted or restored PC, cleared data), the whole diary goes as before, through the
+        protected queue, and the copy is replaced with it. Each class still goes in full once a day."""
+        key = 'frequency-' + payload['sourceClassId']
+        digest = content_hash(payload)
+        today = datetime.fromtimestamp(self._clock(), ZoneInfo(zone)).date().isoformat()
+        copy = self._load_copy(key)
+        if is_current(copy, payload, digest, today):
+            try:
+                self._send(unchanged_payload(payload, digest, str(uuid.uuid4())), epoch, queued=False)
+                return
+            except FrequencyError as error:
+                if error.code != 'payload-required': raise
+        with self._lock:
+            self._check(epoch)
+            self._storage.enqueue(payload)
+        self._send(payload, epoch)
+        self._save_copy(key, {'classId': payload['classId'], 'sourceClassId': payload['sourceClassId'],
+                              'contentHash': digest, 'fullOn': today,
+                              'content': {field: payload[field] for field in
+                                          ('sourceClassLabel', 'rosterComplete', 'records', 'coverage', 'marks')}})
+
+    def _collect_schedule(self, epoch, catalog, status, zone):
+        """The school's weekly grid for the Portal's "Horário" (owner decision 22/10/2026).
+
+        Read at most hourly, in the same verified session and under the same lease as the diaries.
+        Sent only when a class's grid differs from the local copy, or once a day; the server keeps a
+        version per change and only freshness otherwise. Each grid goes with the class's Smecel id
+        (the frequency's), matched to the Centro through the class list like the diaries. A failure
+        here never fails the frequency run: the grid is tried again at the next run."""
+        now = self._clock()
+        if self._schedule_read_at is not None and now - self._schedule_read_at < SCHEDULE_READ_SECONDS: return
+        try:
+            def read():
+                self._check(epoch, lease=False)
+                return self._source.operational_schedule()
+            # Read and compare first; the lease is taken again only when there is something to send.
+            grids = self._verified(read)
+            self._schedule_read_at = now
+            pairs, _ = self._pair_classes(catalog['catalog']['classes'], status['classes'], None)
+            items = [{'classId': central['classId'], 'sourceClassId': source['class_id'],
+                      'sourceClassLabel': source['name'], 'lessons': grids[source['class_id']]['lessons']}
+                     for source, central in pairs if source['class_id'] in grids]
+            if not items: return
+            today = datetime.fromtimestamp(now, ZoneInfo(zone)).date().isoformat()
+            hashes = {str(item['classId']): schedule_hash(item) for item in items}
+            copy = self._load_copy('schedule')
+            if isinstance(copy, dict) and copy.get('hashes') == hashes and copy.get('sentOn') == today: return
+            observed = datetime.fromtimestamp(now, timezone.utc).isoformat()
+            version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'observedAt': observed,
+                                                          'grids': hashes})).hexdigest()
+            def lease():
+                fresh = self._fresh()
+                if fresh['settings']['paused']: raise FrequencyError('paused')
+                if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
+                self._check(epoch)
+            self._verified(lease)
+            payload = {'operation': 'schedule-collect', 'academicYear': 2026, 'requestId': str(uuid.uuid4()),
+                       'fencingToken': self._lease['fencingToken'], 'sourceVersion': 'sha256:' + version,
+                       'observedAt': observed, 'classes': items}
+            reply = self._committed(self._request(payload), payload)
+            changed = [c for c in reply.get('classes') or [] if isinstance(c, dict) and c.get('changed') is True]
+            self._save_copy('schedule', {'hashes': hashes, 'sentOn': today, 'classes': items})
+            self._history.record('schedule-sent', sent=len(changed))
+        except Exception as error:
+            # A stop, a pause or a lost authority (the institutional access itself, or the Ecossistema's
+            # answer) stops the run as anywhere else; any other problem with the grid is only noted,
+            # and the frequency already sent stands. FrequencyError is an AccessDenied too.
+            code = getattr(error, 'code', None)
+            if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise
+            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED',
+                                 label='Grade de horários')
+
+    def _load_copy(self, key):
+        try: return self._storage.load_copy(key)
+        except StorageError: return None
+
+    def _save_copy(self, key, value):
+        # A copy that cannot be written only costs a whole diary next time; never a failed run.
+        try: self._storage.save_copy(key, value)
+        except StorageError: pass
+
+    def _send(self, payload, epoch, queued=True):
         # Every attempt has the identical payload/requestId and a new challenge.
         # A timeout is reconciled before a bounded retry, never called success.
+        # `queued`: the payload waits in the protected queue (a whole diary); the short message of
+        # an unchanged diary does not, since losing it costs nothing but the next run.
         result = None
         for attempt in range(3):
             self._check(epoch)
@@ -892,7 +984,7 @@ class FrequencyRuntime:
         self._check(epoch)
         if result is None: raise FrequencyError('unavailable')
         self._collection_receipt(result, payload)
-        self._storage.acknowledge(payload['requestId'])
+        if queued: self._storage.acknowledge(payload['requestId'])
         with self._lock:
             self._last_receipt = {k: result[k] for k in ('receivedAt', 'resolvedRecords', 'unresolvedRecords', 'conflicts')}
 
