@@ -108,6 +108,7 @@ class Source:
         return {'selected_class_ids': ['13331'], 'unavailable_class_ids': [], 'catalog': {'classes': [
                 {'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'}]}}
     def operational_capture(self, class_id): self.reads += 1; self.on_capture(); return preview()
+    def operational_schedule(self): return {}  # No weekly grid unless a test gives one.
     def preserve_and_close(self, storage): self.close()
     def remember_if_ready(self, storage): pass
     def close(self): self.closed += 1
@@ -147,9 +148,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         # Every server request and the source read run inside a verified
         # bracket. Per class: status+lease+read+status share one; send has its own.
+        # The weekly grid (read at most hourly, after the diaries) adds one more.
         self.assertEqual(outside, [])
         self.assertEqual(captured, [1])
-        self.assertEqual(self.access.calls, 6)
+        self.assertEqual(self.access.calls, 7)
 
     def test_uncertain_send_consults_receipt_before_retry_and_never_duplicates(self):
         self.provider.fail_after_commit = True

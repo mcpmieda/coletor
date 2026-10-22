@@ -27,7 +27,9 @@ from .windows_device_key import WindowsDeviceKey, DeviceKeyError, TPM_PROVIDER, 
 PREFIX = '/api/frequency-collector/'
 PATHS = {PREFIX + p for p in ('config', 'pairings', 'pairings/poll', 'pairings/cancel', 'pairings/claim', 'challenge', 'access', 'revoke', 'device-status', 'frequency')}
 FREQUENCY_BYTES = 16 * 1024 * 1024
-FREQUENCY_ERRORS = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy', 'lease-fenced', 'paused', 'source-invalid', 'identity-review'}
+FREQUENCY_ERRORS = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy', 'lease-fenced', 'paused', 'source-invalid', 'identity-review',
+                    # The server cannot confirm an unchanged diary: the collector sends it whole.
+                    'payload-required'}
 
 
 def launch_system_browser(url, new=2, *, platform=None, shell_execute=None):

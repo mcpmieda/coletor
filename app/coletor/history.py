@@ -18,7 +18,9 @@ MAX_ENTRIES = 2000
 COMPACT_SLACK = 500  # Appended lines tolerated before rewriting the file.
 MAX_READ_BYTES = 2 * 1024 * 1024
 KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', 'collection-finished',
-         'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start', 'late-cancelled', 'queue-quarantined', 'queue-expired', 'queue-restored', 'collection-stopped', 'unknown-mark'}
+         'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start', 'late-cancelled', 'queue-quarantined', 'queue-expired', 'queue-restored', 'collection-stopped', 'unknown-mark',
+         # The school's weekly grid went to the Ecossistema (sent: how many classes changed).
+         'schedule-sent'}
 
 
 class CollectorHistory:

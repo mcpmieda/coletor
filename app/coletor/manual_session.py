@@ -277,6 +277,19 @@ class ManualSession:
         generation = self.status()['generation']
         return self.capture_selected(generation, class_id, True, _operational=True)['preview']
 
+    def operational_schedule(self):
+        """The school's weekly grid, read in the same verified session as the class list
+        (owner decision 22/10/2026). Validated here; a failure never touches the session state."""
+        from .class_schedule import schedule_from_observation
+        with self._lock:
+            driver, state = self._driver, self._state
+        if driver is None or state not in {'list_ready', 'preview_ready'}:
+            raise SessionError('SOURCE_LOGIN_REQUIRED')
+        try:
+            return schedule_from_observation(driver.schedule())
+        except Exception:
+            raise SessionError('SOURCE_READ_FAILED') from None
+
     def preserve_and_close(self, storage):
         with self._lock: driver = self._driver
         if driver is not None:
