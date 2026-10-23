@@ -74,6 +74,78 @@ class ClassLinkTests(unittest.TestCase):
         self.assertEqual(self.runtime.collect()['code'], 'SOURCE_LOGIN_FAILED')
         self.assertTrue(self.runtime._source_blocked)
 
+    def _agenda_now(self, minutes_later=0):
+        """Today's matutino agenda with a slot now (and one some minutes later, when asked)."""
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo('America/Bahia')
+        at = lambda offset: datetime.fromtimestamp(self.provider.now + offset, timezone.utc).astimezone(zone)
+        value = base.schedule()
+        for r in value['rules']: r.update(enabled=False, times=[], recheck=None)
+        rule = next(r for r in value['rules'] if r['weekday'] == (at(0).weekday() + 1) % 7 and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=sorted({at(0).strftime('%H:%M'), at(minutes_later * 60).strftime('%H:%M')}))
+        self.provider.shared_schedule = value
+
+    def _wait_idle(self):
+        import time
+        deadline = time.monotonic() + 2
+        time.sleep(.02)
+        while self.runtime._operation.locked() and time.monotonic() < deadline: time.sleep(.01)
+
+    def test_saved_login_signs_in_again_right_away_when_the_session_expires(self):
+        # Owner request 23/10/2026: read the frequency at any cost, never wait for the next slot.
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        self._agenda_now()
+        calls = []
+        def catalog(storage):
+            calls.append(1)
+            if len(calls) == 1: raise SessionError('SOURCE_LOGIN_REQUIRED')
+            return base.Source.operational_catalog(self.source, storage)
+        self.source.operational_catalog = catalog
+        self.runtime.tick()
+        self._wait_idle()
+        self.assertEqual(len(calls), 1)
+        self.provider.now += 60  # The next minute: no slot, but a new attempt.
+        self.runtime.tick()
+        self._wait_idle()
+        self.assertEqual(len(calls), 2)
+        self.assertIsNone(self.runtime.public_status()['code'])
+        self.assertTrue(any(e['kind'] == 'login-retry' for e in self.runtime.recent_history(20)))
+        self.provider.now += 60  # One new attempt only: never a loop.
+        self.runtime.tick()
+        self._wait_idle()
+        self.assertEqual(len(calls), 2)
+
+    def test_a_new_attempt_after_an_expired_session_happens_once_per_failure(self):
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        self._agenda_now()
+        self.source.operational_catalog = Mock(side_effect=SessionError('SOURCE_LOGIN_REQUIRED'))
+        for _ in range(4):
+            self.runtime.tick()
+            self._wait_idle()
+            self.provider.now += 60
+        self.assertEqual(self.source.operational_catalog.call_count, 2)
+
+    def test_slots_missed_while_waiting_for_a_login_run_once_right_after_it(self):
+        # No saved login: a person signs in. The slots missed meanwhile are read right after, once.
+        self._agenda_now(minutes_later=15)
+        self.runtime._source_blocked, self.runtime._code = True, 'SOURCE_LOGIN_REQUIRED'
+        self.runtime.collect = Mock()
+        self.runtime.tick()
+        self.provider.now += 15 * 60
+        self.runtime.tick()
+        self.assertEqual(self.runtime.collect.call_count, 0)
+        self.provider.now += 4 * 60  # Signed in four minutes after the last slot.
+        self.runtime.source_ready()
+        self.runtime.tick()
+        self._wait_idle()
+        self.assertEqual(self.runtime.collect.call_count, 1)
+        self.assertTrue(any(e['kind'] == 'login-catch-up' for e in self.runtime.recent_history(20)))
+        self.provider.now += 60
+        self.runtime.tick()
+        self._wait_idle()
+        self.assertEqual(self.runtime.collect.call_count, 1)
+
     def test_status_never_returns_the_saved_password(self):
         self.storage.save_credential(**SYNTHETIC_LOGIN)
         status = self.runtime.public_status()

@@ -261,6 +261,10 @@ class FrequencyRuntime:
         self._stale = {}  # Fenced, uncommitted batches by source class (see _drain).
         self._schedule_read_at = None  # When the weekly grid was last read (this session).
         self._source_blocked = False
+        # Shifts of a run whose Smecel session expired, read again at the next tick with the saved
+        # login (owner request 23/10/2026: never wait for the next slot). Once per failed run.
+        self._login_retry = None
+        self._login_missed = set()  # Slots that passed while waiting for someone to sign in.
         self._last_tick = 0
         self._thread = None
         self._stop = threading.Event()
@@ -579,11 +583,27 @@ class FrequencyRuntime:
             return
         if self._code == 'NO_SELECTED_CLASSES':
             self.source_ready()
-        blockers = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
+        retry, self._login_retry = self._login_retry, None
+        if retry is not None and not self._source_blocked:
+            # The previous run met an expired Smecel session and a login is saved: read again now.
+            if not self._operation.acquire(blocking=False): return
+            self._history.record('login-retry')
+            def run_retry():
+                try: self.collect(retry['shifts'], _claimed=True, _retry=True)
+                finally: self._operation.release()
+            threading.Thread(target=run_retry, daemon=True, name='collector-capture').start()
+            return
+        # An expired session with a saved login is not a blocker: the next slot signs in again.
+        blockers = {'SOURCE_LOGIN_FAILED', 'NO_SELECTED_CLASSES',
                     'CENTER_CLASSES_REQUIRED', 'SOURCE_CLASS_UNAVAILABLE',
                     'SOURCE_CLASS_AMBIGUOUS', 'source-invalid', 'identity-review',
                     'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'PENDING_BATCHES'}
         if self._source_blocked or self._code in blockers:
+            # Slots missed while waiting for someone to sign in run once, right after the login.
+            if self._source_blocked:
+                before = set(self._pending_slots)
+                self._note_busy_slot()
+                self._login_missed |= self._pending_slots - before
             self._release_if_ineligible(status)
             return
         # A school-wide lease is reserved only by collect(), after verifying
@@ -616,7 +636,9 @@ class FrequencyRuntime:
             self._history.record('late-cancelled', label=', '.join(sorted({k[2] for k in cancelled})))
         if late:
             shifts |= {k[1] for k in late}; keys |= late
-            self._history.record('late-start', label=', '.join(sorted({k[2] for k in late})))
+            kind = 'login-catch-up' if late & self._login_missed else 'late-start'
+            self._history.record(kind, label=', '.join(sorted({k[2] for k in late})))
+        self._login_missed &= self._pending_slots
         if shifts:
             # lease-fenced and revision-conflict are NOT blockers: a fenced batch
             # waits for a confirmed re-read and the next status carries the new
@@ -666,7 +688,7 @@ class FrequencyRuntime:
                     and (civil_day, r['shift'], wall_time) not in self._fired):
                 self._pending_slots.add((civil_day, r['shift'], wall_time))
 
-    def collect(self, shifts=None, *, _claimed=False):
+    def collect(self, shifts=None, *, _claimed=False, _retry=False):
         # A scheduled invocation already owns the operation lock so its minute
         # cannot be marked fired before a capture is accepted.
         if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
@@ -804,6 +826,8 @@ class FrequencyRuntime:
         except Exception as error:
             self._error(error, label=getattr(error, 'label', None))
             code = getattr(error, 'code', None)
+            if not _retry and self._code == 'SOURCE_LOGIN_REQUIRED' and not self._source_blocked:
+                with self._lock: self._login_retry = {'shifts': shifts}
             if started and code in QUIET_CODES:
                 # A run stopped by a pause, a school pause or another PC's lease
                 # still gets a closing fact (other codes are recorded as failures),
