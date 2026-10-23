@@ -278,7 +278,9 @@ class BrowserWorker:
 
     def schedule(self):
         # The school's weekly grid (owner decision 22/10/2026): one page, every class.
-        return self._rpc({"command": "schedule"})
+        # Loading the page, bringing every class into view and waiting for its table takes longer
+        # than a capture (up to 30 s of waiting on top of the page itself).
+        return self._rpc({"command": "schedule"}, timeout=90)
 
     def login(self, email, password):
         # Same private pipe as captures; the reply carries only a boolean.
@@ -343,7 +345,7 @@ class BrowserWorker:
 async def browser_session(initial):
     from .manual_session import matches_source, source_url
     from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
-    from .class_schedule import grade_url, matches_grade, SCHEDULE_JS
+    from .class_schedule import grade_url, matches_grade, SCHEDULE_JS, SCHEDULE_LOAD_JS
     from urllib.parse import parse_qsl, urlsplit
     from playwright.async_api import async_playwright
     url = initial.get("url", "")
@@ -455,8 +457,14 @@ async def browser_session(initial):
                             if not matches_grade(before):
                                 payload = {"error": "schedule_unavailable"}  # Login redirect.
                             else:
-                                payload = await page.evaluate(SCHEDULE_JS)
-                                if page.url != before or payload.get("url") != before:
+                                # Each class's table arrives only once it is in view: bring every
+                                # one in and wait; a page still loading is never read.
+                                loaded = await page.evaluate(SCHEDULE_LOAD_JS)
+                                if not isinstance(loaded, dict) or loaded.get("pending") != 0:
+                                    payload = {"error": "schedule_incomplete"}
+                                else:
+                                    payload = await page.evaluate(SCHEDULE_JS)
+                                if page.url != before or payload.get("url", before) != before:
                                     payload = {"error": "page_changed"}
                             owned["url"] = None  # The list is loaded again when needed.
                             encoded = json.dumps(payload, ensure_ascii=False)

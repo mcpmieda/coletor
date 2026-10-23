@@ -16,6 +16,23 @@ WEEKDAYS = ("SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA")
 MAX_BLOCKS = 64
 MAX_SUBJECT = 120
 
+# The Smecel loads each class's table only when it comes into view (ajax/grade_turma.php, owner
+# report 23/10/2026: "as tabelas só carregam quando desce tudo"). Before reading, every block is
+# brought into view in turn and the page is given up to 30 s for all of them to arrive; the count
+# still loading is returned, and a page with any left is never read.
+SCHEDULE_LOAD_JS = """async () => {
+  const pending=()=>document.querySelectorAll('div.grade-turma .skeleton-loading-container').length;
+  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  for(const block of document.querySelectorAll('div.grade-turma')){
+    block.scrollIntoView({block:'center'});
+    await wait(150);
+  }
+  const started=Date.now();
+  while(pending()&&Date.now()-started<30000)await wait(250);
+  window.scrollTo(0,0);
+  return {pending:pending()};
+}"""
+
 SCHEDULE_JS = """() => {
   // textContent, not innerText: on a narrow window the Smecel hides the full names (CSS), and
   // innerText would read them as empty.
