@@ -68,6 +68,8 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   'late-cancelled': ['info', 'Horário atrasado cancelado: ele saiu da agenda enquanto a coleta anterior rodava.'],
   'collection-stopped': ['info', 'Coleta interrompida (pausa ou outro computador assumiu).'],
   'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
+  'login-retry': ['info', 'A sessão do Smecel expirou: o Coletor entrou de novo e leu na hora.'],
+  'login-catch-up': ['info', 'Horário(s) perdido(s) esperando a entrada no Smecel: coletado logo depois, uma vez só.'],
 };
 const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
 /** Short, plain cause of each failure (Registros detail), instead of the technical code. */
