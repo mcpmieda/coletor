@@ -68,6 +68,20 @@ class UnchangedDeliveryTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         self.assertEqual(self.runtime.public_status()['lastReceipt']['resolvedRecords'], 1)
 
+    def test_the_history_tells_a_short_message_from_a_whole_diary(self):
+        # Newest first.
+        sent = lambda: [e for e in self.runtime.recent_history(50) if e['kind'] == 'class-sent']
+        self.run_once()
+        self.assertNotIn('unchanged', sent()[0])
+        self.provider.now += 3600
+        self.run_once()
+        self.assertIs(sent()[0]['unchanged'], True)
+        # The server could not confirm it, so the whole diary went: not "sem alteração".
+        self.provider.now += 3600
+        self.provider.forget = True
+        self.run_once()
+        self.assertNotIn('unchanged', sent()[0])
+
     def test_what_the_server_cannot_confirm_goes_whole_in_the_same_run(self):
         self.run_once()
         self.provider.now += 3600

@@ -676,6 +676,70 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result['state'], 'error')
         self.assertFalse(self.runtime._source_blocked)
 
+    def several_classes(self, count, failing):
+        """A school with `count` synthetic classes; the diaries in `failing` cannot be read."""
+        names = [f'TURMA SINTÉTICA {chr(65 + i)}' for i in range(count)]
+        request = self.provider.frequency_request
+        def with_classes(payload):
+            value = request(payload)
+            if payload['operation'] == 'status':
+                revision = value['classes'][0]['revision']
+                value['classes'] = [{'classId': 10 + i, 'sourceClassLabel': name, 'shift': 'matutino', 'revision': revision}
+                                    for i, name in enumerate(names)]
+            return value
+        self.provider.frequency_request = with_classes
+        self.source.operational_catalog = lambda storage: {
+            'selected_class_ids': [str(13331 + i) for i in range(count)], 'unavailable_class_ids': [],
+            'catalog': {'classes': [{'class_id': str(13331 + i), 'name': name, 'shift': 'matutino'} for i, name in enumerate(names)]}}
+        def capture(class_id):
+            self.source.reads += 1
+            name = names[int(class_id) - 13331]
+            if name in failing: raise SessionError('O Smecel demorou')
+            view = preview()
+            view['snapshot']['class_id'] = class_id
+            for student in view['snapshot']['students']: student['original_class'] = name
+            return view
+        self.source.operational_capture = capture
+        return names
+
+    def sent_classes(self):
+        return [p['classId'] for p in self.provider.requests if p['operation'] == 'collect']
+
+    def test_one_unreadable_diary_does_not_hold_back_the_other_classes(self):
+        names = self.several_classes(3, failing={'TURMA SINTÉTICA B'})
+        result = self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [10, 12])
+        history = list(reversed(self.runtime.recent_history(50)))
+        failed = [e for e in history if e['kind'] == 'class-failed']
+        self.assertEqual([(e['label'], e['code']) for e in failed], [(names[1], 'SOURCE_READ_FAILED')])
+        # The run ends normally, as partial: the window shows the problem, no extra failure line.
+        finished = next(e for e in history if e['kind'] == 'collection-finished')
+        self.assertEqual(finished['code'], 'SOURCE_READ_FAILED')
+        self.assertFalse(any(e['kind'] == 'failure' for e in history))
+        self.assertEqual((result['state'], result['code']), ('error', 'SOURCE_READ_FAILED'))
+        self.assertFalse(self.runtime._source_blocked)
+        # A later run reads every class again and, all read, clears the notice.
+        self.several_classes(3, failing=set())
+        self.provider.now += 24 * 3600  # Whole diaries again (this fake server knows no short message).
+        self.assertEqual(self.runtime.collect()['state'], 'ready')
+
+    def test_two_unreadable_diaries_in_a_row_stop_the_run_as_before(self):
+        names = self.several_classes(4, failing={'TURMA SINTÉTICA B', 'TURMA SINTÉTICA C'})
+        result = self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [10])
+        self.assertEqual(self.source.reads, 3)  # D is not even tried: the Smecel looks down.
+        history = list(reversed(self.runtime.recent_history(50)))
+        self.assertEqual([e['label'] for e in history if e['kind'] == 'class-failed'], [names[1]])
+        self.assertEqual([e['code'] for e in history if e['kind'] == 'failure'], ['SOURCE_READ_FAILED'])
+        self.assertFalse(any(e['kind'] == 'collection-finished' for e in history))
+        self.assertEqual((result['state'], result['code']), ('error', 'SOURCE_READ_FAILED'))
+
+    def test_unreadable_diaries_apart_are_each_skipped(self):
+        self.several_classes(5, failing={'TURMA SINTÉTICA B', 'TURMA SINTÉTICA D'})
+        self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [10, 12, 14])
+        self.assertEqual(sum(e['kind'] == 'class-failed' for e in self.runtime.recent_history(50)), 2)
+
     def test_status_reports_how_many_classes_are_saved(self):
         self.source.saved_class_count = Mock(return_value=15)
         self.assertEqual(self.runtime.public_status()['selectedClasses'], 15)

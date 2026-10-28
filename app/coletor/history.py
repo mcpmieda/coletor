@@ -20,7 +20,9 @@ MAX_READ_BYTES = 2 * 1024 * 1024
 KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', 'collection-finished',
          'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start', 'login-retry', 'login-catch-up', 'late-cancelled', 'queue-quarantined', 'queue-expired', 'queue-restored', 'collection-stopped', 'unknown-mark',
          # The school's weekly grid went to the Ecossistema (sent: how many classes changed).
-         'schedule-sent'}
+         'schedule-sent',
+         # One class's diary could not be read; the run went on with the others.
+         'class-failed'}
 
 
 class CollectorHistory:
@@ -46,7 +48,7 @@ class CollectorHistory:
         return entries
 
     def record(self, kind, *, code=None, label=None, sent=None, unresolved=None, conflicts=None,
-               read_ms=None, send_ms=None):
+               read_ms=None, send_ms=None, unchanged=None):
         """Append one fact; a failure to write never interrupts collection."""
         if kind not in KINDS: return
         entry = {'at': None, 'kind': kind}
@@ -55,6 +57,8 @@ class CollectorHistory:
         for key, value in (('sent', sent), ('unresolved', unresolved), ('conflicts', conflicts),
                            ('readMs', read_ms), ('sendMs', send_ms)):
             if type(value) is int and value >= 0: entry[key] = value
+        # A class's diary was the same as last sent: only the short message went.
+        if unchanged is True: entry['unchanged'] = True
         with self._lock:
             try:
                 # O(1) per event: append one line. The whole file is rewritten
