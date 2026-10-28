@@ -333,6 +333,10 @@ class FrequencyRuntime:
             if self._code == 'ACCESS_UNAVAILABLE' and self._state == 'reserve':
                 self._code = None
                 self._transient = None
+            # Its time agrees with this computer's: a clock notice left by an earlier check no
+            # longer holds once the Windows clock is fixed, and the collector waits again.
+            elif self._code == 'CLOCK_OUT_OF_SYNC':
+                self._state, self._code = 'reserve', None
         return value
 
     def _committed(self, reply, payload):
