@@ -945,6 +945,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNone(status['code'])
         self.assertEqual(status['state'], 'reserve')
 
+    def test_a_successful_status_clears_the_clock_notice_once_the_clock_is_fixed(self):
+        self.runtime._clock = lambda: self.provider.now + 11
+        with self.assertRaises(FrequencyError) as caught:
+            self.runtime._fresh()
+        self.runtime._error(caught.exception)
+        self.assertEqual(self.runtime.public_status()['state'], 'error')
+        self.runtime._clock = lambda: self.provider.now
+        status = self.runtime.refresh()
+        self.assertIsNone(status['code'])
+        self.assertEqual(status['state'], 'reserve')
+
     def test_a_successful_status_keeps_other_alerts(self):
         self.runtime._error(FrequencyError('identity-review'))
         self.assertEqual(self.runtime.refresh()['code'], 'identity-review')
