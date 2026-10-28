@@ -17,6 +17,8 @@ export interface CollectorStatus {
 }
 export interface HistoryEntry {
   at: number; kind: string; code?: string; label?: string; sent?: number; unresolved?: number; conflicts?: number;
+  /** class-sent: the diary was the same as last sent, so only the short message went. */
+  unchanged?: boolean;
 }
 export type CollectorResult = CollectorStatus | { error: string; code?: string };
 export const COLLECTOR_CODES: Record<string, string> = {

@@ -68,3 +68,36 @@ test('an unknown Smecel mark is one warning that names it and is not a failure',
   expect(event!.detail).toContain('Vista primeiro em 6A 2026 - MATUTINO');
   expect(failures24h(entries, 201_000)).toBe(0);
 });
+
+test('a diary that went as the short message reads "sem alteração" (owner request 28/10/2026)', () => {
+  const entries: HistoryEntry[] = [
+    { at: 100, kind: 'class-sent', label: '7C', sent: 22, unresolved: 0, conflicts: 0 },
+    { at: 200, kind: 'class-sent', label: '7C', sent: 22, unresolved: 0, conflicts: 0, unchanged: true },
+  ];
+  expect(logEvents(entries).map(e => e.message)).toEqual(['7C sem alteração · 22 aluno(s)', '7C enviada · 22 aluno(s)']);
+});
+
+test('an unread diary is one failure of its class, and the run goes on as partial', () => {
+  const entries: HistoryEntry[] = [
+    { at: 100, kind: 'collection-started', sent: 3 },
+    { at: 110, kind: 'class-sent', label: '7C', sent: 22, unresolved: 0, conflicts: 0 },
+    { at: 120, kind: 'class-failed', code: 'SOURCE_READ_FAILED', label: '7D' },
+    { at: 130, kind: 'class-sent', label: '8A', sent: 32, unresolved: 0, conflicts: 0 },
+    { at: 140, kind: 'collection-finished', sent: 3, code: 'SOURCE_READ_FAILED' },
+  ];
+  const [run] = groupRuns(entries);
+  expect(run).toMatchObject({ status: 'partial', resolved: 54, finished: 140 });
+  expect(runSummary(run!)).toContain('2 de 3 turma(s)');
+  const failed = logEvents(entries).find(e => e.message.startsWith('7D'));
+  expect(failed).toMatchObject({ level: 'error', detail: 'O Smecel demorou ou falhou ao abrir um diário.' });
+  expect(failed!.message).toContain('As outras turmas seguiram');
+  expect(failures24h(entries, 200_000)).toBe(1);
+});
+
+test('the weekly grid line says whether anything changed', () => {
+  const entries: HistoryEntry[] = [
+    { at: 100, kind: 'schedule-sent', sent: 0 },
+    { at: 200, kind: 'schedule-sent', sent: 2 },
+  ];
+  expect(logEvents(entries).map(e => e.message)).toEqual(['Grade de horários enviada · 2 turma(s) com mudança', 'Grade de horários conferida · sem alteração']);
+});

@@ -765,6 +765,9 @@ class FrequencyRuntime:
                         return
             heartbeat = threading.Thread(target=renew, name='collector-heartbeat', daemon=True)
             heartbeat.start()
+            # Classes whose diary could not be read (owner request 28/10/2026): one slow diary
+            # never holds back the others; they go on and it is read again at the next time.
+            failed, last_failed = [], False
             for source, central in pairs:
                 self._check(epoch, lease=False)
                 def read_class(source=source, central=central):
@@ -796,13 +799,23 @@ class FrequencyRuntime:
                 # Status, concession, source read and the post-read status share
                 # one verified bracket; the transmission below opens its own.
                 read_started = time.monotonic()
-                current, preview, after_capture = self._verified(read_class)
+                try:
+                    current, preview, after_capture = self._verified(read_class)
+                except SessionError as error:
+                    # Two diaries in a row: the Smecel itself is down or the session is gone, and
+                    # the run stops as before. A single one is only that class.
+                    if str(error) != 'SOURCE_READ_FAILED' or last_failed: raise
+                    failed.append(source['name'])
+                    self._history.record('class-failed', code='SOURCE_READ_FAILED', label=source['name'])
+                    last_failed = True
+                    continue
+                last_failed = False
                 send_started = time.monotonic()
                 school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
                 payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
                 self._note_unknown_marks(preview, source['name'])
                 del preview
-                self._deliver(payload, epoch, school_zone)
+                unchanged = self._deliver(payload, epoch, school_zone)
                 self._supersede(source['class_id'])
                 with self._lock:
                     self._progress['completed'] += 1
@@ -810,7 +823,7 @@ class FrequencyRuntime:
                 self._history.record('class-sent', label=source['name'], sent=receipt.get('resolvedRecords'),
                                      unresolved=receipt.get('unresolvedRecords'), conflicts=receipt.get('conflicts'),
                                      read_ms=round((send_started - read_started) * 1000),
-                                     send_ms=round((time.monotonic() - send_started) * 1000))
+                                     send_ms=round((time.monotonic() - send_started) * 1000), unchanged=unchanged)
             self._check(epoch)
             self._collect_schedule(epoch, catalog, status, (status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone'])
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
@@ -822,9 +835,13 @@ class FrequencyRuntime:
             closing = ('CLASS_RECONCILIATION_REQUIRED' if unmatched else
                        # "Todas" promises the whole school: a filtered or partial
                        # Smecel list must not look complete.
-                       'SOURCE_LIST_FILTERED' if catalog.get('all_classes') and catalog['catalog'].get('filtered') else None)
+                       'SOURCE_LIST_FILTERED' if catalog.get('all_classes') and catalog['catalog'].get('filtered') else
+                       # Each unread diary already has its own line in the history.
+                       'SOURCE_READ_FAILED' if failed else None)
             self._history.record('collection-finished', sent=len(pairs), code=closing)
-            if closing:
+            if closing == 'SOURCE_READ_FAILED':
+                with self._lock: self._state, self._code = 'error', closing
+            elif closing:
                 self._error(FrequencyError(closing), label=', '.join(unmatched) if unmatched else None)
             return self.public_status()
         except Exception as error:
@@ -910,7 +927,8 @@ class FrequencyRuntime:
         server compares with what it holds and may answer 'payload-required' (its data was restored,
         a student's link changed in the Centro...): then, and whenever there is no usable copy
         (formatted or restored PC, cleared data), the whole diary goes as before, through the
-        protected queue, and the copy is replaced with it. Each class still goes in full once a day."""
+        protected queue, and the copy is replaced with it. Each class still goes in full once a day.
+        Returns True when only the short message went (the history says "sem alteração")."""
         key = 'frequency-' + payload['sourceClassId']
         digest = content_hash(payload)
         today = datetime.fromtimestamp(self._clock(), ZoneInfo(zone)).date().isoformat()
@@ -918,7 +936,7 @@ class FrequencyRuntime:
         if is_current(copy, payload, digest, today):
             try:
                 self._send(unchanged_payload(payload, digest, str(uuid.uuid4())), epoch, queued=False)
-                return
+                return True
             except FrequencyError as error:
                 if error.code != 'payload-required': raise
         with self._lock:
@@ -929,6 +947,7 @@ class FrequencyRuntime:
                               'contentHash': digest, 'fullOn': today,
                               'content': {field: payload[field] for field in
                                           ('sourceClassLabel', 'rosterComplete', 'records', 'coverage', 'marks')}})
+        return False
 
     def _collect_schedule(self, epoch, catalog, status, zone):
         """The school's weekly grid for the Portal's "Horário" (owner decision 22/10/2026).

@@ -98,7 +98,17 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
         e.unresolved ? `${e.unresolved} não reconhecido(s): nome sem par na Relação` : '',
         e.conflicts ? `${e.conflicts} conflito(s): marcação mudou no Smecel, decida no Centro` : '',
       ].filter(Boolean).join(' · ');
-      return { id, at: e.at, level: e.unresolved || e.conflicts ? 'warn' : 'info', message: `${e.label ?? 'Turma'} enviada · ${e.sent ?? 0} aluno(s)`, detail: extra || undefined };
+      // The same diary as last sent goes as a short message (owner request 28/10/2026: say so).
+      const sent = e.unchanged ? 'sem alteração' : 'enviada';
+      return { id, at: e.at, level: e.unresolved || e.conflicts ? 'warn' : 'info', message: `${e.label ?? 'Turma'} ${sent} · ${e.sent ?? 0} aluno(s)`, detail: extra || undefined };
+    }
+    if (e.kind === 'schedule-sent') {
+      return { id, at: e.at, level: 'info', message: e.sent ? `Grade de horários enviada · ${e.sent} turma(s) com mudança` : 'Grade de horários conferida · sem alteração' };
+    }
+    if (e.kind === 'class-failed') {
+      // The run went on with the other classes (owner request 28/10/2026).
+      return { id, at: e.at, level: 'error', message: `${e.label ?? 'Turma'}: diário não lido. As outras turmas seguiram; esta é lida de novo no próximo horário.`,
+        detail: e.code ? FAILURE_CAUSE[e.code] : undefined };
     }
     if (e.kind === 'unknown-mark') {
       // Logged once per mark (owner request 20/10/2026): the mark itself and where it first appeared.
