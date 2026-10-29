@@ -227,7 +227,11 @@ class DesktopApi(PreviewApi):
                 pass
         # History (class names, counts) waits for the verified access: the
         # protected get_collector_history fills it a moment later.
-        return {'paired': paired, 'status': status, 'history': [], 'settings': self._read_settings()['settings']}
+        # The program's own version (the build's), never the interface package's fixed "0.4.0"
+        # (owner report 29/10/2026: the window showed 0.4.0 while 0.4.295 was running).
+        from . import __version__
+        return {'paired': paired, 'status': status, 'history': [], 'settings': self._read_settings()['settings'],
+                'version': __version__}
 
     def activate_collector(self):
         result = self._operational(self._collector.activate)
