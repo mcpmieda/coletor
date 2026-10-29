@@ -22,8 +22,8 @@ def observation():
     suspension = record('9002', kind='SUSPENSÃO', type='SUSPENSÃO', leave='22/10/2026 até 28/10/2026', leave_days='03')
     return {'url': LIST, 'password_form': False, 'context_organization': True, 'context_school': True,
             'year_selected': '2026', 'total': 2, 'per_page': 30, 'pages': 1, 'failed_pages': [], 'failed_students': [],
-            'rows': [{'href': first, 'name': 'ALUNA SINTETICA UM', 'count': 2},
-                     {'href': second, 'name': 'ALUNO SINTETICO DOIS', 'count': 1}],
+            'rows': [{'href': first, 'name': 'ALUNA SINTETICA UM', 'class_label': '6A 2026 - MATUTINO', 'count': 2},
+                     {'href': second, 'name': 'ALUNO SINTETICO DOIS', 'class_label': '7B 2026 - MATUTINO', 'count': 1}],
             'students': {
                 # Two enrolments of the year: every record shows twice, with the same id.
                 first: {'enrolments': [{'year': '2026', 'label': '6A 2026 - MATUTINO'},
@@ -40,7 +40,7 @@ class IncidentsTests(unittest.TestCase):
         value = incidents_from_observation(observation(), YEAR)
         self.assertTrue(value['complete'])
         first, second = value['students']
-        self.assertEqual(first['sourceStudentId'], '101')
+        self.assertEqual((first['sourceStudentId'], first['name']), ('101', 'ALUNA SINTETICA UM'))
         self.assertEqual(first['classLabels'], ['6A 2026 - MATUTINO', 'MULTIFUNCIONAL MATUTINO'])
         self.assertEqual([i['sourceIncidentId'] for i in first['incidents']], ['9001', '9002'])
         self.assertEqual(first['incidents'][0], {'sourceIncidentId': '9001', 'kind': 'ADVERTÊNCIA', 'date': '2026-09-08',
@@ -87,6 +87,8 @@ class IncidentsTests(unittest.TestCase):
             lambda v: v['students'][v['rows'][0]['href']]['records'][2].update(leave='28/10/2026 até 22/10/2026'),
             # The same id with two different contents is never merged silently.
             lambda v: v['students'][v['rows'][0]['href']]['records'][1].update(description='Outra.'),
+            # The class in place of the student's name (the first real reading, 29/10/2026).
+            lambda v: v['rows'][0].update(name='6A 2026 - MATUTINO'),
         ):
             value = observation()
             change(value)
