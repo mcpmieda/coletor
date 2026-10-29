@@ -8,6 +8,8 @@ export interface CollectorStatus {
   state: 'connect' | 'ready' | 'reserve' | 'collecting' | 'paused' | 'login-required' | 'error';
   code: string | null; active: boolean; localPaused: boolean; persistent: boolean;
   progress: { completed: number; total: number; classLabel: string | null };
+  /** A run started and is still signing in / reading the class list: show the bar already. */
+  preparing?: boolean;
   lastReceipt: { receivedAt: string; resolvedRecords: number; unresolvedRecords: number; conflicts: number } | null;
   settings: { revision: number; paused: boolean; schedule: SharedSchedule | null } | null;
   /** The saved Smecel login is write-only: only a masked account comes back. */
@@ -17,7 +19,8 @@ export interface CollectorStatus {
 }
 export interface HistoryEntry {
   at: number; kind: string; code?: string; label?: string; sent?: number; unresolved?: number; conflicts?: number;
-  /** class-sent: the diary was the same as last sent, so only the short message went. */
+  /** class-sent: the diary was the same as last sent, so only the short message went.
+   *  incidents-sent: the Ecossistema already had every incident. */
   unchanged?: boolean;
 }
 export type CollectorResult = CollectorStatus | { error: string; code?: string };

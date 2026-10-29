@@ -101,3 +101,22 @@ test('the weekly grid line says whether anything changed', () => {
   ];
   expect(logEvents(entries).map(e => e.message)).toEqual(['Grade de horários enviada · 2 turma(s) com mudança', 'Grade de horários conferida · sem alteração']);
 });
+
+test('the grid and the incidents are steps of the run and lines of the log (29/10/2026)', () => {
+  const entries: HistoryEntry[] = [
+    { at: 400, kind: 'collection-started', sent: 1 },
+    { at: 410, kind: 'class-sent', label: '6A', sent: 30, unresolved: 0, conflicts: 0 },
+    { at: 420, kind: 'schedule-sent', sent: 0 },
+    { at: 430, kind: 'incidents-sent', sent: 370, unresolved: 2, unchanged: true },
+    { at: 440, kind: 'collection-finished', sent: 1 },
+  ];
+  const [run] = groupRuns(entries);
+  expect(run.status).toBe('ok');
+  expect(run.steps).toEqual([
+    { label: 'Horário', detail: 'sem alteração', review: false },
+    { label: 'Ocorrências', detail: '370 ocorrência(s) · sem alteração · 2 aluno(s) sem par na Relação', review: true,
+      readMs: undefined, sendMs: undefined },
+  ]);
+  const line = logEvents(entries).find(e => e.message.startsWith('Ocorrências'));
+  expect(line).toMatchObject({ level: 'warn', message: 'Ocorrências conferidas · 370 ocorrência(s) · sem alteração · 2 aluno(s) sem par na Relação' });
+});

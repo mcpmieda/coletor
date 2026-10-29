@@ -29,6 +29,9 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   const next = status?.active && !status.localPaused && !status.settings?.paused ? nextSharedRun(schedule, new Date(nowMs)) : null;
   const errors24h = useMemo(() => failures24h(history), [history]);
   const collecting = status?.state === 'collecting';
+  // From the click on (owner request 29/10/2026): the button goes and the bar shows at once, while
+  // the Coletor still signs in to the Smecel and reads the class list ("Preparando").
+  const running = collecting || starting || status?.preparing === true;
   const credential = status?.credential?.saved === true;
   const classes = status?.classesMode === 'all' ? 'Todas' : (status?.selectedClasses ?? 0);
   const code = status?.code ?? null;
@@ -38,11 +41,12 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   function collectNow() {
     setStarting(true);
     notify('Coleta iniciada');
-    window.setTimeout(() => { setStarting(false); void refresh(); }, 1500);
+    window.setTimeout(() => { void refresh(); }, 1500);
     void call(api => api.collect_now()).then(final => {
       setStatus(final);
       if (final.code && !QUIET_CODES.has(final.code)) notify.danger(COLLECTOR_CODES[final.code] ?? 'A coleta não terminou.');
-    }).catch(e => { notify.danger(e instanceof Error ? e.message : 'Não foi possível coletar.'); }).finally(() => { void refresh(); });
+    }).catch(e => { notify.danger(e instanceof Error ? e.message : 'Não foi possível coletar.'); })
+      .finally(() => { setStarting(false); void refresh(); });
   }
 
   async function act(work: Parameters<typeof call<Status>>[0], message?: string) {
@@ -81,7 +85,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Turmas coletadas" value={classes} icon={<School size={20} />} />
         {/* "Coletando agora" only while a run is in progress; otherwise it read as if one were (owner, 21/10/2026). */}
-        {collecting
+        {running
           ? <Stat label="Coletando agora" value={`${status!.progress?.completed ?? 0}/${status!.progress?.total ?? 0}`} icon={<Activity size={20} />} />
           : <Stat label="Agora" value={status?.localPaused || status?.settings?.paused ? 'Pausado' : 'Aguardando'} icon={<Activity size={20} />} />}
         <Stat label="Próxima coleta" value={fmtCountdown(next, nowMs)} icon={<CalendarClock size={20} />} />
@@ -107,10 +111,10 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
                 <Button size="sm" variant="primary" isDisabled={busy || !credential} onPress={() => { void act(api => api.activate_collector(), 'Coleta automática ativada'); }}>
                   <Play size={14} /> Ativar
                 </Button>
-              ) : (
-                <Button size="sm" variant="primary" isDisabled={starting || collecting || status.localPaused || !!status.settings?.paused}
+              ) : running ? null : (
+                <Button size="sm" variant="primary" isDisabled={status.localPaused || !!status.settings?.paused}
                   onPress={collectNow}>
-                  <RefreshCw size={14} /> {collecting ? 'Coletando…' : 'Coletar agora'}
+                  <RefreshCw size={14} /> Coletar agora
                 </Button>
               )}
               <IconButton label="Editar agenda" onPress={() => setEditing(true)} isDisabled={!status?.settings}><Pencil size={16} /></IconButton>
@@ -122,11 +126,11 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
               )}
             </div>
           </div>
-          {collecting ? (
+          {running ? (
             <div className="flex flex-col gap-1.5 pl-14">
               <div className="flex justify-between text-xs">
-                <span className="truncate">Coletando {status!.progress?.classLabel ?? '…'}</span>
-                <span className="text-muted">{status!.progress?.completed ?? 0}/{status!.progress?.total ?? 0}</span>
+                <span className="truncate">{collecting ? `Coletando ${status!.progress?.classLabel ?? '…'}` : 'Preparando: entrando no Smecel…'}</span>
+                {collecting && <span className="text-muted">{status!.progress?.completed ?? 0}/{status!.progress?.total ?? 0}</span>}
               </div>
               <ProgressBar aria-label="Progresso" size="md" value={status!.progress?.total ? Math.round(((status!.progress.completed ?? 0) / status!.progress.total) * 100) : 0}>
                 {/* A stripe keeps moving while the run goes on, so the bar shows life from the first

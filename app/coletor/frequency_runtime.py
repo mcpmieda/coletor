@@ -255,6 +255,9 @@ class FrequencyRuntime:
         self._transient = None  # (code, first seen, already in history)
         self._status, self._lease, self._class, self._last_receipt = None, None, None, None
         self._progress = {'completed': 0, 'total': 0, 'classLabel': None}
+        # From the start of a run until its classes are known (Smecel login, class list, lease): the
+        # window shows the progress bar at once, not after the login (owner request 29/10/2026).
+        self._preparing = False
         self._minute = None
         self._fired = set()
         self._pending_slots, self._last_schedule = set(), None
@@ -265,6 +268,10 @@ class FrequencyRuntime:
         # login (owner request 23/10/2026: never wait for the next slot). Once per failed run.
         self._login_retry = None
         self._login_missed = set()  # Slots that passed while waiting for someone to sign in.
+        # A scheduled slot another computer took (owner request 29/10/2026): if that computer stops
+        # mid-run, its concession lapses and this one collects the rest without waiting for the next
+        # slot. {'shifts', 'since', 'day'}; cleared by any run here and at the end of the day.
+        self._standby = None
         self._last_tick = 0
         self._thread = None
         self._stop = threading.Event()
@@ -425,6 +432,7 @@ class FrequencyRuntime:
             return {'selectedClasses': selected, 'classesMode': 'all' if selected is None and count else 'chosen',
                     'state': self._state, 'code': self._code, 'active': self._active, 'localPaused': self._paused,
                     'persistent': self._storage.persistent, 'progress': dict(self._progress),
+                    'preparing': self._preparing,
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
                     # Status shown locally contains operational settings only.
@@ -616,6 +624,7 @@ class FrequencyRuntime:
         # shift, even if this machine has unrelated saved classes.
         self._release_if_ineligible(status)
         now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
+        if self._take_over(status, now): return
         minute = now.strftime('%Y-%m-%dT%H:%M%z')
         if minute == self._minute: return
         self._minute = minute  # No replay after sleep/offline, including DST.
@@ -668,6 +677,29 @@ class FrequencyRuntime:
                 self._operation.release()
                 raise
 
+    def _take_over(self, status, now):
+        """The computer that had this slot stopped (owner request 29/10/2026): no live concession
+        any more and a class of the slot's shifts with no collection since the slot began. Runs the
+        slot once, here, at once; a slot the other computer finished leaves nothing to do."""
+        with self._lock: standby = self._standby
+        if standby is None: return False
+        if now.date() != standby['day']:
+            with self._lock: self._standby = None
+            return False
+        if status.get('lease') is not None: return False
+        done = {c['classId'] for c in status.get('collections') or []
+                if isinstance(c, dict) and stamp(c.get('receivedAt')) >= standby['since']}
+        if all(c['classId'] in done for c in status['classes'] if c['shift'] in standby['shifts']):
+            return False
+        if not self._operation.acquire(blocking=False): return False
+        with self._lock: self._standby = None
+        self._history.record('standby-takeover')
+        def run_takeover():
+            try: self.collect(standby['shifts'], _claimed=True)
+            finally: self._operation.release()
+        threading.Thread(target=run_takeover, daemon=True, name='collector-capture').start()
+        return True
+
     def _note_unknown_marks(self, preview, class_label):
         """One log entry per unknown Smecel mark, ever: which mark it is and where it was first seen.
 
@@ -701,6 +733,10 @@ class FrequencyRuntime:
             if not _claimed: self._operation.release()
             return self.public_status()
         self._on_started()
+        with self._lock:
+            self._preparing = True
+            self._standby = None
+            self._progress = {'completed': 0, 'total': 0, 'classLabel': None}  # Never the last run's.
         heartbeat_stop = threading.Event()
         heartbeat, started = None, False
         try:
@@ -735,9 +771,12 @@ class FrequencyRuntime:
             self._acquire(status)
             self._check(epoch)
             self._drain(epoch)
+            # The grid (when due) and the incidents are steps of the run like the classes (owner request
+            # 29/10/2026): they show in the progress bar and in the history.
+            schedule_due = self._schedule_due()
             with self._lock:
-                self._state, self._code = 'collecting', None
-                self._progress = {'completed': 0, 'total': len(pairs), 'classLabel': None}
+                self._state, self._code, self._preparing = 'collecting', None, False
+                self._progress = {'completed': 0, 'total': len(pairs) + 1 + schedule_due, 'classLabel': None}
             self._history.record('collection-started', sent=len(pairs))
             started = True
             def renew():
@@ -825,7 +864,9 @@ class FrequencyRuntime:
                                      read_ms=round((send_started - read_started) * 1000),
                                      send_ms=round((time.monotonic() - send_started) * 1000), unchanged=unchanged)
             self._check(epoch)
-            self._collect_schedule(epoch, catalog, status, (status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone'])
+            if schedule_due:
+                self._collect_schedule(epoch, catalog, status, (status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone'])
+            self._collect_incidents(epoch, catalog, status)
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
                 self._state, self._class = 'ready', None
@@ -849,6 +890,11 @@ class FrequencyRuntime:
             code = getattr(error, 'code', None)
             if not _retry and self._code == 'SOURCE_LOGIN_REQUIRED' and not self._source_blocked:
                 with self._lock: self._login_retry = {'shifts': shifts}
+            if code == 'lease-busy' and shifts is not None and self._last_schedule:
+                # A class collected within the other computer's concession counts as this slot's.
+                now = self._clock()
+                day = datetime.fromtimestamp(now, ZoneInfo(self._last_schedule['timezone'])).date()
+                with self._lock: self._standby = {'shifts': set(shifts), 'since': now - LEASE_SECONDS, 'day': day}
             if started and code in QUIET_CODES:
                 # A run stopped by a pause, a school pause or another PC's lease
                 # still gets a closing fact (other codes are recorded as failures),
@@ -870,6 +916,7 @@ class FrequencyRuntime:
                 except Exception: pass
             return self.public_status()
         finally:
+            with self._lock: self._preparing = False
             heartbeat_stop.set()
             if heartbeat: heartbeat.join(timeout=1)
             if not _claimed: self._operation.release()
@@ -958,7 +1005,7 @@ class FrequencyRuntime:
         (the frequency's), matched to the Centro through the class list like the diaries. A failure
         here never fails the frequency run: the grid is tried again at the next run."""
         now = self._clock()
-        if self._schedule_read_at is not None and now - self._schedule_read_at < SCHEDULE_READ_SECONDS: return
+        with self._lock: self._progress['classLabel'] = 'Horário'
         try:
             def read():
                 self._check(epoch, lease=False)
@@ -974,7 +1021,9 @@ class FrequencyRuntime:
             today = datetime.fromtimestamp(now, ZoneInfo(zone)).date().isoformat()
             hashes = {str(item['classId']): schedule_hash(item) for item in items}
             copy = self._load_copy('schedule')
-            if isinstance(copy, dict) and copy.get('hashes') == hashes and copy.get('sentOn') == today: return
+            if isinstance(copy, dict) and copy.get('hashes') == hashes and copy.get('sentOn') == today:
+                self._history.record('schedule-sent', sent=0)  # Read and the same: "sem alteração".
+                return
             observed = datetime.fromtimestamp(now, timezone.utc).isoformat()
             version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'observedAt': observed,
                                                           'grids': hashes})).hexdigest()
@@ -999,6 +1048,65 @@ class FrequencyRuntime:
             if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise
             self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED',
                                  label='Grade de horários')
+        finally:
+            with self._lock: self._progress['completed'] += 1
+
+    def _schedule_due(self):
+        return self._schedule_read_at is None or self._clock() - self._schedule_read_at >= SCHEDULE_READ_SECONDS
+
+    def _collect_incidents(self, epoch, catalog, status):
+        """The Smecel "Ocorrências" of the school year for the Portal (owner decision 29/10/2026).
+
+        Read at every run, in the same verified session and under the same lease as the diaries:
+        the list of students with incidents, then each one's page. Every incident of the year goes
+        at every run and the Ecossistema, not this computer, decides whether anything changed, so a
+        second computer, a restored one or a cleared copy never makes it skip or repeat anything.
+        Each student goes with the class linked in the Centro among the student's Smecel classes of
+        the year (none, or two different ones, leaves the student unlinked; the Ecossistema keeps
+        the records and links them later). A failure here never fails the frequency run."""
+        with self._lock: self._progress['classLabel'] = 'Ocorrências'
+        try:
+            year = catalog['catalog']['scope']['year']
+            def read():
+                self._check(epoch, lease=False)
+                return self._source.operational_incidents(year)
+            read_started = time.monotonic()
+            reading = self._verified(read)
+            linked = {class_key(c['sourceClassLabel']): c for c in status['classes']}
+            students = []
+            for student in reading['students']:
+                matches = {linked[class_key(label)]['classId']: label for label in student['classLabels']
+                           if class_key(label) in linked}
+                class_id, label = next(iter(matches.items())) if len(matches) == 1 else (None, None)
+                students.append({'sourceStudentId': student['sourceStudentId'], 'name': student['name'],
+                                 'classId': class_id, 'sourceClassLabel': label, 'incidents': student['incidents']})
+            send_started = time.monotonic()
+            observed = datetime.fromtimestamp(self._clock(), timezone.utc).isoformat()
+            version = hashlib.sha256(canonical_frequency({'academicYear': year, 'observedAt': observed,
+                                                          'students': students})).hexdigest()
+            def lease():
+                fresh = self._fresh()
+                if fresh['settings']['paused']: raise FrequencyError('paused')
+                if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
+                self._check(epoch)
+            self._verified(lease)
+            payload = {'operation': 'incident-collect', 'academicYear': year, 'requestId': str(uuid.uuid4()),
+                       'fencingToken': self._lease['fencingToken'], 'sourceVersion': 'sha256:' + version,
+                       'observedAt': observed, 'complete': reading['complete'], 'students': students}
+            reply = self._committed(self._request(payload), payload)
+            self._history.record('incidents-sent', sent=reply.get('incidents'), unresolved=reply.get('unresolvedStudents'),
+                                 unchanged=reply.get('changed') is False,
+                                 code=None if reading['complete'] else 'INCIDENTS_PARTIAL',
+                                 read_ms=round((send_started - read_started) * 1000),
+                                 send_ms=round((time.monotonic() - send_started) * 1000))
+        except Exception as error:
+            # As for the grid: a stop or a lost authority stops the run; anything else is only noted.
+            code = getattr(error, 'code', None)
+            if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise
+            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED',
+                                 label='Ocorrências')
+        finally:
+            with self._lock: self._progress['completed'] += 1
 
     def _load_copy(self, key):
         try: return self._storage.load_copy(key)

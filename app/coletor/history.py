@@ -21,6 +21,11 @@ KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', '
          'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start', 'login-retry', 'login-catch-up', 'late-cancelled', 'queue-quarantined', 'queue-expired', 'queue-restored', 'collection-stopped', 'unknown-mark',
          # The school's weekly grid went to the Ecossistema (sent: how many classes changed).
          'schedule-sent',
+         # The school year's Smecel incidents went to the Ecossistema (sent: how many; unresolved:
+         # students not linked in the Centro; unchanged: the Ecossistema already had them all).
+         'incidents-sent',
+         # The computer that had the slot stopped mid-run: this one took the rest of it over.
+         'standby-takeover',
          # One class's diary could not be read; the run went on with the others.
          'class-failed'}
 

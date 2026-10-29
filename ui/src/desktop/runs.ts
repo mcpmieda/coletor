@@ -1,9 +1,11 @@
 import { COLLECTOR_CODES, type HistoryEntry } from '../collector';
 
 export interface ClassResult { label: string; sent: number; unresolved: number; conflicts: number; readMs?: number; sendMs?: number }
+/** A step of the run besides the classes (owner request 29/10/2026): the weekly grid, the incidents. */
+export interface StepResult { label: string; detail: string; review: boolean; readMs?: number; sendMs?: number }
 export interface Run {
   id: string; started: number; finished: number | null; status: 'ok' | 'review' | 'partial' | 'stopped' | 'error' | 'running';
-  total: number; classes: ClassResult[]; resolved: number; unresolved: number; conflicts: number; problem: string | null;
+  total: number; classes: ClassResult[]; steps: StepResult[]; resolved: number; unresolved: number; conflicts: number; problem: string | null;
 }
 
 /** Collections (start → classes → finish/failure) from the local history, newest first. */
@@ -22,11 +24,13 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
   for (const e of sorted) {
     if (e.kind === 'collection-started') {
       if (current) close(e.at, 'error', 'Interrompida antes de terminar.');
-      current = { id: String(e.at), started: e.at, finished: null, status: 'running', total: e.sent ?? 0, classes: [], resolved: 0, unresolved: 0, conflicts: 0, problem: null };
+      current = { id: String(e.at), started: e.at, finished: null, status: 'running', total: e.sent ?? 0, classes: [], steps: [], resolved: 0, unresolved: 0, conflicts: 0, problem: null };
     } else if (e.kind === 'class-sent' && current) {
       const item = { label: e.label ?? 'Turma', sent: e.sent ?? 0, unresolved: e.unresolved ?? 0, conflicts: e.conflicts ?? 0,
         readMs: (e as HistoryEntry & { readMs?: number }).readMs, sendMs: (e as HistoryEntry & { sendMs?: number }).sendMs };
       current.classes.push(item); current.resolved += item.sent; current.unresolved += item.unresolved; current.conflicts += item.conflicts;
+    } else if ((e.kind === 'schedule-sent' || e.kind === 'incidents-sent') && current) {
+      current.steps.push(stepResult(e));
     } else if (e.kind === 'collection-finished') close(e.at, e.code ? 'review' : 'ok', e.code ? problemText(e.code) : null);
     else if (e.kind === 'failure' && current) close(e.at, current.classes.length ? 'partial' : 'error', problemText(e.code));
     // Paused (here or by the school) or taken over by another PC: not a failure.
@@ -34,6 +38,20 @@ export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
   }
   if (current) runs.push(current);
   return runs.reverse();
+}
+
+function stepResult(e: HistoryEntry): StepResult {
+  const timing = e as HistoryEntry & { readMs?: number; sendMs?: number };
+  if (e.kind === 'schedule-sent')
+    return { label: 'Horário', detail: e.sent ? `${e.sent} turma(s) com mudança` : 'sem alteração', review: false };
+  return { label: 'Ocorrências', detail: incidentsText(e), review: !!e.unresolved || e.code === 'INCIDENTS_PARTIAL',
+    readMs: timing.readMs, sendMs: timing.sendMs };
+}
+
+function incidentsText(e: HistoryEntry): string {
+  return [`${e.sent ?? 0} ocorrência(s)${e.unchanged ? ' · sem alteração' : ''}`,
+    e.unresolved ? `${e.unresolved} aluno(s) sem par na Relação` : '',
+    e.code === 'INCIDENTS_PARTIAL' ? 'leitura incompleta: nada é dado como apagado' : ''].filter(Boolean).join(' · ');
 }
 
 export function problemText(code?: string): string {
@@ -70,6 +88,7 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   'late-start': ['info', 'Horário que chegou durante a coleta anterior: coletado logo depois, uma vez só.'],
   'login-retry': ['info', 'A sessão do Smecel expirou: o Coletor entrou de novo e leu na hora.'],
   'login-catch-up': ['info', 'Horário(s) perdido(s) esperando a entrada no Smecel: coletado logo depois, uma vez só.'],
+  'standby-takeover': ['warn', 'O computador que coletava parou no meio: este assumiu e coletou o que faltava.'],
 };
 const QUIET = new Set(['lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
 /** Short, plain cause of each failure (Registros detail), instead of the technical code. */
@@ -104,6 +123,10 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
     }
     if (e.kind === 'schedule-sent') {
       return { id, at: e.at, level: 'info', message: e.sent ? `Grade de horários enviada · ${e.sent} turma(s) com mudança` : 'Grade de horários conferida · sem alteração' };
+    }
+    if (e.kind === 'incidents-sent') {
+      return { id, at: e.at, level: e.unresolved || e.code === 'INCIDENTS_PARTIAL' ? 'warn' : 'info',
+        message: `Ocorrências ${e.unchanged ? 'conferidas' : 'enviadas'} · ${incidentsText(e)}` };
     }
     if (e.kind === 'class-failed') {
       // The run went on with the other classes (owner request 28/10/2026).
