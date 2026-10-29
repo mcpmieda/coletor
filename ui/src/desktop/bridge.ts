@@ -13,6 +13,8 @@ export interface StartupSnapshot {
   status: Partial<CollectorStatus> | null;
   history: HistoryEntry[];
   settings: Preferences;
+  /** The running program's version, as in its window title. */
+  version: string;
 }
 type Failure = { error: string; code?: string };
 export type Status = CollectorStatus & { classesMode?: 'all' | 'chosen' };

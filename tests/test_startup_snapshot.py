@@ -37,6 +37,9 @@ class StartupSnapshotTests(unittest.TestCase):
         raw = (self.path / 'ui-snapshot.json').read_text(encoding='utf-8')
         self.assertNotIn('never', raw); self.assertNotIn('token', raw); self.assertNotIn('progress', raw)
         self.assertIn('browser', snapshot['settings'])
+        # The program's own version, not the interface package's (owner report 29/10/2026).
+        from coletor import __version__
+        self.assertEqual(snapshot['version'], __version__)
 
     def test_snapshot_saved_while_collecting_reopens_safe_and_without_history(self):
         (self.path / 'device.json').write_text(json.dumps({'state': 'active'}), encoding='utf-8')

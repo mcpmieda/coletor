@@ -1047,6 +1047,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([e.get('code') for e in history if e['kind'] == 'incidents-sent'], ['INCIDENTS_PARTIAL'])
         self.assertFalse(any(e['kind'] == 'failure' for e in history))
 
+    def test_the_window_never_asks_the_ecossistema_while_a_run_goes_on(self):
+        # 29/10/2026: the window's status every 5 s waited on the run's own transaction and the run's
+        # send timed out. During a run the window gets what this computer has.
+        seen = []
+        def during_capture():
+            before = len(self.provider.requests)
+            seen.append((self.runtime.refresh()['state'], len(self.provider.requests) - before))
+        self.source.on_capture = during_capture
+        self.assertEqual(self.runtime.collect()['state'], 'ready')
+        self.assertEqual(seen, [('collecting', 0)])
+        before = len(self.provider.requests)
+        self.runtime.refresh()
+        self.assertEqual([r['operation'] for r in self.provider.requests[before:]], ['status'])
+
     def test_a_successful_status_clears_a_stale_no_connection_notice(self):
         # The computer woke up before its network: the notice must not stay until the next time.
         self.runtime._error(AccessDenied('ACCESS_UNAVAILABLE'))

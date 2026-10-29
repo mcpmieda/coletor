@@ -9,6 +9,8 @@ export interface ColetorState {
   history: HistoryEntry[];
   prefs: Preferences | null;
   error: string;
+  /** The running program's version (as in the window title); null outside the desktop window. */
+  version: string | null;
   refresh: () => Promise<void>;
   setStatus: (status: Status) => void;
   setPrefs: (prefs: Preferences) => void;
@@ -21,6 +23,8 @@ export function useColetor(): ColetorState {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [error, setError] = useState('');
+  // The running program's version (startup snapshot); unknown outside the desktop window.
+  const [version, setVersion] = useState<string | null>(null);
   const busy = useRef(false), again = useRef(false), mounted = useRef(true);
   // Bumped by every status an action sets: a poll that started before it must
   // not put the older status back on screen.
@@ -66,6 +70,7 @@ export function useColetor(): ColetorState {
         if (snapshot.status) setLiveStatus(current => current ?? (snapshot.status as Status));
         setHistory(current => (current.length ? current : snapshot.history));
         setPrefs(current => current ?? snapshot.settings);
+        setVersion(snapshot.version);
       }).catch(() => undefined).finally(() => { void refresh(); });
     }
     return () => { mounted.current = false; };
@@ -77,5 +82,5 @@ export function useColetor(): ColetorState {
     return () => clearInterval(timer);
   }, [refresh, collecting]);
 
-  return { status, cached, history, prefs, error, refresh, setStatus, setPrefs };
+  return { status, cached, history, prefs, error, version, refresh, setStatus, setPrefs };
 }

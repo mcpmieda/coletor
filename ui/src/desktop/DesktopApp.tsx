@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Button, Chip, Spinner } from '@heroui/react';
 import { History, LayoutList, Minimize2, ScrollText, Settings } from 'lucide-react';
-import { version } from '../../package.json';
 import { useDesktopTray } from '../desktop';
 import FoxPet from './FoxPet';
 import type { FoxMood } from './foxPhrases';
@@ -84,7 +83,7 @@ export default function DesktopApp() {
         <ServiceLine state={state} />
         <div className="mt-3 px-2 text-[11px] leading-snug text-muted">
           <div>© 2026 Guilherme Pereira da Silva</div>
-          <div className="mt-1">Versão {version}</div>
+          {state.version && <div className="mt-1">Versão {state.version}</div>}
         </div>
       </aside>
 
@@ -97,7 +96,7 @@ export default function DesktopApp() {
           {page === 'tasks' && <TasksPage state={state} onOpenSettings={() => setPage('settings')} />}
           {page === 'history' && <HistoryPage history={state.history} />}
           {page === 'logs' && <LogsPage history={state.history} error={state.error} onRetry={() => { void state.refresh(); }} />}
-          {page === 'settings' && <SettingsPage state={state} version={version} />}
+          {page === 'settings' && <SettingsPage state={state} />}
         </div>
       </main>
     </div>

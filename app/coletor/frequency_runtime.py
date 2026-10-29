@@ -439,6 +439,10 @@ class FrequencyRuntime:
                     'settings': copy.deepcopy(self._status['settings']) if self._status else None}
 
     def refresh(self):
+        # While a run goes on, the run itself keeps the status current. Asking the Ecossistema too
+        # queues behind the run's own transaction on the school's row, and a slow one made the run's
+        # send time out (29/10/2026, the 8C at 17:19): the window shows what this computer has.
+        if self._operation.locked(): return self.public_status()
         self._fresh()
         return self.public_status()
 
