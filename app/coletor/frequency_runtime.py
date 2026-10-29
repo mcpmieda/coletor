@@ -19,7 +19,7 @@ import ctypes
 import os
 from .history import CollectorHistory
 from .institutional_access import AccessDenied
-from .local_copy import content_hash, is_current, schedule_hash, unchanged_payload
+from .local_copy import content_hash, is_current, payload_hash, schedule_hash, unchanged_payload
 from .manual_session import SessionError
 from .protected_storage import ProtectedStorage, StorageError
 
@@ -29,7 +29,8 @@ SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conf
               'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT', 'QUEUE_REQUEST_CONFLICT',
               'ACCESS_REQUIRED', 'ACCESS_UNAVAILABLE', 'CANCELLED', 'SOURCE_LOGIN_FAILED',
               'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED', 'CENTER_CLASSES_REQUIRED', 'CLOCK_OUT_OF_SYNC',
-              'PENDING_BATCHES', 'SOURCE_READ_FAILED', 'payload-required'}
+              'PENDING_BATCHES', 'SOURCE_READ_FAILED', 'payload-required',
+              'REPORT_REVIEW', 'REPORT_PREPARING', 'REPORT_AWAITING_RELATION'}
 # Problems an operator must see even with the window hidden in the tray.
 ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIATION_REQUIRED', 'SOURCE_LIST_FILTERED',
                'CENTER_CLASSES_REQUIRED', 'NO_SELECTED_CLASSES', 'SOURCE_CLASS_UNAVAILABLE', 'lease-fenced',
@@ -48,6 +49,10 @@ TRANSIENT_CODES = {'ACCESS_UNAVAILABLE', 'unavailable'}
 TRANSIENT_GRACE_SECONDS = 600
 # The weekly grid rarely changes: it is read at most this often, at the end of a collection run.
 SCHEDULE_READ_SECONDS = 3600
+# The student report's server step prepares Portal credentials four at a time: a report with many
+# new ones is sent again (same rows) until it is applied, at most this many times per run.
+REPORT_SENDS = 10
+REPORT_KEYS = {'timezone', 'enabled', 'every', 'from', 'to', 'weekdays'}
 
 
 def discard_confirmation():
@@ -103,6 +108,35 @@ def validate_schedule(schedule):
                                     or any(t >= recheck for t in times)): raise FrequencyError('invalid-request')
         if len(times) + (1 if recheck is not None else 0) > MAX_DAILY_TIMES: raise FrequencyError('invalid-request')
     return copy.deepcopy(schedule)
+
+
+def validate_report_schedule(schedule):
+    """The student report's agenda (frequencyReportScheduleV2): every `every` minutes (30 or more)
+    from `from` to `to` on the chosen weekdays (0 = Sunday)."""
+    time_pattern = r'(?:[01]\d|2[0-3]):[0-5]\d'
+    if (not isinstance(schedule, dict) or set(schedule) != REPORT_KEYS or type(schedule['enabled']) is not bool
+            or type(schedule['every']) is not int or not 30 <= schedule['every'] <= 720
+            or not all(isinstance(schedule[k], str) and re.fullmatch(time_pattern, schedule[k]) for k in ('from', 'to'))
+            or schedule['from'] > schedule['to'] or not isinstance(schedule['weekdays'], list)
+            or any(type(d) is not int or not 0 <= d <= 6 for d in schedule['weekdays'])
+            or len(set(schedule['weekdays'])) != len(schedule['weekdays'])):
+        raise FrequencyError('invalid-request')
+    try: ZoneInfo(schedule['timezone'])
+    except (ZoneInfoNotFoundError, ValueError, TypeError): raise FrequencyError('invalid-request') from None
+    return copy.deepcopy(schedule)
+
+
+def report_times(schedule):
+    """The report's times of a day, in order ('HH:MM')."""
+    if not schedule or not schedule['enabled']: return []
+    start = int(schedule['from'][:2]) * 60 + int(schedule['from'][3:])
+    end = int(schedule['to'][:2]) * 60 + int(schedule['to'][3:])
+    return [f'{m // 60:02d}:{m % 60:02d}' for m in range(start, end + 1, schedule['every'])]
+
+
+def report_hash(rows):
+    """studentReportHashV2 in the Ecossistema: the rows in sheet order, canonical JSON, SHA-256."""
+    return payload_hash(sorted(rows, key=lambda row: row['sourceRow']))
 
 
 # Positions of the Smecel diary that had a lesson: a point ("aula prevista/presença", given up to the
@@ -272,6 +306,11 @@ class FrequencyRuntime:
         # mid-run, its concession lapses and this one collects the rest without waiting for the next
         # slot. {'shifts', 'since', 'day'}; cleared by any run here and at the end of the day.
         self._standby = None
+        # The Smecel's "Relatório de alunos" (owner decision 29/10/2026): a run of its own, on its own
+        # agenda, never with a frequency run (the same operation lock). A slot that finds a run going
+        # on waits for it and runs once, right after.
+        self._report = {'running': False, 'preparing': False, 'code': None}
+        self._report_fired, self._report_pending, self._last_report_schedule = set(), None, None
         self._last_tick = 0
         self._thread = None
         self._stop = threading.Event()
@@ -298,7 +337,7 @@ class FrequencyRuntime:
     def _mutation(self, operation, **fields):
         payload = {'operation': operation, 'academicYear': 2026, 'requestId': str(uuid.uuid4()), **fields}
         reply = self._committed(self._request(payload), payload)
-        if operation in {'save-settings', 'set-paused'} and reply.get('settingsRevision') != fields['expectedRevision'] + 1:
+        if operation in {'save-settings', 'save-report-settings', 'set-paused'} and reply.get('settingsRevision') != fields['expectedRevision'] + 1:
             raise FrequencyError('unavailable')
         return reply
 
@@ -322,6 +361,8 @@ class FrequencyRuntime:
             settings = value['settings']
             if type(settings['revision']) is not int or settings['revision'] < 0 or type(settings['paused']) is not bool: raise ValueError()
             if settings['schedule'] is not None: validate_schedule(settings['schedule'])
+            # A server before the automatic report has no reportSchedule: no report agenda.
+            if settings.get('reportSchedule') is not None: validate_report_schedule(settings['reportSchedule'])
             for c in value['classes']:
                 if (type(c['classId']) is not int or c['classId'] < 1 or type(c['revision']) is not int
                         or c['revision'] < 0 or not label(c['sourceClassLabel'])): raise ValueError()
@@ -335,6 +376,8 @@ class FrequencyRuntime:
         with self._lock:
             self._status = value
             self._school_paused = value['settings']['paused']
+            # A run's own status checks keep the report's agenda current for a time that comes meanwhile.
+            self._last_report_schedule = value['settings'].get('reportSchedule')
             # The Ecossistema answered: a "no connection" notice left by an earlier attempt (the
             # computer woke up before its network) no longer holds until the next scheduled time.
             if self._code == 'ACCESS_UNAVAILABLE' and self._state == 'reserve':
@@ -435,6 +478,9 @@ class FrequencyRuntime:
                     'preparing': self._preparing,
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
+                    'report': dict(self._report),
+                    # What the Ecossistema did with the last report (no student names reach a device).
+                    'studentReport': copy.deepcopy(self._status.get('studentReport')) if self._status else None,
                     # Status shown locally contains operational settings only.
                     'settings': copy.deepcopy(self._status['settings']) if self._status else None}
 
@@ -571,11 +617,13 @@ class FrequencyRuntime:
             epoch = self._epoch
         if self._operation.locked():
             self._note_busy_slot()
+            self._note_busy_report()
             return
         status = self._fresh()
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
             return
+        if self._report_tick(status): return
         if self._code == 'CENTER_CLASSES_REQUIRED' and status['classes']:
             with self._lock: self._code, self._state = None, 'reserve'
         schedule = status['settings']['schedule']
@@ -703,6 +751,177 @@ class FrequencyRuntime:
             finally: self._operation.release()
         threading.Thread(target=run_takeover, daemon=True, name='collector-capture').start()
         return True
+
+    def _report_slot(self, schedule):
+        """(civil day, time) when this minute is one of the report's times, else None."""
+        if not schedule or not schedule['enabled']: return None
+        now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
+        wall = now.strftime('%H:%M')
+        if (now.weekday() + 1) % 7 not in schedule['weekdays'] or wall not in report_times(schedule): return None
+        return now.date().isoformat(), wall
+
+    def _note_busy_report(self):
+        """A report time that found a run going on: it runs once when the run ends."""
+        slot = self._report_slot(self._last_report_schedule)
+        if slot is not None and slot not in self._report_fired:
+            self._report_fired.add(slot)
+            self._report_pending = slot
+
+    def _report_tick(self, status):
+        """Starts the report when one of its times comes (or a time that found a run going on), unless
+        a frequency slot is waiting too: the frequency goes first. True when the tick is spent."""
+        schedule = status['settings'].get('reportSchedule')
+        self._last_report_schedule = schedule
+        if not schedule or not schedule['enabled'] or self._source_blocked:
+            self._report_pending = None
+            return False
+        if self._pending_slots: return False
+        now = datetime.fromtimestamp(self._clock(), ZoneInfo(schedule['timezone']))
+        today = now.date().isoformat()
+        self._report_fired = {k for k in self._report_fired if k[0] >= (now.date() - timedelta(days=7)).isoformat()}
+        pending, self._report_pending = self._report_pending, None
+        # A time removed from the agenda (or of another day) while it waited is not run.
+        due = pending if (pending and pending[0] == today and (now.weekday() + 1) % 7 in schedule['weekdays']
+                          and pending[1] in report_times(schedule)) else None
+        if due is None:
+            slot = self._report_slot(schedule)
+            if slot is None or slot in self._report_fired: return False
+            due = slot
+        self._report_fired.add(due)
+        if not self._operation.acquire(blocking=False):
+            self._report_pending = due
+            return True
+        def run_report():
+            try: self.collect_report(_claimed=True)
+            finally: self._operation.release()
+        threading.Thread(target=run_report, daemon=True, name='collector-report').start()
+        return True
+
+    def collect_report(self, *, _claimed=False):
+        """Reads the Smecel's "Relatório de alunos" and sends it (owner decision 29/10/2026).
+
+        The rows go whole when the report changed, or once a day; otherwise only the content's hash
+        (the local copy, as for the diaries), and the Ecossistema asks for the whole report when its
+        last one is another. The Ecossistema applies it through the Conciliação and lists there what
+        it did not apply."""
+        if not _claimed and not self._operation.acquire(blocking=False): return self.public_status()
+        if self._exiting:
+            if not _claimed: self._operation.release()
+            return self.public_status()
+        self._on_started()
+        with self._lock: self._report = {'running': True, 'preparing': True, 'code': None}
+        failed = False
+        try:
+            with self._lock:
+                epoch = self._epoch
+                if not self._active or self._paused: raise FrequencyError('CANCELLED')
+            status = self._fresh()
+            if status['settings']['paused']: raise FrequencyError('paused')
+            if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
+            self._history.record('report-started')
+            read_started = time.monotonic()
+            catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
+            year = catalog['catalog']['scope']['year']
+            with self._lock: self._report['preparing'] = False
+            def read():
+                self._check(epoch, lease=False)
+                return self._source.operational_student_report(year)
+            rows = self._verified(read)['rows']
+            send_started = time.monotonic()
+            reply = self._send_report(rows, year, epoch, status)
+            self._access.run(lambda: self._source.preserve_and_close(self._storage))
+            outcome = reply.get('outcome')
+            code = {'review': 'REPORT_REVIEW', 'preparing': 'REPORT_PREPARING',
+                    'awaiting_relation': 'REPORT_AWAITING_RELATION'}.get(outcome)
+            counted = lambda key: reply[key] if type(reply.get(key)) is int and reply[key] >= 0 else 0
+            self._history.record('report-finished', sent=len(rows), unresolved=counted('pending'),
+                                 conflicts=counted('differences') + counted('invalid'), code=code,
+                                 unchanged=reply.get('changed') is False,
+                                 read_ms=round((send_started - read_started) * 1000),
+                                 send_ms=round((time.monotonic() - send_started) * 1000))
+            # The window shows the Ecossistema's view of the report at once.
+            try: self._fresh()
+            except Exception: pass
+        except Exception as error:
+            failed = True
+            code = getattr(error, 'code', 'unavailable')
+            if isinstance(error, SessionError):
+                code = str(error) if str(error) in {'SOURCE_LOGIN_FAILED', 'SOURCE_READ_FAILED'} else 'SOURCE_LOGIN_REQUIRED'
+            if code not in SAFE_CODES: code = 'unavailable'
+            with self._lock: self._report['code'] = code
+            # A refused Smecel password blocks the frequency too: one place shows it.
+            if code == 'SOURCE_LOGIN_FAILED': self._error(SessionError('SOURCE_LOGIN_FAILED'))
+            if code not in QUIET_CODES: self._history.record('report-failed', code=code)
+            try:
+                self._check(epoch, lease=False)
+                self._source.preserve_and_close(self._storage)
+            except Exception:
+                try: self._source.close()
+                except Exception: pass
+        finally:
+            with self._lock: self._report.update(running=False, preparing=False)
+            if not _claimed: self._operation.release()
+            self._on_finished(failed)
+        return self.public_status()
+
+    def _report_lease(self, epoch):
+        def lease():
+            fresh = self._fresh()
+            if fresh['settings']['paused']: raise FrequencyError('paused')
+            if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
+            self._check(epoch)
+            return fresh
+        return self._verified(lease)
+
+    def _report_request(self, payload, epoch):
+        """One report request, retried like a diary: the receipt first, never a blind repeat."""
+        for attempt in range(3):
+            self._check(epoch)
+            if attempt:
+                receipt = self._request({'operation': 'receipt', 'academicYear': payload['academicYear'],
+                                         'requestId': payload['requestId']})
+                if (receipt.get('state') != 'ready' or receipt.get('operation') != 'receipt'
+                        or receipt.get('requestId') != payload['requestId']): raise FrequencyError('unavailable')
+                if receipt.get('result') is not None: return self._committed(receipt['result'], payload)
+                if self._stop.wait(2 ** attempt): raise FrequencyError('CANCELLED')
+            try: return self._committed(self._request(payload), payload)
+            except (AccessDenied, FrequencyError) as error:
+                if error.code not in {'unavailable', 'ACCESS_UNAVAILABLE'} or attempt == 2: raise
+
+    def _send_report(self, rows, year, epoch, status):
+        digest = report_hash(rows)
+        observed = datetime.fromtimestamp(self._clock(), timezone.utc).isoformat()
+        version = 'sha256:' + hashlib.sha256(canonical_frequency({'academicYear': year, 'observedAt': observed,
+                                                                  'contentHash': digest})).hexdigest()
+        zone = (status['settings'].get('reportSchedule') or status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
+        today = datetime.fromtimestamp(self._clock(), ZoneInfo(zone)).date().isoformat()
+        local = self._load_copy('student-report')
+        if isinstance(local, dict) and local.get('contentHash') == digest and local.get('sentOn') == today:
+            self._report_lease(epoch)
+            short = {'operation': 'student-report-unchanged', 'academicYear': year, 'requestId': str(uuid.uuid4()),
+                     'fencingToken': self._lease['fencingToken'], 'sourceVersion': version, 'observedAt': observed,
+                     'rows': len(rows), 'contentHash': digest}
+            try: return self._report_request(short, epoch)
+            except FrequencyError as error:
+                if error.code != 'payload-required': raise
+        reply = None
+        for _ in range(REPORT_SENDS):
+            self._report_lease(epoch)
+            payload = {'operation': 'student-report-collect', 'academicYear': year, 'requestId': str(uuid.uuid4()),
+                       'fencingToken': self._lease['fencingToken'], 'sourceVersion': version, 'observedAt': observed,
+                       'rows': rows}
+            reply = self._report_request(payload, epoch)
+            if reply.get('outcome') != 'preparing': break
+        # Only a report the Ecossistema holds as finished may be skipped by the short message.
+        if reply.get('outcome') in {'applied', 'review'}:
+            self._save_copy('student-report', {'contentHash': digest, 'sentOn': today})
+        return reply
+
+    def save_report_settings(self, expected_revision, schedule):
+        if schedule is not None: validate_report_schedule(schedule)
+        if type(expected_revision) is not int or expected_revision < 0: raise FrequencyError('invalid-request')
+        self._mutation('save-report-settings', expectedRevision=expected_revision, reportSchedule=schedule)
+        return self.refresh()
 
     def _note_unknown_marks(self, preview, class_label):
         """One log entry per unknown Smecel mark, ever: which mark it is and where it was first seen.

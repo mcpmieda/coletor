@@ -204,7 +204,7 @@ function instant(year: number, month: number, day: number, minute: number, timez
   return new Date(guess);
 }
 
-function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: Date): Date | null {
+export function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: Date): Date | null {
   const today = civil(now, timezone);
   for (let offset = 0; offset < 8; offset++) {
     const next = dayMinutes((today.weekday + offset) % 7).sort((a, b) => a - b).find(m => offset > 0 || m > today.minute);

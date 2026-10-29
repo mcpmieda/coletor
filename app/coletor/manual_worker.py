@@ -288,6 +288,11 @@ class BrowserWorker:
         # student's page, about 15 s for 170 students; the margin covers a slow Smecel.
         return self._rpc({"command": "incidents", "year": year}, timeout=180)
 
+    def student_report(self, year):
+        # The Smecel's "Relatório de alunos" (owner decision 29/10/2026): its export link, read in
+        # memory; the Smecel takes a few seconds to build it for the whole school.
+        return self._rpc({"command": "student-report", "year": year}, timeout=120)
+
     def login(self, email, password):
         # Same private pipe as captures; the reply carries only a boolean.
         return self._rpc({"command": "login", "email": email, "password": password}, timeout=60).get("logged_in") is True
@@ -353,6 +358,7 @@ async def browser_session(initial):
     from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
     from .class_schedule import grade_url, matches_grade, SCHEDULE_JS, SCHEDULE_LOAD_JS
     from .class_incidents import INCIDENTS_JS, list_url as incidents_url, matches_list as matches_incidents
+    from .student_report import REPORT_JS, export_query, form_url as report_url, matches_form as matches_report
     from urllib.parse import parse_qsl, urlsplit
     from playwright.async_api import async_playwright
     url = initial.get("url", "")
@@ -499,6 +505,26 @@ async def browser_session(initial):
                                 encoded = '{"error":"transport_limit"}'
                             print(encoded, flush=True)
                             return
+                        if command["command"] == "student-report":
+                            # Like the incidents: only from the class list's session; the export
+                            # is fetched by the form page itself and comes back as bytes, never a file.
+                            if not listing_mode:
+                                raise ValueError("report_outside_list")
+                            year = command.get("year")
+                            await load(report_url(year))
+                            before = page.url
+                            if not matches_report(before, year):
+                                payload = {"error": "report_unavailable"}  # Login redirect.
+                            else:
+                                payload = await page.evaluate(REPORT_JS, {"year": year, "query": export_query()})
+                                if page.url != before or payload.get("url", before) != before:
+                                    payload = {"error": "page_changed"}
+                            owned["url"] = None  # The list is loaded again when needed.
+                            encoded = json.dumps(payload, ensure_ascii=False)
+                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
+                                encoded = '{"error":"transport_limit"}'
+                            print(encoded, flush=True)
+                            return
                         class_id, year = params.get("ct"), params.get("ano")
                         if listing_mode:
                             class_id, year = command.get("class_id"), command.get("year")
@@ -539,7 +565,7 @@ async def browser_session(initial):
                             if not line:
                                 break
                             command = json.loads(line)
-                            if command.get("command") not in {"capture", "list", "state", "login", "schedule", "incidents"}:
+                            if command.get("command") not in {"capture", "list", "state", "login", "schedule", "incidents", "student-report"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")

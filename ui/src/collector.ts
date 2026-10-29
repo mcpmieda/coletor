@@ -4,6 +4,16 @@ export interface SharedSchedule {
   timezone: string;
   rules: { weekday: number; shift: 'matutino' | 'vespertino'; enabled: boolean; times: string[]; recheck: string | null }[];
 }
+/** The student report's own agenda (frequencyReportScheduleV2): weekdays 0 = Sunday. */
+export interface ReportSchedule {
+  timezone: string; enabled: boolean; every: number; from: string; to: string; weekdays: number[];
+}
+/** What the Ecossistema did with the last automatic report (no student names reach a device). */
+export interface StudentReportState {
+  observedAt: string; receivedAt: string; changedAt: string;
+  outcome: 'applied' | 'preparing' | 'awaiting_relation' | 'review'; rows: number;
+  notes: { counts: { rows: number; linked: number; pending: number } | null; differences: string[]; invalid: unknown[] };
+}
 export interface CollectorStatus {
   state: 'connect' | 'ready' | 'reserve' | 'collecting' | 'paused' | 'login-required' | 'error';
   code: string | null; active: boolean; localPaused: boolean; persistent: boolean;
@@ -11,7 +21,10 @@ export interface CollectorStatus {
   /** A run started and is still signing in / reading the class list: show the bar already. */
   preparing?: boolean;
   lastReceipt: { receivedAt: string; resolvedRecords: number; unresolvedRecords: number; conflicts: number } | null;
-  settings: { revision: number; paused: boolean; schedule: SharedSchedule | null } | null;
+  settings: { revision: number; paused: boolean; schedule: SharedSchedule | null; reportSchedule?: ReportSchedule | null } | null;
+  /** The student report's own run on this computer (owner decision 29/10/2026). */
+  report?: { running: boolean; preparing: boolean; code: string | null };
+  studentReport?: StudentReportState | null;
   /** The saved Smecel login is write-only: only a masked account comes back. */
   credential?: { saved: boolean; account?: string };
   /** Classes saved for this computer (display only; collection revalidates the list). */

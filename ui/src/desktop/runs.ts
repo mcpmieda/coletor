@@ -66,6 +66,48 @@ export function runSummary(run: Run): string {
   return parts.join(' · ') + (run.problem && run.status !== 'ok' ? ` · ${run.problem}` : '');
 }
 
+/** One run of the Smecel "Relatório de alunos" (owner decision 29/10/2026), its own history. */
+export interface ReportRun {
+  id: string; started: number; finished: number | null; status: Run['status'];
+  rows: number; pending: number; issues: number; unchanged: boolean; detail: string; readMs?: number; sendMs?: number;
+}
+const REPORT_OUTCOME: Record<string, string> = {
+  REPORT_REVIEW: 'nada aplicado: confira na Conciliação',
+  REPORT_PREPARING: 'aplicação continua na próxima leitura',
+  REPORT_AWAITING_RELATION: 'aguardando a Relação',
+};
+
+/** Report runs (started → finished/failed) from the local history, newest first. */
+export function groupReportRuns(entries: readonly HistoryEntry[]): ReportRun[] {
+  const runs: ReportRun[] = [];
+  let current: ReportRun | null = null;
+  for (const e of [...entries].sort((a, b) => a.at - b.at)) {
+    if (e.kind === 'report-started') {
+      if (current) runs.push({ ...current, status: 'error', finished: e.at, detail: 'Interrompida antes de terminar.' });
+      current = { id: `r${e.at}`, started: e.at, finished: null, status: 'running', rows: 0, pending: 0, issues: 0, unchanged: false, detail: 'Lendo o relatório' };
+    } else if (e.kind === 'report-finished' && current) {
+      const timing = e as HistoryEntry & { readMs?: number; sendMs?: number };
+      const issues = e.conflicts ?? 0, pending = e.unresolved ?? 0;
+      runs.push({ ...current, finished: e.at, rows: e.sent ?? 0, pending, issues, unchanged: !!e.unchanged,
+        status: e.code || issues || pending ? 'review' : 'ok', readMs: timing.readMs, sendMs: timing.sendMs,
+        detail: reportDetail(e) });
+      current = null;
+    } else if (e.kind === 'report-failed' && current) {
+      runs.push({ ...current, finished: e.at, status: 'error', detail: problemText(e.code) });
+      current = null;
+    }
+  }
+  if (current) runs.push(current);
+  return runs.reverse();
+}
+
+function reportDetail(e: HistoryEntry): string {
+  return [`${e.sent ?? 0} linha(s)${e.unchanged ? ' · sem alteração' : ' · enviado'}`,
+    e.unresolved ? `${e.unresolved} pendente(s) na Conciliação` : '',
+    e.conflicts ? `${e.conflicts} diferença(s) listada(s) na Conciliação` : '',
+    e.code ? REPORT_OUTCOME[e.code] ?? '' : ''].filter(Boolean).join(' · ');
+}
+
 export type Level = 'info' | 'warn' | 'error';
 export interface LogEvent { id: string; at: number; level: Level; message: string; detail?: string }
 
@@ -127,6 +169,17 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
     if (e.kind === 'incidents-sent') {
       return { id, at: e.at, level: e.unresolved || e.code === 'INCIDENTS_PARTIAL' ? 'warn' : 'info',
         message: `Ocorrências ${e.unchanged ? 'conferidas' : 'enviadas'} · ${incidentsText(e)}` };
+    }
+    if (e.kind === 'report-started') return { id, at: e.at, level: 'info', message: 'Relatório de alunos: leitura iniciada.' };
+    if (e.kind === 'report-finished') {
+      return { id, at: e.at, level: e.code || e.conflicts ? 'warn' : 'info',
+        message: `Relatório de alunos ${e.unchanged ? 'conferido' : 'enviado'} · ${reportDetail(e)}` };
+    }
+    if (e.kind === 'report-failed') {
+      const level: Level = TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
+      const cause = e.code === 'SOURCE_READ_FAILED' ? 'o Smecel demorou ou falhou ao gerar o relatório. A próxima leitura tenta de novo.' : problemText(e.code);
+      return { id, at: e.at, level, message: `Relatório de alunos não lido: ${cause}`,
+        detail: e.code ? FAILURE_CAUSE[e.code] : undefined };
     }
     if (e.kind === 'class-failed') {
       // The run went on with the other classes (owner request 28/10/2026).

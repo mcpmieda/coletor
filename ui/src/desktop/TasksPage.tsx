@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Chip, ProgressBar } from '@heroui/react';
 import { notify } from './foxSay';
-import { Activity, CalendarClock, CalendarDays, KeyRound, LayoutList, Pause, Pencil, Play, RefreshCw, School, Settings, ShieldCheck } from 'lucide-react';
+import { Activity, CalendarClock, CalendarDays, FileSpreadsheet, KeyRound, LayoutList, Pause, Pencil, Play, RefreshCw, School, Settings, ShieldCheck } from 'lucide-react';
 import { COLLECTOR_CODES } from '../collector';
 import { call, type Status } from './bridge';
 import { fromShared, nextSharedRun, scheduleText } from './periods';
-import { failures24h, fmtCountdown, fmtDate, groupRuns, runSummary } from './runs';
+import { failures24h, fmtCountdown, fmtDate, groupReportRuns, groupRuns, runSummary } from './runs';
 import ScheduleEditor from './ScheduleEditor';
+import ReportScheduleEditor from './ReportScheduleEditor';
+import { nextReportRun, reportText } from './reportPlan';
 import { IconButton, Stat, StatusChip } from './ui';
 import type { ColetorState } from './useColetor';
 
@@ -15,7 +17,8 @@ const QUIET_CODES = new Set(['lease-busy', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
 
 export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: ColetorState; onOpenSettings: () => void }>) {
   const { status, history, setStatus, refresh } = state;
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(false), [editingReport, setEditingReport] = useState(false);
+  const [startingReport, setStartingReport] = useState(false);
   const [busy, setBusy] = useState(false), [starting, setStarting] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNowMs(Date.now()), 1000); return () => clearInterval(t); }, []);
@@ -32,6 +35,14 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   // From the click on (owner request 29/10/2026): the button goes and the bar shows at once, while
   // the Coletor still signs in to the Smecel and reads the class list ("Preparando").
   const running = collecting || starting || status?.preparing === true;
+  // The student report is a run of its own and never runs with the frequency (owner decision 29/10/2026).
+  const reportRunning = startingReport || status?.report?.running === true;
+  const reportSchedule = status?.settings?.reportSchedule ?? null;
+  const reportRuns = useMemo(() => groupReportRuns(history), [history]);
+  const lastReport = reportRuns.find(r => r.status !== 'running') ?? null;
+  const nextReport = status?.active && !status.localPaused && !status.settings?.paused ? nextReportRun(reportSchedule, new Date(nowMs)) : null;
+  const reportCode = status?.report?.code ?? null;
+  const server = status?.studentReport ?? null;
   const credential = status?.credential?.saved === true;
   const classes = status?.classesMode === 'all' ? 'Todas' : (status?.selectedClasses ?? 0);
   const code = status?.code ?? null;
@@ -47,6 +58,18 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
       if (final.code && !QUIET_CODES.has(final.code)) notify.danger(COLLECTOR_CODES[final.code] ?? 'A coleta não terminou.');
     }).catch(e => { notify.danger(e instanceof Error ? e.message : 'Não foi possível coletar.'); })
       .finally(() => { setStarting(false); void refresh(); });
+  }
+
+  function collectReportNow() {
+    setStartingReport(true);
+    notify('Leitura do relatório iniciada');
+    window.setTimeout(() => { void refresh(); }, 1500);
+    void call(api => api.collect_report_now()).then(final => {
+      setStatus(final);
+      const code = final.report?.code;
+      if (code && !QUIET_CODES.has(code)) notify.danger(COLLECTOR_CODES[code] ?? 'O relatório não foi lido.');
+    }).catch(e => { notify.danger(e instanceof Error ? e.message : 'Não foi possível ler o relatório.'); })
+      .finally(() => { setStartingReport(false); void refresh(); });
   }
 
   async function act(work: Parameters<typeof call<Status>>[0], message?: string) {
@@ -111,7 +134,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
                 <Button size="sm" variant="primary" isDisabled={busy || !credential} onPress={() => { void act(api => api.activate_collector(), 'Coleta automática ativada'); }}>
                   <Play size={14} /> Ativar
                 </Button>
-              ) : running ? null : (
+              ) : running || reportRunning ? null : (
                 <Button size="sm" variant="primary" isDisabled={status.localPaused || !!status.settings?.paused}
                   onPress={collectNow}>
                   <RefreshCw size={14} /> Coletar agora
@@ -151,7 +174,53 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
         </Card.Content>
       </Card>
 
-      <ScheduleEditor open={editing} status={status} onClose={() => setEditing(false)}
+      <Card className={status?.active && !status.localPaused && reportSchedule?.enabled ? '' : 'opacity-80'}>
+        <Card.Content className="flex flex-col gap-3">
+          <div className="flex items-start gap-4">
+            <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-default text-muted"><FileSpreadsheet size={20} /></div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-base font-semibold">Relatório de alunos</span>
+                {!reportSchedule?.enabled && <Chip size="sm" variant="soft">Desligado</Chip>}
+                {server?.outcome === 'review' && <Chip size="sm" variant="soft" color="warning">Confira na Conciliação</Chip>}
+                {server?.outcome === 'awaiting_relation' && <Chip size="sm" variant="soft" color="warning">Aguardando a Relação</Chip>}
+              </div>
+              <div className="truncate text-xs text-muted">Smecel → Conciliação do Ecossistema · datas de matrícula e de transferência</div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {!status?.active || running || reportRunning ? null : (
+                <Button size="sm" variant="primary" isDisabled={status.localPaused || !!status.settings?.paused || !credential} onPress={collectReportNow}>
+                  <RefreshCw size={14} /> Coletar agora
+                </Button>
+              )}
+              <IconButton label="Editar agenda do relatório" onPress={() => setEditingReport(true)} isDisabled={!status?.settings}><Pencil size={16} /></IconButton>
+            </div>
+          </div>
+          {reportRunning ? (
+            <div className="flex flex-col gap-1.5 pl-14">
+              <span className="truncate text-xs">{status?.report?.preparing !== false ? 'Preparando: entrando no Smecel…' : 'Lendo o relatório e enviando à Conciliação…'}</span>
+              <ProgressBar aria-label="Progresso do relatório" size="md" isIndeterminate>
+                <ProgressBar.Track className="collect-track"><ProgressBar.Fill /><span className="collect-sweep" aria-hidden="true" /></ProgressBar.Track>
+              </ProgressBar>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 pl-14 text-xs text-muted">
+              <span className="flex items-center gap-1.5"><CalendarDays size={14} /> {reportText(reportSchedule)}</span>
+              <span>Próxima: <span className="tabular-nums text-foreground">{fmtCountdown(nextReport, nowMs)}</span></span>
+              <span className="flex min-w-0 items-center gap-2">
+                Última: <StatusChip status={lastReport?.status} />
+                {lastReport && <span className="truncate" title={lastReport.detail}>{fmtDate(lastReport.started)} · {lastReport.detail}</span>}
+              </span>
+              {server && <span>No Ecossistema: lido em {fmtDate(Date.parse(server.observedAt) / 1000)}{server.notes.counts ? ` · ${server.notes.counts.pending} pendente(s)` : ''}</span>}
+              {reportCode && !QUIET_CODES.has(reportCode) && <span className="text-danger">{COLLECTOR_CODES[reportCode] ?? 'A última leitura não terminou.'}</span>}
+            </div>
+          )}
+        </Card.Content>
+      </Card>
+
+      <ReportScheduleEditor open={editingReport} status={status} history={history} onClose={() => setEditingReport(false)}
+        onSaved={saved => { setStatus(saved); setEditingReport(false); void refresh(); }} />
+      <ScheduleEditor open={editing} status={status} history={history} onClose={() => setEditing(false)}
         onSaved={saved => { setStatus(saved); setEditing(false); void refresh(); }} />
     </div>
   );

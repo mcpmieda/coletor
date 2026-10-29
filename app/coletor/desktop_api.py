@@ -171,7 +171,7 @@ class DesktopApi(PreviewApi):
 
     # ---- Instant opening: a non-secret summary of the last verified status.
     _SNAPSHOT_FIELDS = ('state', 'code', 'active', 'localPaused', 'persistent', 'credential', 'selectedClasses',
-                        'classesMode', 'settings', 'lastReceipt')
+                        'classesMode', 'settings', 'lastReceipt', 'studentReport')
 
     def _snapshot_path(self):
         return self._settings._directory / 'ui-snapshot.json'
@@ -240,6 +240,13 @@ class DesktopApi(PreviewApi):
 
     def collect_now(self):
         return self._operational(self._collector.collect)
+
+    def collect_report_now(self):
+        # The Smecel's "Relatório de alunos", a run of its own (owner decision 29/10/2026).
+        return self._operational(self._collector.collect_report)
+
+    def save_report_schedule(self, revision, schedule):
+        return self._operational(lambda: self._collector.save_report_settings(revision, schedule))
 
     def pause_collector(self, paused):
         self._paused_for_choice = False  # The operator's explicit decision wins.
@@ -582,7 +589,7 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
-for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'pause_collector',
+for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'collect_report_now', 'save_report_schedule', 'pause_collector',
               'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection',
               'save_source_credential', 'forget_source_credential'):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))

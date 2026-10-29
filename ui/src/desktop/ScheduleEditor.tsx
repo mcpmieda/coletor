@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { notify } from './foxSay';
 import { Save } from 'lucide-react';
-import type { SharedSchedule } from '../collector';
+import type { HistoryEntry, SharedSchedule } from '../collector';
+import { frequencyMinutes, reportClash, reportMinutes } from './reportPlan';
 import { call, type Status } from './bridge';
 import { DAY_LETTERS, DAY_NAMES, cloneSchedule, draftProblem, draftSignature, fromShared, sharedScheduleProblem, timezoneProblem, toShared, type PeriodDraft } from './periods';
 import { NumberInput, Section, SwitchRow, TextInput, TimeInput, TimeValidationContext } from './ui';
@@ -15,8 +16,8 @@ const sameSchedule = (a: SharedSchedule | null, b: SharedSchedule) => a !== null
   a.rules.every(rule => { const other = b.rules.find(r => r.weekday === rule.weekday && r.shift === rule.shift);
     return other && other.enabled === rule.enabled && other.recheck === rule.recheck && JSON.stringify(other.times) === JSON.stringify(rule.times); });
 
-export default function ScheduleEditor({ open, status, onClose, onSaved }: Readonly<{
-  open: boolean; status: Status | null; onClose: () => void; onSaved: (status: Status) => void;
+export default function ScheduleEditor({ open, status, history = [], onClose, onSaved }: Readonly<{
+  open: boolean; status: Status | null; history?: readonly HistoryEntry[]; onClose: () => void; onSaved: (status: Status) => void;
 }>) {
   const [draft, setDraft] = useState<PeriodDraft>(() => fromShared(status?.settings?.schedule ?? null));
   const [source, setSource] = useState<SharedSchedule | null>(null);
@@ -43,7 +44,9 @@ export default function ScheduleEditor({ open, status, onClose, onSaved }: Reado
   const zoneChanged = !!source && source.timezone !== draft.timezone;
   const problem = Object.values(incomplete).some(Boolean) ? 'Preencha ou remova o horário incompleto.' :
     unchanged && (perRule || draft.initial === draftSignature(draft)) ? null :
-      (perRule ? sharedScheduleProblem(candidate) : draftProblem(draft));
+      (perRule ? sharedScheduleProblem(candidate) : draftProblem(draft))
+      // Never together with the student report (owner decision 29/10/2026), by the real run lengths.
+      ?? reportClash(status?.settings?.reportSchedule, candidate, reportMinutes(history), frequencyMinutes(history));
   const blocked = !!problem || (zoneChanged && !zoneConfirmed) || baseRevision === null;
   const perDay = Math.max(...Array.from({ length: 7 }, (_, weekday) => new Set(candidate.rules.filter(r => r.enabled && r.weekday === weekday).flatMap(r => [...r.times, ...(r.recheck ? [r.recheck] : [])])).size));
   const rule = rulesDraft.rules[ruleIndex];
