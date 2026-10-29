@@ -1,6 +1,6 @@
 # Instaladores Windows — cinco últimas versões
 
-Esta pasta mantém os **cinco instaladores .exe mais recentes aprovados pelos testes Windows** após novas integrações na branch main. O processo começa a funcionar quando o workflow da PR #7 for integrado. Os nomes contêm a versão da aplicação, o número do build e o identificador do commit, mesmo que a versão nominal (por exemplo, 0.4.0) não mude.
+Esta pasta mantém os **cinco instaladores .exe mais recentes aprovados pelos testes Windows** após novas integrações na branch main. O processo começa a funcionar quando o workflow da PR #7 for integrado. Cada instalador se chama `COLETOR v<versão>.exe` (por exemplo, `COLETOR v0.4.286.exe`); o último número da versão é o build. O commit e a execução de CI de cada um ficam no versoes.json. Instaladores antigos com o nome longo (`ColetorFrequencia-v…-build…-windows-x64-setup.exe`) continuam na pasta até saírem das cinco versões mantidas.
 
 - **Baixar:** abra o arquivo .exe nesta pasta pelo GitHub, usando a opção de baixar o arquivo completo. Ele é armazenado no **Git LFS**, não como código de texto. Ao clonar o repositório, instale Git LFS e execute git lfs pull para obter os executáveis. Não tente executar um arquivo de ponteiro LFS.
 - **Verificar:** cada .exe possui um arquivo .exe.sha256. O versoes.json registra nome, versão, hash SHA-256, commit original e execução de CI.
