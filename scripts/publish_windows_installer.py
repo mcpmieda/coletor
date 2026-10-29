@@ -16,7 +16,9 @@ import shutil
 import struct
 
 SOURCE = re.compile(r"ColetorFrequencia-(\d+\.\d+\.\d+)-windows-x64-setup-candidato\.exe\Z")
-STORED = re.compile(r"ColetorFrequencia-v\d+\.\d+\.\d+-build\d{6,12}-[0-9a-f]{12}-windows-x64-setup\.exe\Z")
+# "COLETOR v0.4.286.exe" (owner request 29/10/2026): the build and commit stay in versoes.json.
+# The older long names are still accepted until the last of them leaves the five kept builds.
+STORED = re.compile(r"COLETOR v\d+\.\d+\.\d+\.exe\Z|ColetorFrequencia-v\d+\.\d+\.\d+-build\d{6,12}-[0-9a-f]{12}-windows-x64-setup\.exe\Z")
 FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
 HEX_HASH = re.compile(r"[0-9a-f]{64}\Z")
 KEEP = 5
@@ -128,7 +130,7 @@ def publish(repository: Path, artifact_dir: Path, *, head_sha: str, run_id: int,
         raise ValueError('installer-directory-missing')
     setup, version, expected = original_setup(artifact_dir, minimum_bytes=minimum_bytes)
     entries = load_manifest(folder)  # Validate before changing any file.
-    filename = f'ColetorFrequencia-v{version}-build{run_number:06d}-{head_sha[:12]}-windows-x64-setup.exe'
+    filename = f'COLETOR v{version}.exe'
     if not STORED.fullmatch(filename):
         raise ValueError('invalid-published-installer-name')
     previous = next((e for e in entries if e['arquivo'] == filename), None)

@@ -72,22 +72,39 @@ class PublishInstallerTests(unittest.TestCase):
 
     def test_retains_only_five_visible_installers_and_hashes(self):
         for i in range(1, 8):
-            self.stage()
+            self.stage(f'0.4.{i}')
             self.run_publish(i)
         entries = self.manifest()
         self.assertEqual([e['run_number'] for e in entries], [7,6,5,4,3])
         self.assertEqual(len(list((self.root/'instalador').glob('*.exe'))), 5)
         self.assertEqual(len(list((self.root/'instalador').glob('*.sha256'))), 5)
-        self.assertFalse(any('build000001-' in p.name for p in (self.root/'instalador').glob('*.exe')))
+        self.assertEqual(sorted(p.name for p in (self.root/'instalador').glob('*.exe')),
+                         [f'COLETOR v0.4.{i}.exe' for i in range(3, 8)])
 
     def test_retry_is_idempotent_and_old_run_cannot_replace_five(self):
         for i in range(1, 7):
-            self.stage()
+            self.stage(f'0.4.{i}')
             self.run_publish(i)
-        self.stage()
+        self.stage('0.4.6')
         self.assertEqual(self.run_publish(6)['status'], 'already-published')
+        self.stage('0.4.1')
         self.assertEqual(self.run_publish(1)['status'], 'obsolete')
         self.assertEqual([e['run_number'] for e in self.manifest()], [6,5,4,3,2])
+
+    def test_short_name_and_older_long_names_live_together(self):
+        """"COLETOR v0.4.286.exe" from now on; the long names already kept rotate out (29/10/2026)."""
+        folder = self.root/'instalador'
+        raw = b'MZ' + bytes(98)
+        sha = hashlib.sha256(raw).hexdigest()
+        old = 'ColetorFrequencia-v0.4.1-build000001-' + 'a'*12 + '-windows-x64-setup.exe'
+        (folder/old).write_bytes(raw)
+        (folder/(old + '.sha256')).write_text(f'{sha}  {old}\n', encoding='ascii')
+        (folder/'versoes.json').write_text(json.dumps({'formato': 1, 'limite': 5, 'versoes': [{
+            'arquivo': old, 'sha256': sha, 'versao': '0.4.1', 'commit': 'a'*40, 'run_id': 1, 'run_number': 1,
+            'publicado_em': '2026-10-28T12:00:00+00:00'}]}), encoding='utf-8')
+        self.stage('0.4.2')
+        self.assertEqual(self.run_publish(2)['arquivo'], 'COLETOR v0.4.2.exe')
+        self.assertEqual([e['arquivo'] for e in self.manifest()], ['COLETOR v0.4.2.exe', old])
 
     def test_invalid_hash_is_rejected_without_modifying_previous_version(self):
         self.stage()
