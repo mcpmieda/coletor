@@ -105,10 +105,11 @@ def preview():
 class Source:
     def __init__(self): self.closed = 0; self.reads = 0; self.on_capture = lambda: None
     def operational_catalog(self, storage):
-        return {'selected_class_ids': ['13331'], 'unavailable_class_ids': [], 'catalog': {'classes': [
+        return {'selected_class_ids': ['13331'], 'unavailable_class_ids': [], 'catalog': {'scope': {'year': 2026}, 'classes': [
                 {'class_id': '13331', 'name': 'TURMA SINTÉTICA A', 'shift': 'matutino'}]}}
     def operational_capture(self, class_id): self.reads += 1; self.on_capture(); return preview()
     def operational_schedule(self): return {}  # No weekly grid unless a test gives one.
+    def operational_incidents(self, year): return {'complete': True, 'students': []}  # None unless a test gives some.
     def preserve_and_close(self, storage): self.close()
     def remember_if_ready(self, storage): pass
     def close(self): self.closed += 1
@@ -148,10 +149,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         # Every server request and the source read run inside a verified
         # bracket. Per class: status+lease+read+status share one; send has its own.
-        # The weekly grid (read at most hourly, after the diaries) adds one more.
+        # The weekly grid (read at most hourly, after the diaries) adds one more; the incidents
+        # (every run) three: the reading, the lease check and the send.
         self.assertEqual(outside, [])
         self.assertEqual(captured, [1])
-        self.assertEqual(self.access.calls, 7)
+        self.assertEqual(self.access.calls, 10)
 
     def test_uncertain_send_consults_receipt_before_retry_and_never_duplicates(self):
         self.provider.fail_after_commit = True
@@ -166,6 +168,29 @@ class RuntimeTests(unittest.TestCase):
         self.provider.fail_lease = True
         self.assertEqual(self.runtime.collect()['state'], 'reserve')
         self.assertEqual(self.source.reads, 0)
+
+    def test_a_reserve_takes_over_the_slot_when_the_collecting_computer_stops(self):
+        # Owner request 29/10/2026: no waiting for the next slot when the other computer stops mid-run.
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        self.runtime._last_schedule = self.provider.shared_schedule
+        self.provider.fail_lease = True
+        self.assertEqual(self.runtime.collect({'matutino'})['state'], 'reserve')
+        self.provider.fail_lease = False
+        now = datetime.fromtimestamp(self.provider.now, ZoneInfo(self.provider.shared_schedule['timezone']))
+        status = self.runtime._fresh()
+        # The other computer still holds the concession: wait.
+        self.assertFalse(self.runtime._take_over({**status, 'lease': {'deviceId': 'other'}}, now))
+        # It finished the class of the slot: nothing to do.
+        done = {**status, 'collections': [{'classId': 10, 'receivedAt': stamp(self.provider.now)}]}
+        self.assertFalse(self.runtime._take_over(done, now))
+        # It stopped before the class: this computer runs the slot once, at once.
+        self.assertTrue(self.runtime._take_over(status, now))
+        self.runtime._operation.acquire(); self.runtime._operation.release()
+        self.assertEqual([p['classId'] for p in self.provider.requests if p['operation'] == 'collect'], [10])
+        self.assertIsNone(self.runtime._standby)
+        self.assertFalse(self.runtime._take_over(status, now))
+        self.assertIn('standby-takeover', [e['kind'] for e in self.runtime.recent_history(50)])
 
     def test_revoked_gate_and_late_capture_cannot_enqueue_or_send(self):
         self.source.on_capture = lambda: self.runtime.cancel(purge=True)
@@ -690,7 +715,7 @@ class RuntimeTests(unittest.TestCase):
         self.provider.frequency_request = with_classes
         self.source.operational_catalog = lambda storage: {
             'selected_class_ids': [str(13331 + i) for i in range(count)], 'unavailable_class_ids': [],
-            'catalog': {'classes': [{'class_id': str(13331 + i), 'name': name, 'shift': 'matutino'} for i, name in enumerate(names)]}}
+            'catalog': {'scope': {'year': 2026}, 'classes': [{'class_id': str(13331 + i), 'name': name, 'shift': 'matutino'} for i, name in enumerate(names)]}}
         def capture(class_id):
             self.source.reads += 1
             name = names[int(class_id) - 13331]
@@ -996,10 +1021,31 @@ class RuntimeTests(unittest.TestCase):
         self.source.on_capture = during_capture
         self.assertEqual(self.runtime.collect()['state'], 'ready')
         self.assertEqual(seen[0]['state'], 'collecting')
-        self.assertEqual(seen[0]['progress']['total'], 1)
+        # One class, then the weekly grid (due at the first run) and the incidents (owner request 29/10/2026).
+        self.assertEqual(seen[0]['progress']['total'], 3)
         self.assertTrue(seen[0]['progress']['classLabel'])
         beat = next(r for r in self.provider.requests if r['operation'] == 'heartbeat')
         self.assertEqual(beat['status'], 'collecting')
+
+    def test_incidents_go_with_the_student_class_linked_in_the_centro(self):
+        # Owner decision 29/10/2026: the year's Smecel incidents, after the classes, in the same run.
+        incident = {'sourceIncidentId': '9001', 'kind': 'ADVERTÊNCIA', 'date': '2026-02-23',
+                    'sourceClassLabel': 'TURMA SINTÉTICA A', 'leave': None, 'description': 'Descrição sintética.'}
+        self.source.operational_incidents = lambda year: {'complete': False, 'students': [
+            {'sourceStudentId': '101', 'name': 'ALUNO SINTÉTICO', 'classLabels': ['MULTIFUNCIONAL', 'TURMA SINTÉTICA A'],
+             'incidents': [incident]},
+            {'sourceStudentId': '102', 'name': 'ALUNO FORA DO CENTRO', 'classLabels': ['MULTIFUNCIONAL'],
+             'incidents': [dict(incident, sourceIncidentId='9002')]}]}
+        self.assertEqual(self.runtime.collect()['state'], 'ready')
+        sent = [r for r in self.provider.requests if r['operation'] == 'incident-collect']
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]['academicYear'], 2026)
+        self.assertFalse(sent[0]['complete'])
+        self.assertEqual([(s['classId'], s['sourceClassLabel']) for s in sent[0]['students']],
+                         [(10, 'TURMA SINTÉTICA A'), (None, None)])
+        history = self.runtime.recent_history(50)
+        self.assertEqual([e.get('code') for e in history if e['kind'] == 'incidents-sent'], ['INCIDENTS_PARTIAL'])
+        self.assertFalse(any(e['kind'] == 'failure' for e in history))
 
     def test_a_successful_status_clears_a_stale_no_connection_notice(self):
         # The computer woke up before its network: the notice must not stay until the next time.

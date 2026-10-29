@@ -48,7 +48,8 @@ LIST_SETTLED_JS = """() => !!document.querySelector('#tbodyTurmas tr a[href*="vi
 # Reading pages need no pictures, fonts or media. Aborting them keeps the six
 # HTTP/1.1 connections free for the list request and the diary itself. This
 # only refuses more: the allowed origin and every other block stay unchanged.
-READ_PATHS = ("/sistema/escola/turmaListar.php", "/sistema/escola/diario_frequencia.php", "/sistema/escola/grade.php")
+READ_PATHS = ("/sistema/escola/turmaListar.php", "/sistema/escola/diario_frequencia.php", "/sistema/escola/grade.php",
+              "/sistema/escola/ocorrencias.php")
 READ_SKIPPED_TYPES = {"image", "font", "media"}
 # A list validated in this session is reused for the following diaries while
 # the worker alone navigated the window, and for at most this many seconds.
@@ -282,6 +283,11 @@ class BrowserWorker:
         # than a capture (up to 30 s of waiting on top of the page itself).
         return self._rpc({"command": "schedule"}, timeout=90)
 
+    def incidents(self, year):
+        # The school year's incidents (owner decision 29/10/2026): the list's pages, then every
+        # student's page, about 15 s for 170 students; the margin covers a slow Smecel.
+        return self._rpc({"command": "incidents", "year": year}, timeout=180)
+
     def login(self, email, password):
         # Same private pipe as captures; the reply carries only a boolean.
         return self._rpc({"command": "login", "email": email, "password": password}, timeout=60).get("logged_in") is True
@@ -346,6 +352,7 @@ async def browser_session(initial):
     from .manual_session import matches_source, source_url
     from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
     from .class_schedule import grade_url, matches_grade, SCHEDULE_JS, SCHEDULE_LOAD_JS
+    from .class_incidents import INCIDENTS_JS, list_url as incidents_url, matches_list as matches_incidents
     from urllib.parse import parse_qsl, urlsplit
     from playwright.async_api import async_playwright
     url = initial.get("url", "")
@@ -472,6 +479,26 @@ async def browser_session(initial):
                                 encoded = '{"error":"transport_limit"}'
                             print(encoded, flush=True)
                             return
+                        if command["command"] == "incidents":
+                            # Like the grid: only from the class list's session, read as structured
+                            # fields (the list's counts and each student's records), never as HTML.
+                            if not listing_mode:
+                                raise ValueError("incidents_outside_list")
+                            year = command.get("year")
+                            await load(incidents_url(year))
+                            before = page.url
+                            if not matches_incidents(before, year):
+                                payload = {"error": "incidents_unavailable"}  # Login redirect.
+                            else:
+                                payload = await page.evaluate(INCIDENTS_JS, year)
+                                if page.url != before or payload.get("url", before) != before:
+                                    payload = {"error": "page_changed"}
+                            owned["url"] = None  # The list is loaded again when needed.
+                            encoded = json.dumps(payload, ensure_ascii=False)
+                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
+                                encoded = '{"error":"transport_limit"}'
+                            print(encoded, flush=True)
+                            return
                         class_id, year = params.get("ct"), params.get("ano")
                         if listing_mode:
                             class_id, year = command.get("class_id"), command.get("year")
@@ -512,7 +539,7 @@ async def browser_session(initial):
                             if not line:
                                 break
                             command = json.loads(line)
-                            if command.get("command") not in {"capture", "list", "state", "login", "schedule"}:
+                            if command.get("command") not in {"capture", "list", "state", "login", "schedule", "incidents"}:
                                 break
                             if capture is not None:
                                 raise RuntimeError("overlapping_capture")

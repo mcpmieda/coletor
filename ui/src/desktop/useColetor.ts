@@ -71,7 +71,7 @@ export function useColetor(): ColetorState {
     return () => { mounted.current = false; };
   }, [refresh]);
 
-  const collecting = status?.state === 'collecting';
+  const collecting = status?.state === 'collecting' || status?.preparing === true;
   useEffect(() => {
     const timer = setInterval(() => { void refresh(); }, collecting ? 5_000 : 15_000);
     return () => clearInterval(timer);

@@ -66,6 +66,16 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
                   <span className="text-xs tabular-nums text-muted" title="Leitura no Smecel · envio ao Ecossistema">{seconds(c.readMs)} · {seconds(c.sendMs)}</span>
                 </div>
               ))}
+              {(open?.steps ?? []).map((s, i) => (
+                <div key={`${s.label}-${i}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-default">
+                  <StatusChip status={s.review ? 'review' : 'ok'} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{s.label}</div>
+                    <div className="text-xs text-muted">{s.detail}</div>
+                  </div>
+                  {s.readMs !== undefined && <span className="text-xs tabular-nums text-muted" title="Leitura no Smecel · envio ao Ecossistema">{seconds(s.readMs)} · {seconds(s.sendMs)}</span>}
+                </div>
+              ))}
               {open?.problem && <p className="px-2 pt-2 text-sm text-danger">{open.problem}</p>}
               {!open?.classes.length && !open?.problem && <p className="py-6 text-center text-muted">Nenhuma turma enviada nesta coleta.</p>}
             </Modal.Body>
