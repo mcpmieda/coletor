@@ -43,9 +43,13 @@ INCIDENTS_JS = """async (year) => {
   if(!counter)return {...scope,error:'incidents_counter_missing'};
   const total=Number(counter[1]),perPage=Number(counter[2]);
   const pages=Math.max(1,Math.ceil(total/perPage));
-  const rowsOf=doc=>{const table=doc.querySelectorAll('table')[1];
-    return table?[...table.querySelectorAll('tbody tr')].map(tr=>{const a=tr.querySelector('a[href*="ocorrencias_aluno.php"]');
-      return {href:a?.getAttribute('href')??null,name:norm(tr.cells[1]?.textContent),
+  // Each column by its title, never by its position: the ranking table above has a "#" first, the
+  // list does not, and reading the 2nd column sent the class as the student's name (29/10/2026).
+  const columns=(table,titles)=>{const heads=[...(table?.querySelectorAll('thead th')??[])].map(th=>norm(th.textContent).toUpperCase());
+    const found=titles.map(title=>heads.indexOf(title));return found.every(i=>i>=0)?found:null;};
+  const rowsOf=doc=>{const table=doc.querySelectorAll('table')[1];const at=columns(table,['ALUNO','TURMA']);
+    return at?[...table.querySelectorAll('tbody tr')].map(tr=>{const a=tr.querySelector('a[href*="ocorrencias_aluno.php"]');
+      return {href:a?.getAttribute('href')??null,name:norm(tr.cells[at[0]]?.textContent),class_label:norm(tr.cells[at[1]]?.textContent),
         count:Number(norm(tr.querySelector('strong')?.textContent))};}):null;};
   const rows=[],failedPages=[];
   for(let page=1;page<=pages;page++){
@@ -57,7 +61,9 @@ INCIDENTS_JS = """async (year) => {
     if(!strong)return null;let value='';for(let n=strong.nextSibling;n&&n.nodeName!=='BR'&&n.nodeName!=='STRONG';n=n.nextSibling)value+=n.textContent;
     return norm(value);};
   const student=async href=>{const doc=await get(href);
-    const enrolments=[...(doc.querySelector('table')?.querySelectorAll('tbody tr')??[])].map(tr=>({year:norm(tr.cells[0]?.textContent),label:norm(tr.cells[1]?.textContent)}));
+    const table=doc.querySelector('table'),at=columns(table,['ANO LETIVO','TURMA']);
+    if(!at)throw new Error('enrolments');
+    const enrolments=[...table.querySelectorAll('tbody tr')].map(tr=>({year:norm(tr.cells[at[0]]?.textContent),label:norm(tr.cells[at[1]]?.textContent)}));
     const records=[...doc.querySelectorAll('.ls-box')].map(box=>{const print=box.querySelector('a[href*="print_ocorrencia.php?ocorrencia="]');
       if(!print)return null;const title=box.querySelector('h5');
       return {id:new URL(print.getAttribute('href'),location.href).searchParams.get('ocorrencia'),
@@ -149,8 +155,12 @@ def incidents_from_observation(value, year):
     complete = not value.get("failed_pages") and not value.get("failed_students") and len(rows) == value["total"]
     counts, names = {}, {}
     for row in rows:
-        if type(row) is not dict or not isinstance(row.get("name"), str) or type(row.get("count")) is not int:
+        if (type(row) is not dict or not isinstance(row.get("name"), str) or type(row.get("count")) is not int
+                or not isinstance(row.get("class_label"), str)):
             raise ValueError("Uma linha da lista de ocorrências não corresponde à estrutura reconhecida.")
+        # The class read as the student's name linked no student at all (29/10/2026): never again.
+        if " ".join(row["name"].split()).upper() == " ".join(row["class_label"].split()).upper():
+            raise ValueError("A lista de ocorrências trouxe a turma no lugar do nome do aluno.")
         student = _student_id(row.get("href"), year)
         # A student listed in two classes shows the same total in each row.
         counts[student] = max(counts.get(student, 0), row["count"])
