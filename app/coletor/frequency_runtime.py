@@ -135,8 +135,11 @@ def report_times(schedule):
 
 
 def report_hash(rows):
-    """studentReportHashV2 in the Ecossistema: the rows in sheet order, canonical JSON, SHA-256."""
-    return payload_hash(sorted(rows, key=lambda row: row['sourceRow']))
+    """studentReportHashV2 in the Ecossistema: the rows without their position in the sheet, each as
+    canonical JSON, in order. The Smecel swaps rows that tie in its own order from one export to the
+    next (seen 29/10/2026): the same report gives the same hash whatever the order."""
+    return payload_hash(sorted(canonical_frequency({k: v for k, v in row.items() if k != 'sourceRow'}).decode('utf-8')
+                               for row in rows))
 
 
 # Positions of the Smecel diary that had a lesson: a point ("aula prevista/presença", given up to the
