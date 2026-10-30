@@ -111,9 +111,13 @@ class ScheduleTests(unittest.TestCase):
         # tests/attendance/student-report-v2.test.ts pins the same value there.
         rows = rows_from_workbook(xlsx([line(), line('ALUNO SINTETICO DOIS', transferred=46300, status='TRANSFERIDO')]))
         self.assertEqual(report_hash(list(reversed(rows))), PINNED_HASH)
+        # The Smecel swaps rows that tie from one export to the next: the position never counts.
+        moved = [dict(rows[0], sourceRow=3), dict(rows[1], sourceRow=2)]
+        self.assertEqual(report_hash(moved), PINNED_HASH)
+        self.assertNotEqual(report_hash([dict(rows[0], transferredAt=46301), rows[1]]), PINNED_HASH)
 
 
-PINNED_HASH = 'LQ96URThFLmWCfKP4nKEFcuu0SV7jnbjc2NJEXLFiXM'
+PINNED_HASH = '0prs5ns-7GNFFBx7M8Tvr-DtB2o9mNDnRKGTfWrr6Ag'
 
 
 class ReportProvider(Provider):
