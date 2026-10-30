@@ -1,4 +1,4 @@
-import type { CollectorStatus, HistoryEntry, SharedSchedule } from '../collector';
+import type { CollectorStatus, HistoryEntry, ReportSchedule, SharedSchedule } from '../collector';
 import type { ThemeMode } from '../theme';
 
 export interface Preferences {
@@ -26,6 +26,8 @@ interface Native {
   get_local_settings(): Promise<{ settings: Preferences } | Failure>;
   activate_collector(): Promise<Status | Failure>;
   collect_now(): Promise<Status | Failure>;
+  collect_report_now(): Promise<Status | Failure>;
+  save_report_schedule(revision: number, schedule: ReportSchedule | null): Promise<Status | Failure>;
   pause_collector(paused: boolean): Promise<Status | Failure>;
   save_shared_schedule(revision: number, schedule: SharedSchedule): Promise<Status | Failure>;
   save_source_credential(email: string, password: string): Promise<Status | Failure>;

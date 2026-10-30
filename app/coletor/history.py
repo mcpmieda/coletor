@@ -27,7 +27,11 @@ KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', '
          # The computer that had the slot stopped mid-run: this one took the rest of it over.
          'standby-takeover',
          # One class's diary could not be read; the run went on with the others.
-         'class-failed'}
+         'class-failed',
+         # The Smecel's "Relatório de alunos", a run of its own (owner decision 29/10/2026): started,
+         # finished (sent: rows; unresolved: rows pending in the Conciliação; conflicts: differences
+         # and rows left out; code: what it did when not a clean application) or failed (code).
+         'report-started', 'report-finished', 'report-failed'}
 
 
 class CollectorHistory:

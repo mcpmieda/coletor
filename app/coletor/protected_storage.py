@@ -26,7 +26,7 @@ MAX_SMALL_BYTES = 8 * 1024
 PURPOSES = ('session', 'queue', 'consent', 'credential')
 # What this computer last sent, one file per class diary and one for the school's weekly grid
 # (owner decision 22/10/2026). Only a comparison aid: lost or unreadable means "send in full".
-COPY_PURPOSE = re.compile(r'copy:(?:frequency-[1-9][0-9]{0,9}|schedule)')
+COPY_PURPOSE = re.compile(r'copy:(?:frequency-[1-9][0-9]{0,9}|schedule|student-report)')
 MAX_COPY_BYTES = 32 * 1024 * 1024
 
 

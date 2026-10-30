@@ -303,6 +303,19 @@ class ManualSession:
         except Exception:
             raise SessionError('SOURCE_READ_FAILED') from None
 
+    def operational_student_report(self, year):
+        """The Smecel's "Relatório de alunos", read in the same verified session as the class list
+        (owner decision 29/10/2026). Validated here; a failure never touches the session state."""
+        from .student_report import report_from_observation
+        with self._lock:
+            driver, state = self._driver, self._state
+        if driver is None or state not in {'list_ready', 'preview_ready'}:
+            raise SessionError('SOURCE_LOGIN_REQUIRED')
+        try:
+            return report_from_observation(driver.student_report(year), year)
+        except Exception:
+            raise SessionError('SOURCE_READ_FAILED') from None
+
     def preserve_and_close(self, storage):
         with self._lock: driver = self._driver
         if driver is not None:

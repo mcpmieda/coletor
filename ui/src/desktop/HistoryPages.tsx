@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Modal, Table, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { AlertTriangle, Info, RefreshCw, XCircle } from 'lucide-react';
 import type { HistoryEntry } from '../collector';
-import { fmtDate, fmtDuration, groupRuns, logEvents, runSummary, type Level, type Run } from './runs';
+import { fmtDate, fmtDuration, groupReportRuns, groupRuns, logEvents, runSummary, type Level, type Run } from './runs';
 import { StatusChip } from './ui';
 
 const seconds = (ms?: number) => (ms === undefined ? '—' : `${(ms / 1000).toFixed(1).replace('.', ',')} s`);
@@ -10,8 +10,9 @@ const seconds = (ms?: number) => (ms === undefined ? '—' : `${(ms / 1000).toFi
 // ------------------------------------------------------------------ Histórico
 export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) {
   const runs = useMemo(() => groupRuns(history), [history]);
+  const reports = useMemo(() => groupReportRuns(history), [history]);
   const [open, setOpen] = useState<Run | null>(null);
-  if (!runs.length) return <p className="py-16 text-center text-muted">Nenhuma coleta ainda.</p>;
+  if (!runs.length && !reports.length) return <p className="py-16 text-center text-muted">Nenhuma coleta ainda.</p>;
   const last = runs.find(r => r.status !== 'running');
   return (
     <div className="flex flex-col gap-4">
@@ -46,6 +47,31 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
           </Table.Content>
         </Table.ScrollContainer>
       </Table>
+      {reports.length > 0 && <>
+        <h3 className="pt-2 text-sm font-semibold">Relatório de alunos</h3>
+        <Table>
+          <Table.ScrollContainer>
+            <Table.Content aria-label="Leituras do relatório de alunos">
+              <Table.Header>
+                <Table.Column isRowHeader>Início</Table.Column>
+                <Table.Column>Duração</Table.Column>
+                <Table.Column>Status</Table.Column>
+                <Table.Column>Resumo</Table.Column>
+              </Table.Header>
+              <Table.Body>
+                {reports.slice(0, 50).map(r => (
+                  <Table.Row key={r.id} id={r.id}>
+                    <Table.Cell className="whitespace-nowrap">{fmtDate(r.started)}</Table.Cell>
+                    <Table.Cell className="whitespace-nowrap text-muted">{fmtDuration(r.started, r.finished)}</Table.Cell>
+                    <Table.Cell><StatusChip status={r.status} /></Table.Cell>
+                    <Table.Cell className="max-w-[460px] truncate text-muted">{r.detail}</Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table.Content>
+          </Table.ScrollContainer>
+        </Table>
+      </>}
       <Modal.Backdrop isOpen={!!open} onOpenChange={v => !v && setOpen(null)} variant="blur">
         <Modal.Container size="lg" scroll="inside">
           <Modal.Dialog className="max-h-[85vh]">
