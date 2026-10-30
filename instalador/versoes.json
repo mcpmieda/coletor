@@ -3,6 +3,15 @@
   "limite": 5,
   "versoes": [
     {
+      "arquivo": "COLETOR v0.4.306.exe",
+      "sha256": "bf32bffeda2bf2dc965734f534ed518fd3816d9b01542739d1ec1c3ab2d16de4",
+      "versao": "0.4.306",
+      "commit": "149943b04a51d483b0b877463df2dd4a37cbba58",
+      "run_id": 40986732685,
+      "run_number": 306,
+      "publicado_em": "2026-10-30T01:42:24+00:00"
+    },
+    {
       "arquivo": "COLETOR v0.4.303.exe",
       "sha256": "ef2f4387203ceb62d88458fc8bc8d5f8a6c7fb3e38ce1c070f759ab5367e4a03",
       "versao": "0.4.303",
@@ -37,15 +46,6 @@
       "run_id": 40937833672,
       "run_number": 292,
       "publicado_em": "2026-10-29T19:19:39+00:00"
-    },
-    {
-      "arquivo": "ColetorFrequencia-v0.4.285-build000285-dcd4cdc0ccd8-windows-x64-setup.exe",
-      "sha256": "c1f51e398258d971355188c8c2588a94697e7b15d504b70778f7b6dcaa2cf616",
-      "versao": "0.4.285",
-      "commit": "dcd4cdc0ccd8af4f56ea63ad06722da630e7566e",
-      "run_id": 40684476873,
-      "run_number": 285,
-      "publicado_em": "2026-10-28T12:09:27+00:00"
     }
   ]
 }
