@@ -3,6 +3,15 @@
   "limite": 5,
   "versoes": [
     {
+      "arquivo": "COLETOR v0.4.310.exe",
+      "sha256": "47adbc0a1487e45beb6f140240b18c8509137c01bc3501ba178b99ca2003811f",
+      "versao": "0.4.310",
+      "commit": "0b2919ee5164b2ccee0f19012997f860b9a94a32",
+      "run_id": 41540464250,
+      "run_number": 310,
+      "publicado_em": "2026-11-02T22:57:17+00:00"
+    },
+    {
       "arquivo": "COLETOR v0.4.306.exe",
       "sha256": "bf32bffeda2bf2dc965734f534ed518fd3816d9b01542739d1ec1c3ab2d16de4",
       "versao": "0.4.306",
@@ -37,15 +46,6 @@
       "run_id": 40947919614,
       "run_number": 295,
       "publicado_em": "2026-10-29T20:33:51+00:00"
-    },
-    {
-      "arquivo": "COLETOR v0.4.292.exe",
-      "sha256": "78e0eadd4c903b360a4051c7d054e261e38c580ac78915c9f6fb94ca629ca8ea",
-      "versao": "0.4.292",
-      "commit": "38c263142351533e705ff88345ac7a99c1f05b9c",
-      "run_id": 40937833672,
-      "run_number": 292,
-      "publicado_em": "2026-10-29T19:19:39+00:00"
     }
   ]
 }
