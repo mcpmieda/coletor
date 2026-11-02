@@ -97,7 +97,7 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
         </Card.Header>
         <Card.Content className="flex flex-col gap-3">
           <ToggleButtonGroup size="sm" selectionMode="single" disallowEmptySelection selectedKeys={[mode]}
-            onSelectionChange={k => { void pref(api => api.save_classes_mode(String([...k][0]) as 'all' | 'chosen')); }}>
+            onSelectionChange={k => { const m = String([...k][0]) as 'all' | 'chosen'; if (m !== mode) void pref(api => api.save_classes_mode(m)); }}>
             <ToggleButton id="all">Todas as turmas da escola</ToggleButton>
             <ToggleButton id="chosen">Somente as escolhidas</ToggleButton>
           </ToggleButtonGroup>
@@ -135,7 +135,7 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
         </Card.Header>
         <Card.Footer>
           <ToggleButtonGroup size="sm" selectionMode="single" disallowEmptySelection selectedKeys={[prefs?.theme ?? 'system']}
-            onSelectionChange={k => { const m = String([...k][0]) as ThemeMode; paintTheme(m); void pref(api => api.save_theme(m)); }}>
+            onSelectionChange={k => { const m = String([...k][0]) as ThemeMode; if (m === (prefs?.theme ?? 'system')) return; paintTheme(m); void pref(api => api.save_theme(m)); }}>
             <ToggleButton id="system"><Monitor size={14} /> Automático</ToggleButton>
             <ToggleButton id="light"><Sun size={14} /> Claro</ToggleButton>
             <ToggleButton id="dark"><Moon size={14} /> Escuro</ToggleButton>
