@@ -156,7 +156,7 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
         <Card.Content className="flex flex-row items-center gap-4">
           <img src="./mascot/head.png" alt="" width={48} height={48} className="size-12 shrink-0 rounded-xl bg-accent-soft p-1" style={{ imageRendering: 'pixelated' }} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="font-semibold">Coletor de Frequência</span>
+            <span className="font-semibold">Coletor</span>
             <span className="text-sm text-muted">{state.version ? `Versão ${state.version} · ` : ''}Ecossistema Escolar</span>
           </div>
           <Chip size="sm" variant="soft" color={status?.active ? 'success' : 'default'}>{status?.active ? 'Coleta ativa' : 'Coleta desligada'}</Chip>

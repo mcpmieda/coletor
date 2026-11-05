@@ -23,6 +23,18 @@ class InstallerShortcutTests(unittest.TestCase):
             self.assertIn(f'AppUserModelID: "{app_id}"', line)
             self.assertIn('fox-idle.ico', line)
 
+    def test_the_app_is_called_coletor_and_the_old_shortcuts_go(self):
+        # Owner request 05/11/2026: the name shown is just "Coletor"; the AppId and folder stay.
+        script = (ROOT / "installer/Coletor.iss").read_text(encoding="utf-8-sig")
+        self.assertIn('#define AppName "Coletor"', script)
+        self.assertIn("AppId={{D2471FE4-968A-4E83-AC4C-5A85CC8E651B}", script)
+        self.assertIn(r"DefaultDirName={localappdata}\Programs\ColetorFrequenciaSmecel", script)
+        removed = script.split("[InstallDelete]", 1)[1].split("\n[", 1)[0]
+        for place in ("{autoprograms}", "{autodesktop}", "{userstartup}"):
+            self.assertIn(f'Type: files; Name: "{place}\\Coletor de Frequência.lnk"', removed)
+        icons = script.split("[Icons]", 1)[1].split("\n[", 1)[0]
+        self.assertIn('Name: "{autoprograms}\\Coletor";', icons)
+
 
 if __name__ == "__main__":
     unittest.main()

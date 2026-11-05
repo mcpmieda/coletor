@@ -104,7 +104,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     show_requests = ShowRequests()
     api = DesktopApi(settings_directory, access=access)
     geometry = centered_window_geometry(primary_work_area())
-    window = webview.create_window(f"Coletor de Frequência · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
+    window = webview.create_window(f"Coletor · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
     quit_requests = QuitRequests()
     ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).

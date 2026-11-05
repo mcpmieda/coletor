@@ -259,17 +259,17 @@ class HistoryTests(unittest.TestCase):
 
 class TrayAndResumeTests(unittest.TestCase):
     def test_tooltip_shows_collection_state_within_the_tray_limit(self):
-        self.assertEqual(tray_text({'active': True, 'state': 'collecting'}, 'idle'), 'Coletor de Frequência · Coletando')
+        self.assertEqual(tray_text({'active': True, 'state': 'collecting'}, 'idle'), 'Coletor · Coletando')
         self.assertEqual(tray_text(None, 'error'), 'Coletor · Coleta desligada · Arquivo precisa de atenção')
         # A short outage is a calm wait, not the red "needs attention" state.
         offline = tray_text({'active': True, 'state': 'reserve', 'code': 'ACCESS_UNAVAILABLE'}, 'idle')
-        self.assertEqual(offline, 'Coletor de Frequência · Sem conexão, tentando de novo')
+        self.assertEqual(offline, 'Coletor · Sem conexão, tentando de novo')
         self.assertLessEqual(len(offline), 63)
         self.assertEqual(tray_text({'active': True, 'state': 'error', 'code': 'lease-fenced'}, 'idle'),
-                         'Coletor de Frequência · Precisa de atenção')
+                         'Coletor · Precisa de atenção')
         # The catch-all code is a real fault, never shown as a harmless outage.
         self.assertEqual(tray_text({'active': True, 'state': 'error', 'code': 'unavailable'}, 'idle'),
-                         'Coletor de Frequência · Precisa de atenção')
+                         'Coletor · Precisa de atenção')
         for state in ('ready', 'reserve', 'collecting', 'paused', 'login-required', 'error'):
             self.assertLessEqual(len(tray_text({'active': True, 'state': state}, 'idle')), 63)
 

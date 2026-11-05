@@ -1,7 +1,7 @@
 import argparse
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Coletor de Frequência: prévia local, sem sincronização.")
+    parser = argparse.ArgumentParser(description="Coletor: prévia local, sem sincronização.")
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--preview-server", action="store_true", help="Prévia no navegador de desenvolvimento, sem janela nativa.")
     actions.add_argument("--safe-removal", action="store_true", help="Remove a chave e solicita a retirada somente deste dispositivo; preserva pasta e configurações.")

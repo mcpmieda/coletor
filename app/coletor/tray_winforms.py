@@ -20,9 +20,9 @@ def offline(collector):
 def tray_text(collector, activity):
     """Notification-area tooltip (63 characters at most on .NET Framework)."""
     if offline(collector) and collector.get("active"):
-        return "Coletor de Frequência · Sem conexão, tentando de novo"
+        return "Coletor · Sem conexão, tentando de novo"
     if collector and collector.get("active") and collector.get("state") in COLLECTOR_TEXT:
-        return "Coletor de Frequência · " + COLLECTOR_TEXT[collector["state"]]
+        return "Coletor · " + COLLECTOR_TEXT[collector["state"]]
     return "Coletor · Coleta desligada · " + TEXT[activity]
 
 
@@ -171,7 +171,7 @@ class WindowsFormsTray:
             # Like the Atualizador's "Ativo · 1 tarefa(s)": what this PC collects.
             chosen = status.get("selectedClasses")
             text += " · todas as turmas" if status.get("classesMode", "all") == "all" or chosen is None else f" · {chosen} turma(s)"
-        self._status_item.Text = "Coletor de Frequência\n" +("!" if trouble else "") + text
+        self._status_item.Text = "Coletor\n" +("!" if trouble else "") + text
         self._collect_item.Enabled = active and not paused and status.get("state") != "collecting" and self.collect_action is not None
         self._pause_item.Text = "Retomar a coleta" if paused else "Pausar a coleta"
         self._pause_item.Enabled = active and self.pause_action is not None
@@ -288,7 +288,7 @@ class WindowsFormsTray:
         self._form.Hide()
         if not self._told_hidden:
             self._told_hidden = True
-            self.notify("Coletor de Frequência", "O Coletor continua em segundo plano. Para encerrar, use Encerrar coletor neste ícone.", "Info")
+            self.notify("Coletor", "O Coletor continua em segundo plano. Para encerrar, use Encerrar coletor neste ícone.", "Info")
 
     def _quit(self, *_):
         if self._disposed: return

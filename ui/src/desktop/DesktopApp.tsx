@@ -65,7 +65,7 @@ export default function DesktopApp() {
             <img src="./mascot/head.png" alt="" width={28} height={28} style={{ imageRendering: 'pixelated' }} />
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold">Coletor de Frequência</span>
+            <span className="text-sm font-semibold">Coletor</span>
             <span className="text-xs text-muted">Ecossistema Escolar</span>
           </div>
         </div>

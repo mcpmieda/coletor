@@ -208,7 +208,7 @@ export default function InstitutionalAccess() {
   if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && recovery.bound !== false && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}<DesktopApp /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
-    <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor de Frequência.</p>
+    <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor.</p>
     <Button isDisabled={busy} onPress={() => { void login(); }}><LogIn size={18} />{pairingCode ? "Abrir navegador novamente" : "Entrar no Ecossistema"}</Button>
     <Button variant="ghost" isDisabled={busy} onPress={() => { void recheck(); }}>Verificar acesso</Button>
     {(pairingCode || cleanupPending) && <Button variant="ghost" isDisabled={busy} onPress={() => { void logout(); }}>{cleanupPending ? 'Concluir saída' : 'Cancelar autorização'}</Button>}

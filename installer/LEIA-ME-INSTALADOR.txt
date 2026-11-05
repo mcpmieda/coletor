@@ -8,7 +8,7 @@ INSTALAR
 1. Abra ColetorFrequencia-0.4.0-windows-x64-setup-candidato.exe.
 2. Escolha a pasta. "Abrir o Coletor ao entrar no Windows" vem marcado;
    o atalho na área de trabalho é opcional.
-3. Use Coletor de Frequência no menu Iniciar para abrir o programa.
+3. Use Coletor no menu Iniciar para abrir o programa.
 4. Não é necessário instalar Python nem possuir permissões de administrador.
 5. O computador precisa de Windows 10/11 x64, Edge, WebView2 e .NET 4.8.
 
@@ -24,12 +24,12 @@ DURANTE O USO
 - A janela abre no centro da área útil do monitor principal.
 
 DESINSTALAR COM SEGURANÇA
-1. Antes de remover, abra o menu Iniciar > Coletor de Frequência >
+1. Antes de remover, abra o menu Iniciar > Coletor >
    Retirar acesso deste PC e confirme a operação.
 2. Verifique se a revogação remota foi confirmada. Se houver código de
    pendência, peça ajuda e conclua a revogação no Ecossistema.
 3. Verifique e reconcilie os lotes pendentes antes de retirar o aplicativo.
-4. Desinstale por Configurações > Aplicativos > Coletor de Frequência.
+4. Desinstale por Configurações > Aplicativos > Coletor.
 
 A desinstalação remove os binários e atalhos do Coletor. Por segurança, ela
 NÃO apaga por conta própria tokens, chaves TPM/CNG, vínculo de dispositivo,

@@ -2,19 +2,19 @@
 ; Opening at Windows sign-in is an installer option (checked by default): a per-user
 ; logon task (like the Atualizador's) that opens beside the clock. Startup-folder
 ; shortcuts wait behind every Run entry and were missed. Distribution only after the native CI gates.
-#define AppName "Coletor de Frequência"
+#define AppName "Coletor"
 #include "..\dist\windows-portable\version.iss"
 
 [Setup]
 AppId={{D2471FE4-968A-4E83-AC4C-5A85CC8E651B}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Coletor de Frequência {#AppVersion} (candidato)
+AppVerName=Coletor {#AppVersion} (candidato)
 AppPublisher=Ecossistema Escolar
-UninstallDisplayName=Coletor de Frequência
+UninstallDisplayName=Coletor
 UninstallDisplayIcon={app}\programa\app\assets\fox-icons\fox-idle.ico
 DefaultDirName={localappdata}\Programs\ColetorFrequenciaSmecel
-DefaultGroupName=Coletor de Frequência
+DefaultGroupName=Coletor
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 MinVersion=10.0
@@ -45,19 +45,22 @@ Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; Flags: un
 [InstallDelete]
 ; The logon task replaces the old Startup-folder shortcut.
 Type: files; Name: "{userstartup}\Coletor de Frequência.lnk"
+; The app is called just "Coletor" since 05/11/2026: the old shortcuts go.
+Type: files; Name: "{autoprograms}\Coletor de Frequência.lnk"
+Type: files; Name: "{autodesktop}\Coletor de Frequência.lnk"
 
 [Files]
 Source: "{#BundleRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LEIA-ME-INSTALADOR.txt"; DestDir: "{app}"; DestName: "INSTALACAO-E-RETIRADA.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Coletor de Frequência"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor de Frequência Escolar"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"
+Name: "{autoprograms}\Coletor"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; Comment: "Coletor do Ecossistema Escolar"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"
 Name: "{autoprograms}\Retirar acesso deste PC"; Filename: "{app}\Remover acesso deste PC.cmd"; WorkingDir: "{app}"
 Name: "{autoprograms}\Instruções de instalação e retirada"; Filename: "{app}\INSTALACAO-E-RETIRADA.txt"
-Name: "{autodesktop}\Coletor de Frequência"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: desktopicon
+Name: "{autodesktop}\Coletor"; Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; IconFilename: "{app}\programa\app\assets\fox-icons\fox-idle.ico"; AppUserModelID: "EcossistemaEscolar.ColetorFrequenciaSmecel"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; Description: "Abrir Coletor de Frequência"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\programa\ColetorFrequencia.exe"; WorkingDir: "{app}\programa"; Description: "Abrir o Coletor"; Flags: postinstall nowait skipifsilent unchecked
 
 ; The uninstaller does not claim or silently perform access revocation.
 ; Confirm the operator has reviewed pending receipts and the device binding.
@@ -177,7 +180,7 @@ begin
   Log('Closing the running Coletor; quit event answered: ' + IntToStr(Ord(Seconds = QuitWaitSeconds)));
   if Page <> nil then
   begin
-    Page.SetText('Fechando o Coletor de Frequência…',
+    Page.SetText('Fechando o Coletor…',
                  'Se uma coleta estiver em andamento, o Coletor termina essa coleta antes de fechar.');
     Page.Show;
   end;
@@ -187,7 +190,7 @@ begin
       Log('Coletor did not quit in time; stopping its processes.');
       CollectorProcesses(Folder, True);
       if not WaitForCollectorExit(Folder, 15, nil) then
-        Result := 'Não foi possível fechar o Coletor de Frequência. Use "Encerrar coletor" no ícone ao lado do relógio e tente de novo.';
+        Result := 'Não foi possível fechar o Coletor. Use "Encerrar coletor" no ícone ao lado do relógio e tente de novo.';
     end;
   finally
     if Page <> nil then Page.Hide;
@@ -200,7 +203,7 @@ var
 begin
   Page := nil;
   if not WizardSilent then
-    Page := CreateOutputProgressPage('Preparando a atualização', 'Fechando o Coletor de Frequência.');
+    Page := CreateOutputProgressPage('Preparando a atualização', 'Fechando o Coletor.');
   Result := CloseCollector(ExpandConstant('{app}'), Page);
 end;
 
@@ -240,7 +243,7 @@ begin
   // schtasks rejects UTF-8 task files; system-ANSI text without an XML declaration is accepted.
   Xml :=
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' +
-    '<RegistrationInfo><Description>Abre o Coletor de Frequência ao lado do relógio ao entrar no Windows.</Description></RegistrationInfo>' +
+    '<RegistrationInfo><Description>Abre o Coletor ao lado do relógio ao entrar no Windows.</Description></RegistrationInfo>' +
     '<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>' + XmlText(User) + '</UserId><Delay>PT30S</Delay></LogonTrigger></Triggers>' +
     '<Principals><Principal id="Author"><UserId>' + XmlText(User) + '</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>' +
     '<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>' +
