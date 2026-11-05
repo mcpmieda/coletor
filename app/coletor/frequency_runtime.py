@@ -313,6 +313,9 @@ class FrequencyRuntime:
         # agenda, never with a frequency run (the same operation lock). A slot that finds a run going
         # on waits for it and runs once, right after.
         self._report = {'running': False, 'preparing': False, 'code': None}
+        # The report alone paused on this computer (owner request 05/11/2026); the frequency goes on.
+        # The frequency's own pause still stops both.
+        self._report_paused = False
         self._report_fired, self._report_pending, self._last_report_schedule = set(), None, None
         self._last_tick = 0
         self._thread = None
@@ -481,7 +484,7 @@ class FrequencyRuntime:
                     'preparing': self._preparing,
                     'credential': self._storage.credential_status(),
                     'lastReceipt': self._last_receipt,
-                    'report': dict(self._report),
+                    'report': dict(self._report, paused=self._report_paused),
                     # What the Ecossistema did with the last report (no student names reach a device).
                     'studentReport': copy.deepcopy(self._status.get('studentReport')) if self._status else None,
                     # Status shown locally contains operational settings only.
@@ -775,7 +778,7 @@ class FrequencyRuntime:
         a frequency slot is waiting too: the frequency goes first. True when the tick is spent."""
         schedule = status['settings'].get('reportSchedule')
         self._last_report_schedule = schedule
-        if not schedule or not schedule['enabled'] or self._source_blocked:
+        if not schedule or not schedule['enabled'] or self._source_blocked or self._report_paused:
             self._report_pending = None
             return False
         if self._pending_slots: return False
@@ -817,7 +820,7 @@ class FrequencyRuntime:
         try:
             with self._lock:
                 epoch = self._epoch
-                if not self._active or self._paused: raise FrequencyError('CANCELLED')
+                if not self._active or self._paused or self._report_paused: raise FrequencyError('CANCELLED')
             status = self._fresh()
             if status['settings']['paused']: raise FrequencyError('paused')
             if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
@@ -1323,6 +1326,7 @@ class FrequencyRuntime:
             self._history.record('incidents-sent', sent=reply.get('incidents'), unresolved=reply.get('unresolvedStudents'),
                                  unchanged=reply.get('changed') is False,
                                  code=None if reading['complete'] else 'INCIDENTS_PARTIAL',
+                                 notices=reading.get('notices'),
                                  read_ms=round((send_started - read_started) * 1000),
                                  send_ms=round((time.monotonic() - send_started) * 1000))
         except Exception as error:
@@ -1427,6 +1431,17 @@ class FrequencyRuntime:
                 self._paused = False
                 self._state, self._code = 'reserve', None
         self._history.record('paused' if paused else 'resumed')
+        return self.public_status()
+
+    def report_pause(self, paused, *, record=True):
+        """Pauses or resumes the report alone on this computer. Its times are skipped while paused,
+        and a report already being read finishes. record=False restores the saved choice at opening."""
+        if type(paused) is not bool: raise FrequencyError('invalid-request')
+        with self._lock:
+            changed = self._report_paused != paused
+            self._report_paused = paused
+            if paused: self._report_pending = None
+        if record and changed: self._history.record('report-paused' if paused else 'report-resumed')
         return self.public_status()
 
     def cancel(self, purge=False, pause=False, school_pause=False):

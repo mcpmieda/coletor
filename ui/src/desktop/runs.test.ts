@@ -120,3 +120,22 @@ test('the grid and the incidents are steps of the run and lines of the log (29/1
   const line = logEvents(entries).find(e => e.message.startsWith('Ocorrências'));
   expect(line).toMatchObject({ level: 'warn', message: 'Ocorrências conferidas · 370 ocorrência(s) · sem alteração · 2 aluno(s) sem par na Relação' });
 });
+
+test('incidents to fix in the Smecel are a warning naming the student, one per line', () => {
+  // Owner decision 05/11/2026: the school finds an incident by the student, not by its number.
+  const [event] = logEvents([{ at: 500, kind: 'incidents-sent', sent: 374, noticeTotal: 2, notices: [
+    { name: 'ALUNO SINTÉTICO UM', classLabel: '6D 2026 - VESPERTINO', incident: '12288', sent: true,
+      reason: 'data do afastamento em branco no Smecel (aparece como 31/12/1969); enviada sem essa data' },
+    { name: 'ALUNO SINTÉTICO DOIS', classLabel: '6D 2026 - VESPERTINO', incident: '12289', sent: false,
+      reason: 'data da ocorrência não reconhecida; não enviada' },
+  ] }]);
+  expect(event.level).toBe('warn');
+  expect(event.wrap).toBe(true);
+  expect(event.message).toContain('2 ocorrência(s) para conferir no Smecel');
+  expect(event.detail?.split('\n')).toEqual([
+    'ALUNO SINTÉTICO UM · 6D 2026 - VESPERTINO · ocorrência nº 12288 · data do afastamento em branco no Smecel (aparece como 31/12/1969); enviada sem essa data',
+    'ALUNO SINTÉTICO DOIS · 6D 2026 - VESPERTINO · ocorrência nº 12289 · data da ocorrência não reconhecida; não enviada',
+  ]);
+  const [plain] = logEvents([{ at: 600, kind: 'incidents-sent', sent: 374 }]);
+  expect(plain).toMatchObject({ level: 'info', detail: undefined, wrap: false });
+});

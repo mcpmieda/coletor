@@ -1047,6 +1047,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([e.get('code') for e in history if e['kind'] == 'incidents-sent'], ['INCIDENTS_PARTIAL'])
         self.assertFalse(any(e['kind'] == 'failure' for e in history))
 
+    def test_incidents_to_fix_in_the_smecel_are_named_in_the_history(self):
+        # Owner decision 05/11/2026: the student, the class, the number and the reason; never the text.
+        incident = {'sourceIncidentId': '9001', 'kind': 'SUSPENSÃO', 'date': '2026-09-14',
+                    'sourceClassLabel': 'TURMA SINTÉTICA A', 'leave': {'from': '2026-09-14', 'to': None, 'days': 1},
+                    'description': 'Descrição sintética.'}
+        notice = {'name': 'ALUNO SINTÉTICO', 'classLabel': 'TURMA SINTÉTICA A', 'incident': '9001',
+                  'reason': 'data do afastamento em branco no Smecel (aparece como 31/12/1969); enviada sem essa data', 'sent': True}
+        self.source.operational_incidents = lambda year: {'complete': True, 'notices': [notice], 'students': [
+            {'sourceStudentId': '101', 'name': 'ALUNO SINTÉTICO', 'classLabels': ['TURMA SINTÉTICA A'], 'incidents': [incident]}]}
+        self.assertEqual(self.runtime.collect()['state'], 'ready')
+        entry = next(e for e in self.runtime.recent_history(50) if e['kind'] == 'incidents-sent')
+        self.assertEqual(entry['notices'], [notice])
+        self.assertEqual(entry['noticeTotal'], 1)
+        self.assertNotIn('code', entry)
+        self.assertNotIn('Descrição', json.dumps(entry, ensure_ascii=False))
+
     def test_the_window_never_asks_the_ecossistema_while_a_run_goes_on(self):
         # 29/10/2026: the window's status every 5 s waited on the run's own transaction and the run's
         # send timed out. During a run the window gets what this computer has.

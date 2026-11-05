@@ -272,6 +272,40 @@ class ReportRunTests(unittest.TestCase):
             self.runtime.tick()
             self.assertFalse(started.wait(0.1))
 
+    def test_the_report_alone_paused_skips_its_times_and_the_frequency_pause_is_untouched(self):
+        # Owner request 05/11/2026: a pause of the report's own, on this computer.
+        weekday = self.at('08:00')
+        self.provider.agenda = {'timezone': 'America/Bahia', 'enabled': True, 'every': 30, 'from': '08:00', 'to': '09:00', 'weekdays': [weekday]}
+        started = threading.Event()
+        self.runtime.collect_report = lambda _claimed=False: started.set()
+        status = self.runtime.report_pause(True)
+        self.assertTrue(status['report']['paused'])
+        self.assertFalse(status['localPaused'])
+        self.runtime.tick()
+        self.assertFalse(started.wait(0.2))
+        # A time skipped while paused is not run on resuming; the next one is.
+        self.assertFalse(self.runtime.report_pause(False)['report']['paused'])
+        self.at('08:10')
+        self.runtime.tick()
+        self.assertFalse(started.wait(0.2))
+        self.at('08:30')
+        self.runtime.tick()
+        self.assertTrue(started.wait(2))
+        kinds = [e['kind'] for e in self.runtime.recent_history(50)]
+        self.assertEqual([k for k in kinds if k.startswith('report-')], ['report-resumed', 'report-paused'])
+
+    def test_a_report_asked_while_paused_reads_nothing(self):
+        self.runtime.report_pause(True)
+        status = self.runtime.collect_report()
+        self.assertEqual(status['report']['code'], 'CANCELLED')
+        self.assertEqual(self.reads, 0)
+        self.assertEqual(self.sent('student-report-collect'), [])
+
+    def test_restoring_the_saved_pause_at_opening_writes_no_history(self):
+        self.runtime.report_pause(True, record=False)
+        self.assertTrue(self.runtime.public_status()['report']['paused'])
+        self.assertFalse(any(e['kind'] == 'report-paused' for e in self.runtime.recent_history(50)))
+
 
 if __name__ == '__main__':
     unittest.main()

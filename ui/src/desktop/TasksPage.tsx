@@ -40,7 +40,10 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   const reportSchedule = status?.settings?.reportSchedule ?? null;
   const reportRuns = useMemo(() => groupReportRuns(history), [history]);
   const lastReport = reportRuns.find(r => r.status !== 'running') ?? null;
-  const nextReport = status?.active && !status.localPaused && !status.settings?.paused ? nextReportRun(reportSchedule, new Date(nowMs)) : null;
+  // The report alone can be paused on this computer (owner request 05/11/2026); the frequency's
+  // pause still stops both.
+  const reportPaused = status?.report?.paused === true;
+  const nextReport = status?.active && !status.localPaused && !status.settings?.paused && !reportPaused ? nextReportRun(reportSchedule, new Date(nowMs)) : null;
   const reportCode = status?.report?.code ?? null;
   const server = status?.studentReport ?? null;
   const credential = status?.credential?.saved === true;
@@ -174,7 +177,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
         </Card.Content>
       </Card>
 
-      <Card className={status?.active && !status.localPaused && reportSchedule?.enabled ? '' : 'opacity-80'}>
+      <Card className={status?.active && !status.localPaused && !reportPaused && reportSchedule?.enabled ? '' : 'opacity-80'}>
         <Card.Content className="flex flex-col gap-3">
           <div className="flex items-start gap-4">
             <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-default text-muted"><FileSpreadsheet size={20} /></div>
@@ -182,6 +185,8 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
               <div className="flex items-center gap-2">
                 <span className="truncate text-base font-semibold">Relatório de alunos</span>
                 {!reportSchedule?.enabled && <Chip size="sm" variant="soft">Desligado</Chip>}
+                {(reportPaused || status?.localPaused) && <Chip size="sm" variant="soft">Pausado neste computador</Chip>}
+                {status?.settings?.paused && <Chip size="sm" variant="soft" color="warning">Pausado na escola</Chip>}
                 {server?.outcome === 'review' && <Chip size="sm" variant="soft" color="warning">Confira na Conciliação</Chip>}
                 {server?.outcome === 'awaiting_relation' && <Chip size="sm" variant="soft" color="warning">Aguardando a Relação</Chip>}
               </div>
@@ -189,11 +194,18 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {!status?.active || running || reportRunning ? null : (
-                <Button size="sm" variant="primary" isDisabled={status.localPaused || !!status.settings?.paused || !credential} onPress={collectReportNow}>
+                <Button size="sm" variant="primary" isDisabled={status.localPaused || reportPaused || !!status.settings?.paused || !credential} onPress={collectReportNow}>
                   <RefreshCw size={14} /> Coletar agora
                 </Button>
               )}
               <IconButton label="Editar agenda do relatório" onPress={() => setEditingReport(true)} isDisabled={!status?.settings}><Pencil size={16} /></IconButton>
+              {status?.active && (
+                <IconButton label={reportPaused ? 'Retomar o relatório neste computador' : 'Pausar o relatório neste computador'}
+                  isDisabled={busy || status.localPaused}
+                  onPress={() => { void act(api => api.pause_report(!reportPaused), reportPaused ? 'Relatório retomado' : 'Relatório pausado'); }}>
+                  {reportPaused ? <Play size={16} /> : <Pause size={16} />}
+                </IconButton>
+              )}
             </div>
           </div>
           {reportRunning ? (

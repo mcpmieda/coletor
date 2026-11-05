@@ -23,7 +23,7 @@ export interface CollectorStatus {
   lastReceipt: { receivedAt: string; resolvedRecords: number; unresolvedRecords: number; conflicts: number } | null;
   settings: { revision: number; paused: boolean; schedule: SharedSchedule | null; reportSchedule?: ReportSchedule | null } | null;
   /** The student report's own run on this computer (owner decision 29/10/2026). */
-  report?: { running: boolean; preparing: boolean; code: string | null };
+  report?: { running: boolean; preparing: boolean; code: string | null; /** Paused alone on this computer. */ paused?: boolean };
   studentReport?: StudentReportState | null;
   /** The saved Smecel login is write-only: only a masked account comes back. */
   credential?: { saved: boolean; account?: string };
@@ -35,7 +35,11 @@ export interface HistoryEntry {
   /** class-sent: the diary was the same as last sent, so only the short message went.
    *  incidents-sent: the Ecossistema already had every incident. */
   unchanged?: boolean;
+  /** incidents-sent: incidents the Smecel shows out of shape (owner decision 05/11/2026), named by
+   *  the student so the school can fix them; sent says whether the incident still went. */
+  notices?: IncidentNotice[]; noticeTotal?: number;
 }
+export interface IncidentNotice { name: string; classLabel: string; incident: string; reason: string; sent: boolean }
 export type CollectorResult = CollectorStatus | { error: string; code?: string };
 export const COLLECTOR_CODES: Record<string, string> = {
   'lease-busy': 'Outro computador está coletando. Este fica de reserva.',

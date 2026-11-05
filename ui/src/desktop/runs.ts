@@ -44,14 +44,25 @@ function stepResult(e: HistoryEntry): StepResult {
   const timing = e as HistoryEntry & { readMs?: number; sendMs?: number };
   if (e.kind === 'schedule-sent')
     return { label: 'Horário', detail: e.sent ? `${e.sent} turma(s) com mudança` : 'sem alteração', review: false };
-  return { label: 'Ocorrências', detail: incidentsText(e), review: !!e.unresolved || e.code === 'INCIDENTS_PARTIAL',
+  return { label: 'Ocorrências', detail: incidentsText(e), review: !!e.unresolved || e.code === 'INCIDENTS_PARTIAL' || !!e.noticeTotal,
     readMs: timing.readMs, sendMs: timing.sendMs };
 }
 
 function incidentsText(e: HistoryEntry): string {
   return [`${e.sent ?? 0} ocorrência(s)${e.unchanged ? ' · sem alteração' : ''}`,
     e.unresolved ? `${e.unresolved} aluno(s) sem par na Relação` : '',
+    e.noticeTotal ? `${e.noticeTotal} ocorrência(s) para conferir no Smecel` : '',
     e.code === 'INCIDENTS_PARTIAL' ? 'leitura incompleta: nada é dado como apagado' : ''].filter(Boolean).join(' · ');
+}
+
+/** One line per incident to fix in the Smecel: the student first, the school finds it that way. */
+export function incidentNotices(e: HistoryEntry): string | undefined {
+  if (!e.notices?.length) return undefined;
+  const lines = e.notices.map(n => [n.name || 'Aluno sem nome na lista', n.classLabel, n.incident ? `ocorrência nº ${n.incident}` : '', n.reason]
+    .filter(Boolean).join(' · '));
+  const more = (e.noticeTotal ?? 0) - e.notices.length;
+  if (more > 0) lines.push(`e mais ${more} ocorrência(s)`);
+  return lines.join('\n');
 }
 
 export function problemText(code?: string): string {
@@ -109,12 +120,15 @@ function reportDetail(e: HistoryEntry): string {
 }
 
 export type Level = 'info' | 'warn' | 'error';
-export interface LogEvent { id: string; at: number; level: Level; message: string; detail?: string }
+/** wrap: the detail is shown whole, one line per item, instead of cut to one line. */
+export interface LogEvent { id: string; at: number; level: Level; message: string; detail?: string; wrap?: boolean }
 
 const EVENT_TEXT: Record<string, [Level, string]> = {
   activated: ['info', 'Coleta automática ativada neste computador.'],
   paused: ['warn', 'Coleta pausada neste computador.'],
   resumed: ['info', 'Coleta retomada neste computador.'],
+  'report-paused': ['warn', 'Relatório de alunos pausado neste computador. A frequência continua.'],
+  'report-resumed': ['info', 'Relatório de alunos retomado neste computador.'],
   'collection-started': ['info', 'Coleta iniciada.'],
   'collection-finished': ['info', 'Coleta concluída.'],
   'smecel-login': ['info', 'Entrada automática no Smecel.'],
@@ -167,8 +181,8 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
       return { id, at: e.at, level: 'info', message: e.sent ? `Grade de horários enviada · ${e.sent} turma(s) com mudança` : 'Grade de horários conferida · sem alteração' };
     }
     if (e.kind === 'incidents-sent') {
-      return { id, at: e.at, level: e.unresolved || e.code === 'INCIDENTS_PARTIAL' ? 'warn' : 'info',
-        message: `Ocorrências ${e.unchanged ? 'conferidas' : 'enviadas'} · ${incidentsText(e)}` };
+      return { id, at: e.at, level: e.unresolved || e.code === 'INCIDENTS_PARTIAL' || e.noticeTotal ? 'warn' : 'info',
+        message: `Ocorrências ${e.unchanged ? 'conferidas' : 'enviadas'} · ${incidentsText(e)}`, detail: incidentNotices(e), wrap: !!e.notices?.length };
     }
     if (e.kind === 'report-started') return { id, at: e.at, level: 'info', message: 'Relatório de alunos: leitura iniciada.' };
     if (e.kind === 'report-finished') {
