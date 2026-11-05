@@ -13,8 +13,8 @@ from .local_settings import user_settings_directory
 
 
 class ResumeStore:
-    def __init__(self, directory=None):
-        self.path = (Path(directory) if directory is not None else user_settings_directory()) / 'collector-resume.json'
+    def __init__(self, directory=None, name='collector-resume.json'):
+        self.path = (Path(directory) if directory is not None else user_settings_directory()) / name
         self._lock = threading.Lock()
 
     def active(self):
@@ -39,3 +39,9 @@ class ResumeStore:
                 finally: Path(name).unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def report_pause_store(directory=None):
+    """The same single flag for the report alone paused on this computer (owner request
+    05/11/2026): set while paused, so a missing or unreadable file never pauses anything."""
+    return ResumeStore(directory, 'report-paused.json')

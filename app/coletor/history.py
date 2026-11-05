@@ -35,7 +35,9 @@ KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', '
          # The Smecel's "Relatório de alunos", a run of its own (owner decision 29/10/2026): started,
          # finished (sent: rows; unresolved: rows pending in the Conciliação; conflicts: differences
          # and rows left out; code: what it did when not a clean application) or failed (code).
-         'report-started', 'report-finished', 'report-failed'}
+         'report-started', 'report-finished', 'report-failed',
+         # The report alone paused or resumed on this computer (owner request 05/11/2026).
+         'report-paused', 'report-resumed'}
 
 
 class CollectorHistory:

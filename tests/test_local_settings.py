@@ -105,10 +105,20 @@ class LocalSettingsTests(unittest.TestCase):
             self.assertEqual(user_settings_directory(), self.root / "ColetorFrequenciaSmecel")
         self.assertFalse((self.root / "ColetorFrequenciaSmecel").exists())
 
+    def test_the_report_paused_alone_stays_paused_at_the_next_opening(self):
+        # Owner request 05/11/2026: the report's own pause, on this computer.
+        api = DesktopApi(self.directory, access=SyntheticAccess())
+        self.assertTrue(api.pause_report(True)['report']['paused'])
+        reopened = DesktopApi(self.directory, access=SyntheticAccess())
+        self.assertTrue(reopened._collector.public_status()['report']['paused'])
+        self.assertFalse(reopened._collector.public_status()['localPaused'])
+        self.assertFalse(reopened.pause_report(False)['report']['paused'])
+        self.assertFalse(DesktopApi(self.directory, access=SyntheticAccess())._collector.public_status()['report']['paused'])
+
     def test_bridge_has_only_preview_and_specific_settings_methods(self):
         api = DesktopApi(self.directory, access=SyntheticAccess())
         self.assertEqual([n for n in dir(api) if not n.startswith("_")],
-                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "collect_report_now", "discard_local_pending_collection", "discard_pending_collection", "discover_manual_classes", "forget_source_credential", "get_collector_history", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_recovery_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "get_startup_snapshot", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_school_collection", "prepare_manual_login", "preview_html", "save_browser_preference", "save_classes_mode", "save_manual_class_selection", "save_notifications", "save_report_schedule", "save_schedule", "save_shared_schedule", "save_source_credential", "save_theme", "set_tray_context"])
+                         ["activate_collector", "capture_selected_class", "clear_manual_class_selection", "close_manual_session", "collect_now", "collect_report_now", "discard_local_pending_collection", "discard_pending_collection", "discover_manual_classes", "forget_source_credential", "get_collector_history", "get_collector_status", "get_desktop_status", "get_institutional_access_status", "get_local_recovery_status", "get_local_settings", "get_manual_class_selection_preferences", "get_manual_session_status", "get_startup_snapshot", "hide_window", "load_demo", "logout_institutional_access", "open_institutional_login", "open_manual_session", "pause_collector", "pause_report", "pause_school_collection", "prepare_manual_login", "preview_html", "save_browser_preference", "save_classes_mode", "save_manual_class_selection", "save_notifications", "save_report_schedule", "save_schedule", "save_shared_schedule", "save_source_credential", "save_theme", "set_tray_context"])
         self.assertFalse(api.load_demo()["validation"]["allowed"])
         api.preview_html("<html>synthetic-invalid</html>", "TESTE-A", 2026)
         self.assertFalse(self.directory.exists())

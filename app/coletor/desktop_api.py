@@ -7,7 +7,7 @@ from .institutional_access import InstitutionalAccess, AccessDenied
 from .device_provider import DeviceProvider
 from .frequency_runtime import FrequencyRuntime
 from .protected_storage import StorageError
-from .resume_store import ResumeStore
+from .resume_store import ResumeStore, report_pause_store
 from functools import wraps
 import threading
 import time
@@ -99,6 +99,9 @@ class DesktopApi(PreviewApi):
                                            on_started=self._desktop_state.begin_read,
                                            on_finished=self._desktop_state.end_read,
                                            on_alert=self._alert)
+        # The report alone paused on this computer stays paused across openings (owner request 05/11/2026).
+        self._report_pause = report_pause_store(settings_directory)
+        if self._report_pause.active(): self._collector.report_pause(True, record=False)
 
     def _alert(self, code):
         message = ALERTS.get(code)
@@ -244,6 +247,12 @@ class DesktopApi(PreviewApi):
     def collect_report_now(self):
         # The Smecel's "Relatório de alunos", a run of its own (owner decision 29/10/2026).
         return self._operational(self._collector.collect_report)
+
+    def pause_report(self, paused):
+        # The report alone, on this computer; the frequency goes on (owner request 05/11/2026).
+        result = self._operational(lambda: self._collector.report_pause(paused))
+        if 'error' not in result: self._report_pause.set(paused is True)
+        return result
 
     def save_report_schedule(self, revision, schedule):
         return self._operational(lambda: self._collector.save_report_settings(revision, schedule))
@@ -589,7 +598,7 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications"):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
 
-for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'collect_report_now', 'save_report_schedule', 'pause_collector',
+for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'collect_report_now', 'save_report_schedule', 'pause_collector', 'pause_report',
               'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection',
               'save_source_credential', 'forget_source_credential'):
     setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))

@@ -127,6 +127,8 @@ const EVENT_TEXT: Record<string, [Level, string]> = {
   activated: ['info', 'Coleta automática ativada neste computador.'],
   paused: ['warn', 'Coleta pausada neste computador.'],
   resumed: ['info', 'Coleta retomada neste computador.'],
+  'report-paused': ['warn', 'Relatório de alunos pausado neste computador. A frequência continua.'],
+  'report-resumed': ['info', 'Relatório de alunos retomado neste computador.'],
   'collection-started': ['info', 'Coleta iniciada.'],
   'collection-finished': ['info', 'Coleta concluída.'],
   'smecel-login': ['info', 'Entrada automática no Smecel.'],

@@ -29,6 +29,8 @@ interface Native {
   collect_report_now(): Promise<Status | Failure>;
   save_report_schedule(revision: number, schedule: ReportSchedule | null): Promise<Status | Failure>;
   pause_collector(paused: boolean): Promise<Status | Failure>;
+  /** The report alone, on this computer (owner request 05/11/2026). */
+  pause_report(paused: boolean): Promise<Status | Failure>;
   save_shared_schedule(revision: number, schedule: SharedSchedule): Promise<Status | Failure>;
   save_source_credential(email: string, password: string): Promise<Status | Failure>;
   forget_source_credential(): Promise<Status | Failure>;

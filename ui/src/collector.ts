@@ -23,7 +23,7 @@ export interface CollectorStatus {
   lastReceipt: { receivedAt: string; resolvedRecords: number; unresolvedRecords: number; conflicts: number } | null;
   settings: { revision: number; paused: boolean; schedule: SharedSchedule | null; reportSchedule?: ReportSchedule | null } | null;
   /** The student report's own run on this computer (owner decision 29/10/2026). */
-  report?: { running: boolean; preparing: boolean; code: string | null };
+  report?: { running: boolean; preparing: boolean; code: string | null; /** Paused alone on this computer. */ paused?: boolean };
   studentReport?: StudentReportState | null;
   /** The saved Smecel login is write-only: only a masked account comes back. */
   credential?: { saved: boolean; account?: string };
