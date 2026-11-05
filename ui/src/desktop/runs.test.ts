@@ -139,3 +139,19 @@ test('incidents to fix in the Smecel are a warning naming the student, one per l
   const [plain] = logEvents([{ at: 600, kind: 'incidents-sent', sent: 374 }]);
   expect(plain).toMatchObject({ level: 'info', detail: undefined, wrap: false });
 });
+
+test('each failure says what exactly happened (owner request 05/11/2026)', () => {
+  const events = logEvents([
+    { at: 700, kind: 'class-failed', code: 'SOURCE_READ_FAILED', label: '7A 2026 - MATUTINO', reason: 'smecel-timeout', readMs: 32400 },
+    { at: 701, kind: 'failure', code: 'SOURCE_READ_FAILED', label: '7A 2026 - MATUTINO, 7B 2026 - MATUTINO', reason: 'two-in-a-row' },
+    { at: 702, kind: 'failure', code: 'SOURCE_READ_FAILED', label: 'Ocorrências', reason: 'login-page' },
+    { at: 703, kind: 'class-failed', code: 'SOURCE_READ_FAILED', label: '6A' },
+  ]);
+  const at = (t: number) => events.find(e => e.at === t)!;
+  expect(at(700).detail).toBe('O Smecel não abriu a página no tempo limite (30 s). Costuma ser lentidão do Smecel. Esperou 32 s.');
+  expect(at(701).message).toContain('Coleta interrompida');
+  expect(at(701).detail).toBe('Falhou em 7A 2026 - MATUTINO, 7B 2026 - MATUTINO · Dois diários seguidos não abriram: o Smecel parece fora do ar.');
+  expect(at(702).detail).toBe('Ocorrências · O Smecel pediu para entrar de novo (a sessão expirou).');
+  // Older entries without a reason keep the general cause.
+  expect(at(703).detail).toBe('O Smecel demorou ou falhou ao abrir um diário.');
+});

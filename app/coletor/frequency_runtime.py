@@ -20,7 +20,7 @@ import os
 from .history import CollectorHistory
 from .institutional_access import AccessDenied
 from .local_copy import content_hash, is_current, payload_hash, schedule_hash, unchanged_payload
-from .manual_session import SessionError
+from .manual_session import SessionError, failure_reason
 from .protected_storage import ProtectedStorage, StorageError
 
 SAFE_CODES = {'invalid-request', 'not-authorized', 'unavailable', 'revision-conflict', 'lease-busy',
@@ -467,8 +467,8 @@ class FrequencyRuntime:
                 self._transient = (code, now, False)
             if not self._transient[2] and now - self._transient[1] >= TRANSIENT_GRACE_SECONDS:
                 self._transient = (code, self._transient[1], True)
-                self._history.record('failure', code=code, label=label)
-        elif code not in QUIET_CODES and changed: self._history.record('failure', code=code, label=label)
+                self._history.record('failure', code=code, label=label, reason=failure_reason(error))
+        elif code not in QUIET_CODES and changed: self._history.record('failure', code=code, label=label, reason=failure_reason(error))
         if code in ALERT_CODES and changed:
             try: self._on_alert(code)
             except Exception: pass
@@ -857,7 +857,7 @@ class FrequencyRuntime:
             with self._lock: self._report['code'] = code
             # A refused Smecel password blocks the frequency too: one place shows it.
             if code == 'SOURCE_LOGIN_FAILED': self._error(SessionError('SOURCE_LOGIN_FAILED'))
-            if code not in QUIET_CODES: self._history.record('report-failed', code=code)
+            if code not in QUIET_CODES: self._history.record('report-failed', code=code, reason=failure_reason(error))
             try:
                 self._check(epoch, lease=False)
                 self._source.preserve_and_close(self._storage)
@@ -1053,10 +1053,10 @@ class FrequencyRuntime:
                         self._progress['classLabel'] = source['name']
                     try:
                         preview = self._source.operational_capture(source['class_id'])
-                    except SessionError:
+                    except SessionError as error:
                         # The list was just validated: a failed diary is a read
                         # problem (shown as such), not a reason to ask for login.
-                        raise SessionError('SOURCE_READ_FAILED') from None
+                        raise SessionError('SOURCE_READ_FAILED', failure_reason(error)) from None
                     self._check(epoch, lease=False)
                     after_capture = self._fresh()
                     if after_capture['settings']['paused']: raise FrequencyError('paused')
@@ -1070,12 +1070,27 @@ class FrequencyRuntime:
                 try:
                     current, preview, after_capture = self._verified(read_class)
                 except SessionError as error:
-                    # Two diaries in a row: the Smecel itself is down or the session is gone, and
-                    # the run stops as before. A single one is only that class.
-                    if str(error) != 'SOURCE_READ_FAILED' or last_failed: raise
+                    if str(error) != 'SOURCE_READ_FAILED': raise
+                    reason = failure_reason(error)
                     failed.append(source['name'])
-                    self._history.record('class-failed', code='SOURCE_READ_FAILED', label=source['name'])
+                    self._history.record('class-failed', code='SOURCE_READ_FAILED', label=source['name'], reason=reason,
+                                         read_ms=round((time.monotonic() - read_started) * 1000))
+                    # Two diaries in a row: the Smecel itself is down, and the run stops as before.
+                    if last_failed:
+                        stop = SessionError('SOURCE_READ_FAILED', 'two-in-a-row')
+                        stop.label = ', '.join(failed[-2:])
+                        raise stop from None
                     last_failed = True
+                    # A failed diary drops the session's class list (05/11/2026: so the next class
+                    # always failed in 2 s and every run stopped). The list is read again, as at the
+                    # start of the run; when even that fails, the Smecel is down and the run stops.
+                    try:
+                        self._access.run(lambda: self._source.operational_catalog(self._storage))
+                    except Exception as reload_error:
+                        if type(reload_error) is AccessDenied: raise
+                        stop = SessionError('SOURCE_READ_FAILED', 'list-reload-failed')
+                        stop.label = source['name']
+                        raise stop from None
                     continue
                 last_failed = False
                 send_started = time.monotonic()
@@ -1275,7 +1290,7 @@ class FrequencyRuntime:
             # and the frequency already sent stands. FrequencyError is an AccessDenied too.
             code = getattr(error, 'code', None)
             if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise
-            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED',
+            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED', reason=failure_reason(error),
                                  label='Grade de horários')
         finally:
             with self._lock: self._progress['completed'] += 1
@@ -1333,7 +1348,7 @@ class FrequencyRuntime:
             # As for the grid: a stop or a lost authority stops the run; anything else is only noted.
             code = getattr(error, 'code', None)
             if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise
-            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED',
+            self._history.record('failure', code=code if code in SAFE_CODES else 'SOURCE_READ_FAILED', reason=failure_reason(error),
                                  label='Ocorrências')
         finally:
             with self._lock: self._progress['completed'] += 1

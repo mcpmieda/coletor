@@ -161,6 +161,30 @@ const FAILURE_CAUSE: Record<string, string> = {
   CLOCK_OUT_OF_SYNC: 'Data ou hora do computador erradas.',
   PROTECTED_STORAGE_UNAVAILABLE: 'O Windows não conseguiu guardar os dados com segurança.',
 };
+/** What exactly failed, from the collector's reason code (owner request 05/11/2026). */
+export const REASON_TEXT: Record<string, string> = {
+  'smecel-timeout': 'O Smecel não abriu a página no tempo limite (30 s). Costuma ser lentidão do Smecel.',
+  'worker-timeout': 'O navegador do Coletor não respondeu a tempo e foi reiniciado.',
+  network: 'A conexão com o Smecel caiu ou foi recusada. Confira a internet deste computador.',
+  'login-page': 'O Smecel pediu para entrar de novo (a sessão expirou).',
+  'class-not-listed': 'A turma não aparece mais na lista de turmas do Smecel.',
+  'diary-structure': 'O diário abriu, mas veio num formato que o Coletor não reconhece.',
+  'page-changed': 'A página do Smecel mudou durante a leitura.',
+  'too-large': 'A página do Smecel veio maior que o limite de leitura.',
+  'browser-closed': 'O navegador do Coletor fechou durante a leitura.',
+  unrecognized: 'A página do Smecel veio num formato que o Coletor não reconhece.',
+  'session-reset': 'A lista de turmas da sessão foi perdida depois de uma falha anterior.',
+  'list-reload-failed': 'Depois da falha, a lista de turmas do Smecel também não abriu: o Smecel parece fora do ar.',
+  'two-in-a-row': 'Dois diários seguidos não abriram: o Smecel parece fora do ar.',
+};
+
+/** The specific cause when the collector knows it, else the general one of the code. */
+export function failureCause(e: HistoryEntry): string | undefined {
+  const waited = typeof e.readMs === 'number' && e.readMs >= 1000 ? ` Esperou ${Math.round(e.readMs / 1000)} s.` : '';
+  const specific = e.reason ? REASON_TEXT[e.reason] : undefined;
+  return specific ? specific + waited : e.code ? FAILURE_CAUSE[e.code] : undefined;
+}
+
 // The collector retries these by itself: worth seeing, not counted as failures.
 const TEMPORARY = new Set(['ACCESS_UNAVAILABLE']);
 
@@ -192,13 +216,12 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
     if (e.kind === 'report-failed') {
       const level: Level = TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
       const cause = e.code === 'SOURCE_READ_FAILED' ? 'o Smecel demorou ou falhou ao gerar o relatório. A próxima leitura tenta de novo.' : problemText(e.code);
-      return { id, at: e.at, level, message: `Relatório de alunos não lido: ${cause}`,
-        detail: e.code ? FAILURE_CAUSE[e.code] : undefined };
+      return { id, at: e.at, level, message: `Relatório de alunos não lido: ${cause}`, detail: failureCause(e) };
     }
     if (e.kind === 'class-failed') {
       // The run went on with the other classes (owner request 28/10/2026).
       return { id, at: e.at, level: 'error', message: `${e.label ?? 'Turma'}: diário não lido. As outras turmas seguiram; esta é lida de novo no próximo horário.`,
-        detail: e.code ? FAILURE_CAUSE[e.code] : undefined };
+        detail: failureCause(e) };
     }
     if (e.kind === 'unknown-mark') {
       // Logged once per mark (owner request 20/10/2026): the mark itself and where it first appeared.
@@ -207,8 +230,11 @@ export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
     }
     if (e.kind === 'failure') {
       const level: Level = QUIET.has(e.code ?? '') ? 'info' : TEMPORARY.has(e.code ?? '') ? 'warn' : 'error';
-      const cause = e.code ? FAILURE_CAUSE[e.code] : undefined;
-      return { id, at: e.at, level, message: problemText(e.code), detail: [e.label, cause].filter(Boolean).join(' · ') || undefined };
+      // The run stopped before the remaining classes (05/11/2026): say so, and which classes failed.
+      if (e.reason === 'two-in-a-row' || e.reason === 'list-reload-failed')
+        return { id, at: e.at, level, message: 'Coleta interrompida: as turmas que faltavam e as Ocorrências ficam para o próximo horário.',
+          detail: [e.label ? `Falhou em ${e.label}` : '', failureCause(e)].filter(Boolean).join(' · ') };
+      return { id, at: e.at, level, message: problemText(e.code), detail: [e.label, failureCause(e)].filter(Boolean).join(' · ') || undefined };
     }
     const [level, message] = EVENT_TEXT[e.kind] ?? ['info', e.kind];
     return { id, at: e.at, level, message, detail: e.label };

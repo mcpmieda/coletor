@@ -713,13 +713,22 @@ class RuntimeTests(unittest.TestCase):
                                     for i, name in enumerate(names)]
             return value
         self.provider.frequency_request = with_classes
-        self.source.operational_catalog = lambda storage: {
-            'selected_class_ids': [str(13331 + i) for i in range(count)], 'unavailable_class_ids': [],
-            'catalog': {'scope': {'year': 2026}, 'classes': [{'class_id': str(13331 + i), 'name': name, 'shift': 'matutino'} for i, name in enumerate(names)]}}
+        # Like the real session: a failed diary drops its class list until the list is read again.
+        session = {'listed': False, 'catalogs': 0}
+        self.session = session
+        def catalog(storage):
+            session['listed'] = True
+            session['catalogs'] += 1
+            return {'selected_class_ids': [str(13331 + i) for i in range(count)], 'unavailable_class_ids': [],
+                    'catalog': {'scope': {'year': 2026}, 'classes': [{'class_id': str(13331 + i), 'name': name, 'shift': 'matutino'} for i, name in enumerate(names)]}}
+        self.source.operational_catalog = catalog
         def capture(class_id):
             self.source.reads += 1
+            if not session['listed']: raise SessionError('Carregue as turmas novamente', 'session-reset')
             name = names[int(class_id) - 13331]
-            if name in failing: raise SessionError('O Smecel demorou')
+            if name in failing:
+                session['listed'] = False
+                raise SessionError('O Smecel demorou', 'smecel-timeout')
             view = preview()
             view['snapshot']['class_id'] = class_id
             for student in view['snapshot']['students']: student['original_class'] = name
@@ -754,10 +763,39 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.sent_classes(), [10])
         self.assertEqual(self.source.reads, 3)  # D is not even tried: the Smecel looks down.
         history = list(reversed(self.runtime.recent_history(50)))
-        self.assertEqual([e['label'] for e in history if e['kind'] == 'class-failed'], [names[1]])
-        self.assertEqual([e['code'] for e in history if e['kind'] == 'failure'], ['SOURCE_READ_FAILED'])
+        self.assertEqual([e['label'] for e in history if e['kind'] == 'class-failed'], [names[1], names[2]])
+        stop = next(e for e in history if e['kind'] == 'failure')
+        self.assertEqual((stop['code'], stop['reason'], stop['label']), ('SOURCE_READ_FAILED', 'two-in-a-row', f'{names[1]}, {names[2]}'))
         self.assertFalse(any(e['kind'] == 'collection-finished' for e in history))
         self.assertEqual((result['state'], result['code']), ('error', 'SOURCE_READ_FAILED'))
+
+    def test_after_a_failed_diary_the_list_is_read_again_and_the_run_goes_on(self):
+        # 05/11/2026: the session lost its class list with the failed diary, the next class failed
+        # in 2 s and every run stopped there. Each failure now says what happened.
+        names = self.several_classes(4, failing={'TURMA SINTÉTICA B'})
+        self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [10, 12, 13])
+        self.assertEqual(self.session['catalogs'], 2)  # The start of the run, and after B.
+        history = list(reversed(self.runtime.recent_history(50)))
+        failed = [e for e in history if e['kind'] == 'class-failed']
+        self.assertEqual([(e['label'], e['reason']) for e in failed], [(names[1], 'smecel-timeout')])
+        self.assertIn('readMs', failed[0])
+        self.assertFalse(any(e['kind'] == 'failure' for e in history))
+        self.assertTrue(any(e['kind'] == 'incidents-sent' for e in history))
+
+    def test_a_list_that_cannot_be_read_again_stops_the_run_and_says_so(self):
+        names = self.several_classes(3, failing={'TURMA SINTÉTICA B'})
+        first = self.source.operational_catalog
+        calls = []
+        def catalog(storage):
+            calls.append(1)
+            if len(calls) > 1: raise SessionError('SOURCE_READ_FAILED', 'smecel-timeout')
+            return first(storage)
+        self.source.operational_catalog = catalog
+        self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [10])
+        stop = next(e for e in self.runtime.recent_history(50) if e['kind'] == 'failure')
+        self.assertEqual((stop['reason'], stop['label']), ('list-reload-failed', names[1]))
 
     def test_unreadable_diaries_apart_are_each_skipped(self):
         self.several_classes(5, failing={'TURMA SINTÉTICA B', 'TURMA SINTÉTICA D'})

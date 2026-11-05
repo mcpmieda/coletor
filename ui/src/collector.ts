@@ -38,6 +38,8 @@ export interface HistoryEntry {
   /** incidents-sent: incidents the Smecel shows out of shape (owner decision 05/11/2026), named by
    *  the student so the school can fix them; sent says whether the incident still went. */
   notices?: IncidentNotice[]; noticeTotal?: number;
+  /** What exactly failed (owner request 05/11/2026): a short code, see REASON_TEXT in runs.ts. */
+  reason?: string; readMs?: number; sendMs?: number;
 }
 export interface IncidentNotice { name: string; classLabel: string; incident: string; reason: string; sent: boolean }
 export type CollectorResult = CollectorStatus | { error: string; code?: string };

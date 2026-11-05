@@ -8,6 +8,7 @@ Never the incident's text. At most MAX_NOTICES per event.
 Entries older than 30 days, and anything beyond the last 2000, are dropped.
 """
 import json
+import re
 import os
 from pathlib import Path
 import tempfile
@@ -63,11 +64,13 @@ class CollectorHistory:
         return entries
 
     def record(self, kind, *, code=None, label=None, sent=None, unresolved=None, conflicts=None,
-               read_ms=None, send_ms=None, unchanged=None, notices=None):
+               read_ms=None, send_ms=None, unchanged=None, notices=None, reason=None):
         """Append one fact; a failure to write never interrupts collection."""
         if kind not in KINDS: return
         entry = {'at': None, 'kind': kind}
         if isinstance(code, str) and code: entry['code'] = code[:60]
+        # What exactly failed (owner request 05/11/2026): a short code of manual_session.REASONS.
+        if isinstance(reason, str) and re.fullmatch(r'[a-z-]{1,40}', reason): entry['reason'] = reason
         if isinstance(label, str) and label: entry['label'] = ' '.join(label.split())[:120]
         for key, value in (('sent', sent), ('unresolved', unresolved), ('conflicts', conflicts),
                            ('readMs', read_ms), ('sendMs', send_ms)):
