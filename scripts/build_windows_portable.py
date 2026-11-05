@@ -258,7 +258,7 @@ def build(output, source_commit):
     launcher = build_launcher(runtime)
     shutil.copyfile(ROOT / "docs/PORTABLE_LEIA_ME.txt", bundle / "LEIA-ME.txt")
     (bundle / "Abrir Coletor.cmd").write_bytes(
-        b'@echo off\r\nsetlocal\r\nstart "Coletor de Frequencia" "%~dp0programa\\ColetorFrequencia.exe"\r\n')
+        b'@echo off\r\nsetlocal\r\nstart "Coletor" "%~dp0programa\\ColetorFrequencia.exe"\r\n')
     (bundle / "Remover acesso deste PC.cmd").write_bytes(
         b'@echo off\r\nsetlocal\r\necho Feche o Coletor antes de continuar.\r\n'
         b'echo Esta acao retira o acesso deste PC; nao apaga a pasta nem configuracoes.\r\n'
@@ -272,7 +272,7 @@ def build(output, source_commit):
                                  check=True, capture_output=True, text=True).stdout.strip()
     if driver_node != "v24.21.0":
         raise ValueError("Unexpected browser driver Node runtime")
-    manifest = {"application": "Coletor de Frequência", "version": VERSION, "product_version": PRODUCT_VERSION, "launcher": launcher,
+    manifest = {"application": "Coletor", "version": VERSION, "product_version": PRODUCT_VERSION, "launcher": launcher,
         "kind": "portable-test-not-installer", "source_commit": source_commit,
         "built_at": datetime.now(timezone.utc).isoformat(), "platform": "windows-x64",
         "python_version": PYTHON_VERSION, "python_url": PYTHON_URL,

@@ -285,3 +285,37 @@ class PopupShutdownQaTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailureReasonTests(unittest.TestCase):
+    """Owner request 05/11/2026: every failure says what it was, never with page data."""
+
+    def test_the_worker_names_each_failure_by_a_short_code(self):
+        from coletor.manual_worker import failure_kind
+        class TimeoutError(Exception): pass  # The name Playwright gives its own.
+        self.assertEqual(failure_kind(TimeoutError("Timeout 30000ms exceeded. SECRET")), "smecel-timeout")
+        self.assertEqual(failure_kind(OSError("net::ERR_CONNECTION_RESET at https://x")), "network")
+        self.assertEqual(failure_kind(ValueError("selected_class_unavailable")), "class-not-listed")
+        self.assertEqual(failure_kind(ValueError("listing_changed")), "login-page")
+        self.assertEqual(failure_kind(RuntimeError("anything else")), "source_unavailable")
+
+    def test_the_pipe_carries_the_reason_and_keeps_the_old_code(self):
+        from coletor.manual_worker import WorkerError, WORKER_REASONS
+        error = WorkerError("source_unavailable", WORKER_REASONS.get("smecel-timeout"))
+        self.assertEqual((str(error), error.reason), ("source_unavailable", "smecel-timeout"))
+        self.assertIsNone(WORKER_REASONS.get("not-a-code"))
+
+    def test_a_login_page_or_a_strange_diary_say_so(self):
+        url = source_url("13331", 2026)
+        with self.assertRaises(SessionError) as caught:
+            captured_preview({"url": "", "password_form": False, "html": ""}, "13331", 2026)
+        self.assertEqual(caught.exception.reason, "login-page")
+        with self.assertRaises(SessionError) as caught:
+            captured_preview({"url": url, "password_form": True, "html": ""}, "13331", 2026)
+        self.assertEqual(caught.exception.reason, "login-page")
+        with self.assertRaises(SessionError) as caught:
+            captured_preview({"url": url, "password_form": False, "html": "<html><body>outra página</body></html>"}, "13331", 2026)
+        self.assertEqual(caught.exception.reason, "diary-structure")
+
+    def test_an_unknown_reason_is_dropped(self):
+        self.assertIsNone(SessionError("x", "SECRET TEXT").reason)

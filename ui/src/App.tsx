@@ -85,7 +85,7 @@ export default function App() {
   else if (error) activity = 'error';
   else if (preview) activity = 'review';
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><span className="brand-icon brand-fox"><img src="./mascot/head.png" alt="" width="32" height="32" /></span><div><strong>Coletor de Frequência</strong><span>Ecossistema Escolar</span></div></div>
+    <aside className="sidebar"><div className="brand"><span className="brand-icon brand-fox"><img src="./mascot/head.png" alt="" width="32" height="32" /></span><div><strong>Coletor</strong><span>Ecossistema Escolar</span></div></div>
       <nav aria-label="Navegação principal">
         <NavItem view="preview" current={view} onSelect={setView} icon={<LayoutDashboard size={18} />}>{desktop ? 'Coleta' : 'Conferir frequência'}</NavItem>
         <NavItem view="schedule" current={view} onSelect={setView} icon={<Clock3 size={18} />}>Horários de coleta</NavItem>

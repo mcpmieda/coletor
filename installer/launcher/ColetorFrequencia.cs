@@ -8,10 +8,10 @@ using System.Text;
 using System.ComponentModel;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("Coletor de Frequência")]
-[assembly: AssemblyProduct("Coletor de Frequência")]
+[assembly: AssemblyTitle("Coletor")]
+[assembly: AssemblyProduct("Coletor")]
 [assembly: AssemblyCompany("Ecossistema Escolar")]
-[assembly: AssemblyDescription("Coletor de Frequência")]
+[assembly: AssemblyDescription("Coletor")]
 // Version attributes are generated from app/coletor/__init__.py during build.
 
 static class Launcher
@@ -38,7 +38,7 @@ static class Launcher
             {
                 MessageBox.Show("Não foi possível iniciar o Coletor. Reinstale o pacote completo ou peça ajuda.\n\n" +
                                 "Registro de suporte: %LOCALAPPDATA%\\EcossistemaEscolar\\ColetorFrequencia\\launcher.log",
-                                "Coletor de Frequência", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                "Coletor", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch { /* Preserve the original exit code even if no desktop exists. */ }
         }

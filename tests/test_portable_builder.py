@@ -77,7 +77,7 @@ class PortableBuildTests(unittest.TestCase):
                 metadata = builder.build_launcher(root, version="8.12.3")
                 self.assertEqual(metadata["file_version"], "8.12.3.0")
                 self.assertEqual(metadata["product_version"], "8.12.3")
-                self.assertEqual(metadata["description"], "Coletor de Frequência")
+                self.assertEqual(metadata["description"], "Coletor")
                 self.assertEqual(metadata["trust"], "unsigned")
                 bad_source = root / "invalid.cs"
                 bad_source.write_text("this is not C#", encoding="utf-8")

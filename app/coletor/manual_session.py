@@ -13,7 +13,21 @@ NOTICE = "Entre no site na janela separada. O programa não confirma sua identid
 
 
 class SessionError(ValueError):
-    pass
+    """reason: what exactly failed (owner request 05/11/2026), one of REASONS or None."""
+    def __init__(self, message="", reason=None):
+        super().__init__(message)
+        self.reason = reason if reason in REASONS else None
+
+
+# Short, data-free causes of a failed read, shown in Registros by the window.
+REASONS = {"smecel-timeout", "worker-timeout", "network", "login-page", "class-not-listed", "diary-structure",
+           "page-changed", "too-large", "browser-closed", "unrecognized", "session-reset", "list-reload-failed",
+           "two-in-a-row"}
+
+
+def failure_reason(error, fallback=None):
+    reason = getattr(error, "reason", None)
+    return reason if reason in REASONS else fallback
 
 
 def source_url(class_id, year):
@@ -44,18 +58,22 @@ def matches_source(url, class_id, year):
 
 def captured_preview(payload, class_id, year, *, allow_partial=False):
     if not isinstance(payload, dict) or not matches_source(payload.get("url", ""), class_id, year):
-        raise SessionError("A janela não está no diário da turma e do ano confirmados. Confira o site.")
+        # The worker answers an empty address when the diary redirected (expired Smecel login).
+        raise SessionError("A janela não está no diário da turma e do ano confirmados. Confira o site.", "login-page")
     if payload.get("password_form"):
-        raise SessionError("A página solicita entrada no site. Faça o login na janela separada e confira o diário.")
+        raise SessionError("A página solicita entrada no site. Faça o login na janela separada e confira o diário.", "login-page")
     html = payload.get("html")
-    result = preview(html, class_id, year, "manual")
+    try:
+        result = preview(html, class_id, year, "manual")
+    except Exception:
+        raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.", "diary-structure") from None
     snapshot = result["snapshot"]
     permitted = {"CLASS_ID_UNVERIFIED", "ROSTER_COMPLETENESS_UNVERIFIED"}
     if allow_partial:
         permitted |= {'SOURCE_SYMBOL_UNKNOWN', 'GRID_COVERAGE_INVALID', 'TOTALS_ROW_INVALID'}
     if (snapshot["source_format"] != "smecel-annual-v1" or not snapshot["students"]
             or any(i["severity"] == "error" and i["code"] not in permitted for i in snapshot["issues"])):
-        raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.")
+        raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.", "diary-structure")
     result["capture"] = {"source_url": source_url(class_id, year),
                          "captured_at": datetime.now(timezone.utc).isoformat(),
                          "html_sha256": hashlib.sha256(html.encode("utf-8")).hexdigest(),
@@ -167,7 +185,11 @@ class ManualSession:
 
     def capture_selected(self, generation, class_id, confirmed, *, _operational=False):
         with self._lock:
-            self._check(generation, confirmed, {"list_ready", "preview_ready"})
+            try:
+                self._check(generation, confirmed, {"list_ready", "preview_ready"})
+            except SessionError as error:
+                # The class list of this session is gone (a diary failed before): not a Smecel failure.
+                raise SessionError(str(error), "session-reset") from None
             choices = self._catalog_reply()["selected_class_ids"]
             if class_id not in choices:
                 raise SessionError("Selecione uma turma disponível nesta sessão antes de ler.")
@@ -181,12 +203,13 @@ class ManualSession:
                 self._check(generation, True, {"capturing"})
                 self._state = "preview_ready"
                 return {"session": self._status(), "preview": result}
-        except Exception:
+        except Exception as error:
             with self._lock:
                 if generation == self._generation:
                     self._catalog = None
                     self._state = "awaiting_user"
-            raise SessionError("A turma não passou pela revalidação da lista e do diário. Carregue as turmas novamente; a seleção salva foi preservada.") from None
+            raise SessionError("A turma não passou pela revalidação da lista e do diário. Carregue as turmas novamente; a seleção salva foi preservada.",
+                               failure_reason(error)) from None
 
     def _status(self):
         return {"generation": self._generation, "state": self._state,
@@ -287,8 +310,9 @@ class ManualSession:
             raise SessionError('SOURCE_LOGIN_REQUIRED')
         try:
             return schedule_from_observation(driver.schedule())
-        except Exception:
-            raise SessionError('SOURCE_READ_FAILED') from None
+        except Exception as error:
+            # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
+            raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
 
     def operational_incidents(self, year):
         """The school year's Smecel incidents, read in the same verified session as the class list
@@ -300,8 +324,9 @@ class ManualSession:
             raise SessionError('SOURCE_LOGIN_REQUIRED')
         try:
             return incidents_from_observation(driver.incidents(year), year)
-        except Exception:
-            raise SessionError('SOURCE_READ_FAILED') from None
+        except Exception as error:
+            # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
+            raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
 
     def operational_student_report(self, year):
         """The Smecel's "Relatório de alunos", read in the same verified session as the class list
@@ -313,8 +338,9 @@ class ManualSession:
             raise SessionError('SOURCE_LOGIN_REQUIRED')
         try:
             return report_from_observation(driver.student_report(year), year)
-        except Exception:
-            raise SessionError('SOURCE_READ_FAILED') from None
+        except Exception as error:
+            # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
+            raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
 
     def preserve_and_close(self, storage):
         with self._lock: driver = self._driver

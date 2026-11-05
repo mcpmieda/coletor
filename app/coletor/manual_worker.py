@@ -37,7 +37,38 @@ def vendored_script(url):
     return body if hashlib.sha256(body).hexdigest() == entry[1] else None
 
 
-NO_PRINT_JS = """Object.defineProperty(globalThis, 'print', {configurable: false, writable: false, value: () => undefined});"""
+class WorkerError(RuntimeError):
+    """A failed request to the isolated Edge. str() keeps the old code; reason says what happened
+    (owner request 05/11/2026: every failure says what it was), from REASONS only."""
+    def __init__(self, code, reason=None):
+        super().__init__(code)
+        self.reason = reason
+
+
+# What the worker reports (its "error" field), as the reason shown in Registros.
+WORKER_REASONS = {
+    "smecel-timeout": "smecel-timeout", "network": "network", "class-not-listed": "class-not-listed",
+    "login-page": "login-page", "page_changed": "page-changed", "report_too_large": "too-large",
+    "transport_limit": "too-large", "schedule_unavailable": "login-page", "incidents_unavailable": "login-page",
+    "report_unavailable": "login-page", "schedule_incomplete": "unrecognized",
+}
+
+
+def failure_kind(error):
+    """The worker's own reading of an exception: a short code, never its message."""
+    text = str(error)
+    if type(error).__name__ == "TimeoutError":
+        return "smecel-timeout"  # Playwright waited its whole limit for the Smecel page.
+    if "net::ERR_" in text:
+        return "network"
+    if isinstance(error, ValueError) and text == "selected_class_unavailable":
+        return "class-not-listed"
+    if isinstance(error, ValueError) and text == "listing_changed":
+        return "login-page"  # The list redirected: the Smecel session ended.
+    return "source_unavailable"
+
+
+NO_PRINT_JS ="""Object.defineProperty(globalThis, 'print', {configurable: false, writable: false, value: () => undefined});"""
 
 # The list is rendered once a row carries a class link; the placeholder rows
 # shown while it loads have none. Independent of column count or order. Stop
@@ -222,7 +253,7 @@ class BrowserWorker:
         with self._rpc_lock:
             process = self._process
             if process is None or process.poll() is not None:
-                raise RuntimeError("session_closed")
+                raise WorkerError("session_closed", "browser-closed")
             process.stdin.write(json.dumps(command) + "\n")
             process.stdin.flush()
             messages = queue.Queue(maxsize=1)
@@ -237,13 +268,14 @@ class BrowserWorker:
                 line = messages.get(timeout=timeout)
             except queue.Empty:
                 self.close()
-                raise RuntimeError("session_timeout") from None
+                raise WorkerError("session_timeout", "worker-timeout") from None
             if not line or len(line.encode("utf-8")) > MAX_REQUEST_BYTES or not line.endswith("\n"):
                 self.close()
-                raise RuntimeError("invalid_worker_response")
+                raise WorkerError("invalid_worker_response", "browser-closed")
             body = json.loads(line)
             if not isinstance(body, dict) or "error" in body:
-                raise RuntimeError("source_unavailable")
+                kind = body.get("error") if isinstance(body, dict) else None
+                raise WorkerError("source_unavailable", WORKER_REASONS.get(kind))
             return body
 
     def open(self, url):
@@ -548,9 +580,9 @@ async def browser_session(initial):
                         if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
                             encoded = '{"error":"transport_limit"}'
                         print(encoded, flush=True)
-                    except Exception:
+                    except Exception as error:
                         forget()
-                        print('{"error":"source_unavailable"}', flush=True)
+                        print(json.dumps({"error": failure_kind(error)}), flush=True)
                 reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
                 capture = None
                 try:

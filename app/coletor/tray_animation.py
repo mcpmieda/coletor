@@ -12,7 +12,7 @@ import time
 from typing import Callable, Protocol
 
 MIN_FRAME_INTERVAL = 0.6
-APP_TITLE = "Coletor de Frequência"
+APP_TITLE = "Coletor"
 DEFAULT_ASSET_DIRECTORY = Path(__file__).resolve().parents[1] / "assets" / "fox-icons"
 
 
