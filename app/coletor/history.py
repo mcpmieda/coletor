@@ -1,7 +1,10 @@
 """Local operation history of this computer: what happened and when.
 
 Only operational facts are written: event kind, sanitized code, class label and
-counts. Never student names, marks, diaries, credentials or server payloads.
+counts. Never student names, marks, diaries, credentials or server payloads, with one
+exception (owner decision 05/11/2026): an incident the Smecel shows out of shape is named
+by its student, class, number and reason, so the school can find and fix it in the Smecel.
+Never the incident's text. At most MAX_NOTICES per event.
 Entries older than 30 days, and anything beyond the last 2000, are dropped.
 """
 import json
@@ -17,6 +20,7 @@ RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_ENTRIES = 2000
 COMPACT_SLACK = 500  # Appended lines tolerated before rewriting the file.
 MAX_READ_BYTES = 2 * 1024 * 1024
+MAX_NOTICES = 20
 KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', 'collection-finished',
          'failure', 'smecel-login', 'smecel-login-failed', 'access-required', 'started', 'superseded', 'late-start', 'login-retry', 'login-catch-up', 'late-cancelled', 'queue-quarantined', 'queue-expired', 'queue-restored', 'collection-stopped', 'unknown-mark',
          # The school's weekly grid went to the Ecossistema (sent: how many classes changed).
@@ -57,7 +61,7 @@ class CollectorHistory:
         return entries
 
     def record(self, kind, *, code=None, label=None, sent=None, unresolved=None, conflicts=None,
-               read_ms=None, send_ms=None, unchanged=None):
+               read_ms=None, send_ms=None, unchanged=None, notices=None):
         """Append one fact; a failure to write never interrupts collection."""
         if kind not in KINDS: return
         entry = {'at': None, 'kind': kind}
@@ -68,6 +72,16 @@ class CollectorHistory:
             if type(value) is int and value >= 0: entry[key] = value
         # A class's diary was the same as last sent: only the short message went.
         if unchanged is True: entry['unchanged'] = True
+        # Incidents the Smecel shows out of shape (incidents-sent only): who, where, which and why.
+        if kind == 'incidents-sent' and isinstance(notices, list) and notices:
+            text = lambda value, size: ' '.join(value.split())[:size] if isinstance(value, str) else ''
+            kept = [{'name': text(n.get('name'), 120), 'classLabel': text(n.get('classLabel'), 80),
+                     'incident': text(n.get('incident'), 12), 'reason': text(n.get('reason'), 160),
+                     'sent': n.get('sent') is True}
+                    for n in notices if isinstance(n, dict) and text(n.get('reason'), 160)]
+            if kept:
+                entry['notices'] = kept[:MAX_NOTICES]
+                entry['noticeTotal'] = len(kept)
         with self._lock:
             try:
                 # O(1) per event: append one line. The whole file is rewritten

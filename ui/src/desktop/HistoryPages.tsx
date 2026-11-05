@@ -151,7 +151,8 @@ export function LogsPage({ history, error, onRetry }: Readonly<{ history: Histor
               <span className="w-28 shrink-0 text-xs leading-5 text-muted">{fmtDate(e.at)}</span>
               <div className="min-w-0 flex-1">
                 <div className="selectable break-words">{e.message}</div>
-                {e.detail && <div className="truncate text-xs text-muted">{e.detail}</div>}
+                {/* Several lines (incidents to fix in the Smecel) are shown whole, one per line, selectable. */}
+                {e.detail && <div className={e.wrap ?'selectable whitespace-pre-line break-words text-xs text-muted' : 'truncate text-xs text-muted'}>{e.detail}</div>}
               </div>
             </div>
           ))}

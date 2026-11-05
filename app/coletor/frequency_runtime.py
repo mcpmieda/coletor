@@ -1323,6 +1323,7 @@ class FrequencyRuntime:
             self._history.record('incidents-sent', sent=reply.get('incidents'), unresolved=reply.get('unresolvedStudents'),
                                  unchanged=reply.get('changed') is False,
                                  code=None if reading['complete'] else 'INCIDENTS_PARTIAL',
+                                 notices=reading.get('notices'),
                                  read_ms=round((send_started - read_started) * 1000),
                                  send_ms=round((time.monotonic() - send_started) * 1000))
         except Exception as error:

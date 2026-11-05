@@ -12,6 +12,13 @@ class) has each incident shown twice on the student's page, with the same Smecel
 id is kept. The reading is complete only when every page and every student was read and each
 student's incidents match the count of the list, and only a complete reading may make the
 Ecossistema mark a record as removed.
+
+One incident the Smecel shows out of shape never refuses the whole reading (05/11/2026: two
+suspensions with "14/09/2026 até 31/12/1969" stopped every incident for three days). That incident
+alone is left out, the reading is not complete, and a notice names the student, the class, the
+incident's number and the reason, so the school can fix it in the Smecel (owner decision
+05/11/2026: the school finds an incident by the student, not by its number). Only what puts the
+whole reading in doubt still refuses it: another year or school, a login page, the list's shape.
 """
 import re
 from datetime import date
@@ -26,6 +33,15 @@ MAX_STUDENTS = 5000
 MAX_INCIDENTS = 500
 MAX_DESCRIPTION = 8000
 SMECEL_ID = re.compile(r"[1-9][0-9]{0,11}")
+MAX_NOTICES = 50
+# The Smecel shows an empty date as the Unix epoch in its own time zone (31/12/1969, seen on
+# 05/11/2026 as a suspension's end): the same as the blank it means, with a notice.
+EMPTY_DATES = {"31/12/1969", "01/01/1970"}
+BLANK_LEAVE = "data do afastamento em branco no Smecel (aparece como 31/12/1969); enviada sem essa data"
+
+
+class RecordSkipped(ValueError):
+    """One incident that cannot be read whole: left out, with the reason shown to the school."""
 
 # Runs in the list page the worker loaded. The number of pages comes from the page itself
 # ("171 alunos e turmas no filtro atual, 30 por página"), never from this code.
@@ -103,48 +119,56 @@ def _student_id(href, year):
     return query["aluno"]
 
 
-def _date(value):
+def _date(value, reason="data da ocorrência não reconhecida"):
     match = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", value or "")
-    if not match:
-        raise ValueError("Data de ocorrência não reconhecida.")
-    return date(int(match[3]), int(match[2]), int(match[1])).isoformat()
+    try:
+        if not match:
+            raise ValueError
+        return date(int(match[3]), int(match[2]), int(match[1])).isoformat()
+    except ValueError:
+        raise RecordSkipped(reason) from None
 
 
 def _leave(period, days):
     """A suspension's leave. The Smecel leaves its start, its end or its days blank at times
     ("até 24/11/2026", "14/09/2026 até", "até" with no days, seen on 29/10/2026): a blank part is
-    None, never guessed; a leave with nothing at all is no leave."""
-    match = re.fullmatch(r"(\S*) ?até ?(\S*)", period)
+    None, never guessed; a leave with nothing at all is no leave. A part shown as 31/12/1969 is a
+    blank too: (leave, True) says so, for the notice."""
+    reason = "período de afastamento não reconhecido"
+    match = re.fullmatch(r"(\S*) ?até ?(\S*)", period) if isinstance(period, str) else None
     if not match or not isinstance(days, str) or not re.fullmatch(r"\d{0,3}", days):
-        raise ValueError("Afastamento da ocorrência não reconhecido.")
-    leave = {"from": _date(match[1]) if match[1] else None, "to": _date(match[2]) if match[2] else None,
-             "days": int(days) if days else None}
+        raise RecordSkipped(reason)
+    shown_blank = match[1] in EMPTY_DATES or match[2] in EMPTY_DATES
+    start, end = (_date(part, reason) if part and part not in EMPTY_DATES else None for part in (match[1], match[2]))
+    leave = {"from": start, "to": end, "days": int(days) if days else None}
     if (leave["from"] and leave["to"] and leave["from"] > leave["to"]) or (leave["days"] or 0) > 366:
-        raise ValueError("Afastamento da ocorrência não reconhecido.")
-    return leave if any(value is not None for value in leave.values()) else None
+        raise RecordSkipped(reason)
+    return (leave if any(value is not None for value in leave.values()) else None), shown_blank
 
 
 def _record(record, year):
-    """One incident as the Ecossistema contract takes it; None when it cannot be read whole."""
+    """(incident as the Ecossistema contract takes it, notice or None); (None, None) when its text
+    cannot be read whole. RecordSkipped when it is out of the recognized shape."""
     if type(record) is not dict or not isinstance(record.get("id"), str) or not SMECEL_ID.fullmatch(record["id"]):
-        raise ValueError("Ocorrência sem identificador do Smecel.")
+        raise RecordSkipped("ocorrência sem número do Smecel")
     kind, heading, description = record.get("type"), record.get("heading"), record.get("description")
     prefix = f"({year} - "
     if (not isinstance(kind, str) or not 1 <= len(kind) <= 80 or record.get("kind") != kind
             or record.get("year") != str(year) or not isinstance(heading, str)
             or not heading.startswith(prefix) or not heading.endswith(")")):
-        raise ValueError("Ocorrência fora da estrutura reconhecida.")
+        raise RecordSkipped("tipo, ano letivo ou turma da ocorrência fora do formato reconhecido")
     label = heading[len(prefix):-1].strip()
     if not isinstance(description, str) or not 1 <= len(description) <= MAX_DESCRIPTION or not 1 <= len(label) <= 300:
-        return None  # Not refused: the reading is just not complete.
+        return None, None  # Not refused: the reading is just not complete.
     occurred = _date(record.get("date"))
-    leave = None if record.get("leave") is None else _leave(record["leave"], record.get("leave_days"))
-    return {"sourceIncidentId": record["id"], "kind": kind, "date": occurred, "sourceClassLabel": label,
-            "leave": leave, "description": description}
+    leave, shown_blank = (None, False) if record.get("leave") is None else _leave(record["leave"], record.get("leave_days"))
+    return ({"sourceIncidentId": record["id"], "kind": kind, "date": occurred, "sourceClassLabel": label,
+             "leave": leave, "description": description}, BLANK_LEAVE if shown_blank else None)
 
 
 def incidents_from_observation(value, year):
-    """{'complete': bool, 'students': [{'sourceStudentId', 'name', 'classLabels', 'incidents'}]}."""
+    """{'complete': bool, 'students': [{'sourceStudentId', 'name', 'classLabels', 'incidents'}],
+    'notices': [{'name', 'classLabel', 'incident', 'reason', 'sent'}]} (sent: the incident went)."""
     if (type(value) is not dict or "error" in value or not matches_list(value.get("url"), year)
             or value.get("password_form") or value.get("context_organization") is not True
             or value.get("context_school") is not True or value.get("year_selected") != str(year)):
@@ -153,7 +177,7 @@ def incidents_from_observation(value, year):
     if type(rows) is not list or type(observed) is not dict or type(value.get("total")) is not int:
         raise ValueError("A lista de ocorrências não corresponde à estrutura reconhecida.")
     complete = not value.get("failed_pages") and not value.get("failed_students") and len(rows) == value["total"]
-    counts, names = {}, {}
+    counts, names, classes = {}, {}, {}
     for row in rows:
         if (type(row) is not dict or not isinstance(row.get("name"), str) or type(row.get("count")) is not int
                 or not isinstance(row.get("class_label"), str)):
@@ -165,18 +189,44 @@ def incidents_from_observation(value, year):
         # A student listed in two classes shows the same total in each row.
         counts[student] = max(counts.get(student, 0), row["count"])
         names.setdefault(student, row["name"])
-    students = []
+        classes.setdefault(student, row["class_label"])
+    students, notices, noticed = [], [], set()
+
+    def notice(student, raw, reason, sent):
+        number = raw.get("id") if type(raw) is dict and isinstance(raw.get("id"), str) and SMECEL_ID.fullmatch(raw["id"]) else None
+        if (student, number, reason) in noticed:
+            return  # The same incident under a second enrolment of the student.
+        noticed.add((student, number, reason))
+        notices.append({"name": names.get(student, ""), "classLabel": classes.get(student, ""),
+                        "incident": number, "reason": reason, "sent": sent})
+
     for href, page in observed.items():
         student = _student_id(href, year)
         if type(page) is not dict or type(page.get("records")) is not list or type(page.get("enrolments")) is not list:
             raise ValueError("A página de ocorrências do aluno não corresponde à estrutura reconhecida.")
-        incidents, unreadable = {}, False
+        incidents, unreadable, conflicting = {}, False, set()
         for raw in page["records"]:
-            record = _record(raw, year)
+            try:
+                record, warning = _record(raw, year)
+            except RecordSkipped as skipped:
+                unreadable = True
+                notice(student, raw, f"{skipped}; não enviada", False)
+                continue
             if record is None:
                 unreadable = True
-            elif incidents.setdefault(record["sourceIncidentId"], record) != record:
-                raise ValueError("A mesma ocorrência aparece com conteúdos diferentes.")
+                continue
+            number = record["sourceIncidentId"]
+            if number in conflicting:
+                continue
+            if incidents.setdefault(number, record) != record:
+                # The same id with two different contents is never merged silently: neither goes.
+                del incidents[number]
+                conflicting.add(number)
+                unreadable = True
+                notice(student, raw, "a mesma ocorrência aparece com conteúdos diferentes; não enviada", False)
+                continue
+            if warning:
+                notice(student, raw, warning, True)
         if unreadable or len(incidents) != counts.get(student) or len(incidents) > MAX_INCIDENTS:
             complete = False
         labels = sorted({e["label"] for e in page["enrolments"]
@@ -186,4 +236,5 @@ def incidents_from_observation(value, year):
                              "incidents": sorted(incidents.values(), key=lambda i: int(i["sourceIncidentId"]))[:MAX_INCIDENTS]})
     if len(students) > MAX_STUDENTS:
         raise ValueError("Ocorrências acima do limite.")
-    return {"complete": complete and len(students) == len(counts), "students": students}
+    return {"complete": complete and len(students) == len(counts), "students": students,
+            "notices": notices[:MAX_NOTICES]}
