@@ -47,6 +47,8 @@ QUIET_CODES = {'lease-busy', 'paused', 'CANCELLED', 'NO_CLASSES_IN_SHIFT'}
 # at the next 30 s check; it reaches the history only if it lasts this long.
 TRANSIENT_CODES = {'ACCESS_UNAVAILABLE', 'unavailable'}
 TRANSIENT_GRACE_SECONDS = 600
+# Diary failures worth a second read in the same run: the Smecel or the network was slow.
+RETRIED_REASONS = {'smecel-timeout', 'worker-timeout', 'network'}
 # The weekly grid rarely changes: it is read at most this often, at the end of a collection run.
 SCHEDULE_READ_SECONDS = 3600
 # The student report's server step prepares Portal credentials four at a time: a report with many
@@ -824,6 +826,10 @@ class FrequencyRuntime:
             status = self._fresh()
             if status['settings']['paused']: raise FrequencyError('paused')
             if self._source_blocked: raise SessionError('SOURCE_LOGIN_REQUIRED')
+            # Every computer of the school starts the report at the same times; the concession says
+            # which one reads it. Taken before the Smecel (10/11/2026: the other computer read the
+            # whole report and threw it away, and its history showed a run "interrupted").
+            self._report_lease(epoch)
             self._history.record('report-started')
             read_started = time.monotonic()
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
@@ -1035,15 +1041,20 @@ class FrequencyRuntime:
             heartbeat.start()
             # Classes whose diary could not be read (owner request 28/10/2026): one slow diary
             # never holds back the others; they go on and it is read again at the next time.
-            failed, last_failed = [], False
-            for source, central in pairs:
+            # A diary the Smecel was slow to serve (it waited 30 s) is read once more at the end of
+            # the run (owner request 10/11/2026: one timeout a run, a different class each time); only
+            # a second failure reaches the history.
+            failed, last_failed, previous = [], False, None
+            queue, retried = list(pairs), {}
+            while queue:
+                source, central = queue.pop(0)
                 self._check(epoch, lease=False)
                 def read_class(source=source, central=central):
-                    fresh = self._fresh()
+                    fresh = self._patiently(self._fresh, epoch)
                     if fresh['settings']['paused']: raise FrequencyError('paused')
                     # Every class starts with a new database concession, fencing and
                     # requestId. Heartbeat only reports status; it does not renew.
-                    self._acquire(fresh, force=True)
+                    self._patiently(lambda: self._acquire(fresh, force=True), epoch)
                     self._check(epoch)
                     current = next((c for c in fresh['classes'] if c['classId'] == central['classId']
                                     and class_key(c['sourceClassLabel']) == class_key(source['name'])), None)
@@ -1058,10 +1069,10 @@ class FrequencyRuntime:
                         # problem (shown as such), not a reason to ask for login.
                         raise SessionError('SOURCE_READ_FAILED', failure_reason(error)) from None
                     self._check(epoch, lease=False)
-                    after_capture = self._fresh()
+                    after_capture = self._patiently(self._fresh, epoch)
                     if after_capture['settings']['paused']: raise FrequencyError('paused')
                     if self._lease is None or self._lease['deadline'] <= self._clock():
-                        self._acquire(after_capture, force=True)
+                        self._patiently(lambda: self._acquire(after_capture, force=True), epoch)
                         self._check(epoch)
                     return current, preview, after_capture
                 # Status, concession, source read and the post-read status share
@@ -1072,15 +1083,27 @@ class FrequencyRuntime:
                 except SessionError as error:
                     if str(error) != 'SOURCE_READ_FAILED': raise
                     reason = failure_reason(error)
-                    failed.append(source['name'])
-                    self._history.record('class-failed', code='SOURCE_READ_FAILED', label=source['name'], reason=reason,
-                                         read_ms=round((time.monotonic() - read_started) * 1000))
+                    read_ms = round((time.monotonic() - read_started) * 1000)
+                    second = source['class_id'] in retried
+                    if reason in RETRIED_REASONS and not second:
+                        retried[source['class_id']] = (reason, read_ms)
+                        queue.append((source, central))
+                    else:
+                        failed.append(source['name'])
+                        self._history.record('class-failed', code='SOURCE_READ_FAILED', label=source['name'], reason=reason,
+                                             read_ms=read_ms)
                     # Two diaries in a row: the Smecel itself is down, and the run stops as before.
-                    if last_failed:
+                    # The second reads at the end come one after another by design and never count.
+                    if last_failed and not second:
+                        for waiting, _ in queue:
+                            if waiting['class_id'] in retried:
+                                first_reason, first_ms = retried[waiting['class_id']]
+                                self._history.record('class-failed', code='SOURCE_READ_FAILED', label=waiting['name'],
+                                                     reason=first_reason, read_ms=first_ms)
                         stop = SessionError('SOURCE_READ_FAILED', 'two-in-a-row')
-                        stop.label = ', '.join(failed[-2:])
+                        stop.label = ', '.join([previous, source['name']])
                         raise stop from None
-                    last_failed = True
+                    if not second: last_failed, previous = True, source['name']
                     # A failed diary drops the session's class list (05/11/2026: so the next class
                     # always failed in 2 s and every run stopped). The list is read again, as at the
                     # start of the run; when even that fails, the Smecel is down and the run stops.
@@ -1182,6 +1205,16 @@ class FrequencyRuntime:
 
     def recent_history(self, limit=50):
         return self._history.recent(limit)
+
+    def _patiently(self, work, epoch):
+        """A status or concession request asked again after a network or Ecossistema blip
+        (10/11/2026: one unanswered status in the middle of a run stopped the whole run)."""
+        for attempt in range(3):
+            try: return work()
+            except (AccessDenied, FrequencyError) as error:
+                if getattr(error, 'code', None) not in TRANSIENT_CODES or attempt == 2: raise
+            if self._stop.wait(2 ** (attempt + 1)): raise FrequencyError('CANCELLED')
+            self._check(epoch, lease=False)
 
     def _receipt(self, payload):
         reply = self._request({'operation': 'receipt', 'academicYear': 2026, 'requestId': payload['requestId']})
@@ -1371,7 +1404,13 @@ class FrequencyRuntime:
         for attempt in range(3):
             self._check(epoch)
             if attempt:
-                result = self._receipt(payload)
+                # The receipt is asked again at the next attempt when the Ecossistema did not
+                # answer it either (10/11/2026: one blip in the middle of a run stopped it).
+                try: result = self._receipt(payload)
+                except (AccessDenied, FrequencyError) as error:
+                    if getattr(error, 'code', None) not in TRANSIENT_CODES or attempt == 2: raise
+                    if self._stop.wait(2 ** attempt): raise FrequencyError('CANCELLED')
+                    continue
                 if result is not None: break
                 if self._stop.wait(2 ** attempt): raise FrequencyError('CANCELLED')
             self._check(epoch)

@@ -225,6 +225,16 @@ class ReportRunTests(unittest.TestCase):
                          ['SOURCE_READ_FAILED'])
         self.assertEqual(self.sent('student-report-collect'), [])
 
+    def test_another_computer_with_the_concession_reads_it_and_this_one_reads_nothing(self):
+        # 10/11/2026: both computers read the Smecel at every time; the one without the concession
+        # threw it away and its history showed a run "interrupted before finishing".
+        self.provider.fail_lease = True
+        status = self.runtime.collect_report()
+        self.assertEqual(status['report']['code'], 'lease-busy')
+        self.assertEqual(self.reads, 0)
+        self.assertEqual(self.sent('student-report-collect'), [])
+        self.assertFalse(any(e['kind'].startswith('report-') for e in self.runtime.recent_history(20)))
+
     def test_save_report_agenda(self):
         agenda = {'timezone': 'America/Bahia', 'enabled': True, 'every': 30, 'from': '07:00', 'to': '17:00', 'weekdays': [1]}
         self.runtime.save_report_settings(0, agenda)

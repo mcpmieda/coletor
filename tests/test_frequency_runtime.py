@@ -775,7 +775,7 @@ class RuntimeTests(unittest.TestCase):
         names = self.several_classes(4, failing={'TURMA SINTÉTICA B'})
         self.runtime.collect()
         self.assertEqual(self.sent_classes(), [10, 12, 13])
-        self.assertEqual(self.session['catalogs'], 2)  # The start of the run, and after B.
+        self.assertEqual(self.session['catalogs'], 3)  # The start of the run, after B, after B's second read.
         history = list(reversed(self.runtime.recent_history(50)))
         failed = [e for e in history if e['kind'] == 'class-failed']
         self.assertEqual([(e['label'], e['reason']) for e in failed], [(names[1], 'smecel-timeout')])
@@ -796,6 +796,73 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.sent_classes(), [10])
         stop = next(e for e in self.runtime.recent_history(50) if e['kind'] == 'failure')
         self.assertEqual((stop['reason'], stop['label']), ('list-reload-failed', names[1]))
+
+    def test_a_slow_diary_is_read_again_at_the_end_of_the_run(self):
+        # 10/11/2026: one class a run waited 30 s for the Smecel, a different one each time.
+        slow = {'TURMA SINTÉTICA A'}
+        self.several_classes(3, failing=slow)
+        capture = self.source.operational_capture
+        def slow_once(class_id):
+            try: return capture(class_id)
+            except SessionError:
+                slow.clear()  # The Smecel answers the second time.
+                raise
+        self.source.operational_capture = slow_once
+        result = self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [11, 12, 10])
+        history = self.runtime.recent_history(50)
+        self.assertFalse(any(e['kind'] in {'class-failed', 'failure'} for e in history))
+        self.assertIsNone(next(e for e in history if e['kind'] == 'collection-finished').get('code'))
+        self.assertEqual(result['state'], 'ready')
+
+    def test_a_page_that_changed_is_not_read_again(self):
+        names = self.several_classes(3, failing=set())
+        capture = self.source.operational_capture
+        def changed(class_id):
+            if class_id == '13332':
+                self.source.reads += 1
+                raise SessionError('Página mudou', 'page-changed')
+            return capture(class_id)
+        self.source.operational_capture = changed
+        self.runtime.collect()
+        self.assertEqual(self.source.reads, 3)
+        self.assertEqual([e['label'] for e in self.runtime.recent_history(50) if e['kind'] == 'class-failed'], [names[1]])
+
+    def test_an_ecossistema_blip_in_the_middle_of_the_run_is_asked_again(self):
+        # 10/11/2026 13:19: one unanswered status before the 8C stopped the whole run.
+        self.several_classes(3, failing=set())
+        waits = []
+        self.runtime._stop.wait = lambda seconds: waits.append(seconds) or False
+        request, blips = self.provider.frequency_request, {'status': 0, 'receipt': 0}
+        def flaky(payload):
+            operation = payload['operation']
+            if operation in blips and blips[operation] == 0 and (operation == 'receipt' or self.provider.fence == 2):
+                blips[operation] += 1
+                raise FrequencyError('unavailable')
+            return request(payload)
+        self.provider.frequency_request = flaky
+        self.provider.fail_after_commit = True  # The first send needs its receipt, unanswered once.
+        result = self.runtime.collect()
+        self.assertEqual(blips, {'status': 1, 'receipt': 1})
+        self.assertEqual(self.sent_classes(), [10, 11, 12])
+        self.assertEqual(len(set(self.sent_classes())), 3)
+        self.assertFalse(any(e['kind'] == 'failure' for e in self.runtime.recent_history(50)))
+        self.assertEqual(result['state'], 'ready')
+        self.assertTrue(waits)
+
+    def test_a_lasting_outage_still_stops_the_run(self):
+        self.several_classes(3, failing=set())
+        self.runtime._stop.wait = lambda seconds: False
+        request = self.provider.frequency_request
+        def down(payload):
+            if payload['operation'] == 'status' and self.provider.fence >= 1: raise FrequencyError('unavailable')
+            return request(payload)
+        self.provider.frequency_request = down
+        self.runtime.collect()
+        self.assertEqual(self.sent_classes(), [])
+        history = self.runtime.recent_history(50)
+        self.assertEqual([e['code'] for e in history if e['kind'] == 'failure'], ['unavailable'])
+        self.assertFalse(any(e['kind'] == 'collection-finished' for e in history))
 
     def test_unreadable_diaries_apart_are_each_skipped(self):
         self.several_classes(5, failing={'TURMA SINTÉTICA B', 'TURMA SINTÉTICA D'})
