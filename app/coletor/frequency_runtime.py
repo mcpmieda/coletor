@@ -349,11 +349,20 @@ class FrequencyRuntime:
             raise FrequencyError('unavailable')
         return reply
 
+    def _status_request(self, payload):
+        # The status only reads: outside a bracket it reuses a recent online check (issue #1426, 6).
+        if getattr(self._bracket, 'active', False):
+            return self._provider.frequency_request(payload)
+        light = getattr(self._access, 'run_light', None)
+        if light is None:
+            return self._request(payload)
+        return light(lambda: self._provider.frequency_request(payload))
+
     def _fresh(self):
         # A server timestamp is generated after the local request begins. Using
         # this earlier local bound never overstates an existing lease deadline.
         requested_at = self._clock()
-        value = self._request({'operation': 'status', 'academicYear': 2026})
+        value = self._status_request({'operation': 'status', 'academicYear': 2026})
         try:
             if (value['contractVersion'] != 2 or value['state'] != 'ready' or value['academicYear'] != 2026
                     or not isinstance(value['classes'], list) or not isinstance(value['settings'], dict)):

@@ -50,6 +50,36 @@ class Provider:
 
 
 class InstitutionalAccessTests(unittest.TestCase):
+    def test_light_status_reuses_a_recent_check_and_a_refusal_runs_the_full_check(self):
+        # Issue #1426, 6: the 30 s status costs the signed request only, while the check is recent.
+        ticks = iter([0, 0, 30, 30])
+        locked = []
+        provider = Provider([response(), AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: next(ticks),
+                                   on_locked=lambda: locked.append(True))
+        self.assertEqual(gate.run_light(lambda: 'status'), 'status')
+        self.assertEqual(gate.run_light(lambda: 'status'), 'status')
+        self.assertEqual(provider.reads, 1)
+
+        def refused():
+            raise AccessDenied('not-authorized')
+        with self.assertRaises(AccessDenied):
+            gate.run_light(refused)
+        self.assertEqual(provider.reads, 2)
+        self.assertEqual(locked, [True])
+
+    def test_light_status_checks_online_again_once_the_proof_is_old(self):
+        provider = Provider([response(), response()])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=polls_apart())
+        gate.run_light(lambda: 'status')
+        gate.run_light(lambda: 'status')
+        self.assertEqual(provider.reads, 1)
+        gate = InstitutionalAccess(Provider([response(), response()]), clock=lambda: NOW,
+                                   monotonic=itertools.count(0, 301).__next__)
+        gate.run_light(lambda: 'status')
+        gate.run_light(lambda: 'status')
+        self.assertEqual(gate._provider.reads, 2)
+
     def test_no_provider_never_runs_command_or_claims_ready(self):
         calls = []
         gate = InstitutionalAccess(on_locked=lambda: calls.append('locked'))
