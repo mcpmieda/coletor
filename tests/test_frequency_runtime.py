@@ -978,6 +978,36 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.tick.assert_called_once()
         self.assertEqual(self.runtime._last_tick, NOW)
 
+    def test_quiet_away_from_the_agenda(self):
+        # Issue #1426, 6B: away from the agenda the 30 s check waits for the 15 min refresh.
+        agenda = schedule()
+        weekday = (datetime.fromtimestamp(NOW, frequency_runtime.ZoneInfo('America/Bahia')).weekday() + 1) % 7
+        wall = datetime.fromtimestamp(NOW + 3 * 3600, frequency_runtime.ZoneInfo('America/Bahia')).strftime('%H:%M')
+        rule = next(r for r in agenda['rules'] if r['weekday'] == weekday and r['shift'] == 'matutino')
+        rule.update(enabled=True, times=[wall])
+        self.runtime._status = {'settings': {'schedule': agenda, 'reportSchedule': None}}
+        self.runtime._status_at = NOW
+        self.assertTrue(self.runtime._quiet(NOW + 60))
+        # The refresh is due: one check, however far the agenda is.
+        self.assertFalse(self.runtime._quiet(NOW + frequency_runtime.QUIET_REFRESH_SECONDS))
+        # Ten minutes before a time, and five after it, every 30 s again.
+        self.runtime._status_at = NOW + 3 * 3600 - 700
+        self.assertTrue(self.runtime._quiet(NOW + 3 * 3600 - 610))
+        self.assertFalse(self.runtime._quiet(NOW + 3 * 3600 - 590))
+        self.assertFalse(self.runtime._quiet(NOW + 3 * 3600 + 290))
+        # A report time counts as much as a collection time.
+        report = {'timezone': 'America/Bahia', 'enabled': True, 'every': 30, 'from': wall, 'to': wall, 'weekdays': [weekday]}
+        self.assertTrue(frequency_runtime.agenda_near(None, report, NOW + 3 * 3600 - 60))
+        self.assertFalse(frequency_runtime.agenda_near(None, report, NOW))
+        # Something waiting (a slot that found a run going on) never waits for the refresh.
+        self.runtime._status_at = NOW
+        self.runtime._pending_slots = {('2026-01-01', 'matutino', wall)}
+        self.assertFalse(self.runtime._quiet(NOW + 60))
+        self.runtime._pending_slots = set()
+        # No answer yet: check at once.
+        self.runtime._status = None
+        self.assertFalse(self.runtime._quiet(NOW + 60))
+
     def test_heterogeneous_editor_fixture_preserves_scheduled_shift_scope(self):
         value = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/agenda-heterogeneous.json').read_text())
         self.provider.shared_schedule = validate_schedule(value)

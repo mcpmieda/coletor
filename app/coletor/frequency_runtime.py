@@ -55,6 +55,13 @@ SCHEDULE_READ_SECONDS = 3600
 # new ones is sent again (same rows) until it is applied, at most this many times per run.
 REPORT_SENDS = 10
 REPORT_KEYS = {'timezone', 'enabled', 'every', 'from', 'to', 'weekdays'}
+# Away from the agenda the collector stays quiet (owner request 14/11/2026, issue #1426, 6B): the 30 s
+# check runs only from AGENDA_LEAD_SECONDS before a collection or report time until AGENDA_TAIL_SECONDS
+# after it; otherwise the Ecossistema is asked only every QUIET_REFRESH_SECONDS, enough to learn an
+# edited agenda or a school pause. The ADM uses the same numbers (attendance/agenda-quiet-v2.ts).
+AGENDA_LEAD_SECONDS = 600
+AGENDA_TAIL_SECONDS = 300
+QUIET_REFRESH_SECONDS = 900
 
 
 def discard_confirmation():
@@ -134,6 +141,31 @@ def report_times(schedule):
     start = int(schedule['from'][:2]) * 60 + int(schedule['from'][3:])
     end = int(schedule['to'][:2]) * 60 + int(schedule['to'][3:])
     return [f'{m // 60:02d}:{m % 60:02d}' for m in range(start, end + 1, schedule['every'])]
+
+
+def _agenda_times(schedule, report_schedule):
+    """(zone, {weekday: times}) of every collection, recheck and report time (0 = Sunday)."""
+    for agenda in (schedule, report_schedule):
+        if not agenda: continue
+        days = {}
+        if agenda is schedule:
+            for r in agenda['rules']:
+                if r['enabled']: days.setdefault(r['weekday'], []).extend([*r['times'], *([r['recheck']] if r['recheck'] else [])])
+        else:
+            for d in agenda['weekdays']: days.setdefault(d, []).extend(report_times(agenda))
+        yield ZoneInfo(agenda['timezone']), days
+
+
+def agenda_near(schedule, report_schedule, now_ts):
+    """True from AGENDA_LEAD_SECONDS before a collection or report time until AGENDA_TAIL_SECONDS after it."""
+    for zone, days in _agenda_times(schedule, report_schedule):
+        today = datetime.fromtimestamp(now_ts, zone).date()
+        for offset in (-1, 0, 1):
+            day = today + timedelta(days=offset)
+            for wall in days.get((day.weekday() + 1) % 7, ()):
+                at = datetime(day.year, day.month, day.day, int(wall[:2]), int(wall[3:]), tzinfo=zone).timestamp()
+                if -AGENDA_TAIL_SECONDS <= at - now_ts <= AGENDA_LEAD_SECONDS: return True
+    return False
 
 
 def report_hash(rows):
@@ -320,6 +352,7 @@ class FrequencyRuntime:
         self._report_paused = False
         self._report_fired, self._report_pending, self._last_report_schedule = set(), None, None
         self._last_tick = 0
+        self._status_at = None  # When the Ecossistema last answered a status (local clock).
         self._thread = None
         self._stop = threading.Event()
         self._on_started, self._on_finished = on_started, on_finished
@@ -392,6 +425,7 @@ class FrequencyRuntime:
         self._bind_storage()
         with self._lock:
             self._status = value
+            self._status_at = received_at
             self._school_paused = value['settings']['paused']
             # A run's own status checks keep the report's agenda current for a time that comes meanwhile.
             self._last_report_schedule = value['settings'].get('reportSchedule')
@@ -441,9 +475,21 @@ class FrequencyRuntime:
             # Clock corrections must not suspend collection checks until the
             # old wall-clock time is reached again. _fired still blocks repeats.
             if 0 <= elapsed < 30: continue
+            if self._quiet(now): continue
             self._last_tick = now
             try: self.tick()
             except Exception as error: self._error(error)
+
+    def _quiet(self, now):
+        """No check this time: away from the agenda, with a recent answer and nothing waiting."""
+        with self._lock:
+            status, answered = self._status, self._status_at
+            waiting = (self._pending_slots or self._login_retry is not None or self._login_missed
+                       or self._standby is not None or self._report_pending is not None)
+        if status is None or answered is None or waiting or self._operation.locked(): return False
+        if not 0 <= now - answered < QUIET_REFRESH_SECONDS: return False
+        try: return not agenda_near(status['settings']['schedule'], status['settings'].get('reportSchedule'), now)
+        except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError): return False
 
     @staticmethod
     def _state_for(code):
