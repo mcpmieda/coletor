@@ -100,6 +100,11 @@ def validate_authorization(response, now):
 # Reads (status/UI polling) may reuse a grant confirmed online this recently.
 # Commands never do: run() always waits for a request sent after it started.
 STATUS_REUSE_SECONDS = 5.0
+# A status read the server authorizes by itself (signed device request): the online check is
+# reused for this long (issue #1426, 6). A refusal runs the full check at once.
+LIGHT_REUSE_SECONDS = 300.0
+# Server answers that mean the device or the account lost its access.
+ACCESS_REFUSALS = frozenset({'not-authorized', 'ACCESS_REQUIRED'})
 
 
 class _Flight:
@@ -181,23 +186,24 @@ class InstitutionalAccess:
                     raise AccessDenied(flight.code)
                 return flight.proof
 
-    def _reusable(self, generation):
+    def _reusable(self, generation, window=None):
         with self._lock:
             confirmed = self._confirmed
             if confirmed is None or confirmed[0] != generation:
                 return None
             age = self._monotonic() - confirmed[2]
             proof = confirmed[1]
-        if 0 <= age <= self._status_reuse_seconds and proof.expires_at > self._clock():
+        limit = self._status_reuse_seconds if window is None else window
+        if 0 <= age <= limit and proof.expires_at > self._clock():
             return proof
         return None
 
-    def _verify(self, generation, reuse=False):
+    def _verify(self, generation, reuse=False, window=None):
         if self._cleanup_pending:
             self._invalidate("ACCESS_CLEANUP_PENDING")
             raise AccessDenied("ACCESS_CLEANUP_PENDING")
         if reuse:
-            proof = self._reusable(generation)
+            proof = self._reusable(generation, window)
             if proof is not None:
                 return proof
         proof = self._online(fresh=not reuse)
@@ -252,6 +258,29 @@ class InstitutionalAccess:
         after = self._verify(generation)
         if before.identity_key != after.identity_key:
             self._invalidate()
+            raise AccessDenied()
+        return result
+
+    def run_light(self, work: Callable[[], T]) -> T:
+        """A read the server authorizes by itself, such as the 30 s status (issue #1426, 6).
+
+        The signed device request is checked by the server on its own (nonce, signature, the
+        directory evidence and the device lock), so the online check before and after it is
+        reused while recent instead of costing four more requests on every tick. A refusal
+        runs the full check right away, which fences and cleans up exactly as run() does.
+        """
+        with self._lock:
+            generation = self._generation
+        self._verify(generation, reuse=True, window=LIGHT_REUSE_SECONDS)
+        try:
+            result = work()
+        except AccessDenied as error:
+            if getattr(error, "code", None) in ACCESS_REFUSALS:
+                self._verify(generation)
+            raise
+        with self._lock:
+            current = generation == self._generation
+        if not current:
             raise AccessDenied()
         return result
 
