@@ -79,7 +79,7 @@ class LocalSettingsTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), raw)
                 self.store.update("theme", "light")
                 self.assertEqual(LocalSettings(self.directory).read()["settings"]["theme"], "light")
-                self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json", "settings.lock"])
+                self.assertEqual(sorted(p.name for p in self.directory.iterdir()), ["settings.json", "settings.lock"])
 
     def test_atomic_replace_failure_keeps_original_and_cleans_temp(self):
         self.store.update("theme", "dark")
@@ -88,7 +88,7 @@ class LocalSettingsTests(unittest.TestCase):
         with patch("coletor.local_settings.os.replace", side_effect=OSError("DO_NOT_ECHO")):
             with self.assertRaises(OSError): self.store.update("theme", "light")
         self.assertEqual(path.read_bytes(), before)
-        self.assertEqual([p.name for p in self.directory.iterdir()], ["settings.json", "settings.lock"])
+        self.assertEqual(sorted(p.name for p in self.directory.iterdir()), ["settings.json", "settings.lock"])
 
     def test_other_application_files_remain_unchanged(self):
         other = self.root / "Atualizador de Planilhas"
