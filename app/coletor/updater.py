@@ -23,7 +23,14 @@ from urllib.parse import quote, urljoin, urlsplit
 REPOSITORY = 'mcpmieda/coletor'
 MANIFEST_NAME = 'atualizacao.json'
 MANIFEST_URL = f'https://github.com/{REPOSITORY}/releases/latest/download/{MANIFEST_NAME}'
-ALLOWED_HOSTS = frozenset({'github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'})
+ALLOWED_HOSTS = frozenset({'github.com', 'api.github.com', 'release-assets.githubusercontent.com',
+                           'objects.githubusercontent.com'})
+# Only .github/workflows/publish-installer.yml writes Releases with this identity: main needs a reviewed
+# PR, and the repository's other workflows get read-only tokens. A Release made or changed by anyone
+# else (a person, another installed GitHub App) is never installed (owner request 15/11/2026).
+PUBLISHER = 'github-actions[bot]'
+RELEASE_URL = f'https://api.github.com/repos/{REPOSITORY}/releases/tags/v{{version}}'
+RELEASE_LIMIT = 256 * 1024
 MANIFEST_LIMIT = 4096
 SETUP_MINIMUM = 1_000_000
 SETUP_LIMIT = 300 * 1024 * 1024
@@ -85,6 +92,25 @@ def read_manifest(data):
             or not SETUP_MINIMUM <= value['tamanho'] <= SETUP_LIMIT):
         raise UpdateError('bad-manifest')
     return value
+
+
+def check_publisher(data, manifest):
+    """The Release of this version was made, and its two files uploaded, by the publishing workflow."""
+    try: release = json.loads(data.decode('utf-8'))
+    except (UnicodeDecodeError, ValueError): raise UpdateError('bad-release') from None
+    if not isinstance(release, dict) or release.get('tag_name') != f"v{manifest['versao']}" or release.get('draft') is not False:
+        raise UpdateError('bad-release')
+    if not isinstance(release.get('author'), dict) or release['author'].get('login') != PUBLISHER:
+        raise UpdateError('untrusted-release')
+    assets = release.get('assets')
+    if not isinstance(assets, list): raise UpdateError('bad-release')
+    found = {a.get('name'): a for a in assets if isinstance(a, dict)}
+    for name in (manifest['arquivo'], MANIFEST_NAME):
+        asset = found.get(name)
+        if asset is None or asset.get('state') != 'uploaded': raise UpdateError('bad-release')
+        if not isinstance(asset.get('uploader'), dict) or asset['uploader'].get('login') != PUBLISHER:
+            raise UpdateError('untrusted-release')
+    if found[manifest['arquivo']].get('size') != manifest['tamanho']: raise UpdateError('bad-release')
 
 
 def _connect(host):
@@ -375,6 +401,7 @@ class Updater:
             self._attempts.clear()
             return False
         if not self._attempts.allowed(version): raise UpdateError('waiting-after-failed-install')
+        check_publisher(self._fetch(RELEASE_URL.format(version=version), RELEASE_LIMIT), manifest)
         remove_other_setups(self._folder, keep=manifest['arquivo'])
         if not self._space(self._folder, manifest['tamanho']): raise UpdateError('disk-full')
         setup = self._download(manifest, self._folder)

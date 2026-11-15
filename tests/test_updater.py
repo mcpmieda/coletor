@@ -31,6 +31,35 @@ def manifest_for(version, raw):
             'sha256': hashlib.sha256(raw).hexdigest(), 'tamanho': len(raw)}
 
 
+def release_for(manifest, author=updater.PUBLISHER, uploader=updater.PUBLISHER, draft=False):
+    asset = lambda name, size: {'name': name, 'state': 'uploaded', 'size': size, 'uploader': {'login': uploader}}
+    return {'tag_name': f"v{manifest['versao']}", 'draft': draft, 'author': {'login': author},
+            'assets': [asset(manifest['arquivo'], manifest['tamanho']), asset(manifest['arquivo'] + '.sha256', 90),
+                       asset(updater.MANIFEST_NAME, 150)]}
+
+
+class PublisherTests(unittest.TestCase):
+    def test_only_releases_made_and_uploaded_by_the_publishing_workflow(self):
+        manifest = manifest_for('0.4.330', setup_bytes())
+        check = lambda release: updater.check_publisher(json.dumps(release).encode(), manifest)
+        check(release_for(manifest))
+        for release, code in ((release_for(manifest, author='someone'), 'untrusted-release'),
+                              (release_for(manifest, uploader='coderabbitai[bot]'), 'untrusted-release'),
+                              (release_for(manifest, draft=True), 'bad-release'),
+                              ({**release_for(manifest), 'tag_name': 'v0.4.331'}, 'bad-release')):
+            with self.subTest(code=code), self.assertRaisesRegex(updater.UpdateError, code):
+                check(release)
+        replaced = release_for(manifest)
+        replaced['assets'][0]['size'] += 1
+        with self.assertRaisesRegex(updater.UpdateError, 'bad-release'):
+            check(replaced)
+        missing = release_for(manifest)
+        missing['assets'] = missing['assets'][:2]
+        with self.assertRaisesRegex(updater.UpdateError, 'bad-release'):
+            check(missing)
+        self.assertIn('api.github.com', updater.ALLOWED_HOSTS)
+
+
 class Response:
     def __init__(self, status, body=b'', location=None):
         self.status, self._body, self._location = status, body, location
@@ -153,7 +182,9 @@ class UpdaterTests(unittest.TestCase):
         return updater.Updater(current, self.install / 'programa', self.settings, safe_now=safe,
                                launch=self.launched.append, download=download, power=power, space=space,
                                clock=clock, clear_resume=lambda: None,
-                               fetch=lambda url: json.dumps(manifest_for(latest, self.raw)).encode())
+                               fetch=lambda url, limit=None: json.dumps(
+                                   release_for(manifest_for(latest, self.raw)) if 'api.github.com' in url
+                                   else manifest_for(latest, self.raw)).encode())
 
     def test_only_an_installed_ci_build_updates_itself(self):
         self.assertTrue(self.make().enabled())
