@@ -1622,6 +1622,22 @@ class FrequencyRuntime:
         with self._lock: self._code = None
         return self.public_status()
 
+    def update_allowed(self, now=None, *, collecting=False):
+        """An automatic update may start: nothing running, waiting or due on the agenda soon.
+
+        collecting: this computer's collection is left active. Then the agenda must be known (an
+        Ecossistema answer in this opening) before anything is allowed."""
+        now = self._clock() if now is None else now
+        with self._lock:
+            status, busy = self._status, (self._exiting or self._preparing or self._report['running']
+                                          or self._report['preparing'] or self._pending_slots
+                                          or self._login_retry is not None or self._standby is not None
+                                          or self._report_pending is not None)
+        if busy or self._operation.locked(): return False
+        if status is None: return not collecting
+        try: return not agenda_near(status['settings']['schedule'], status['settings'].get('reportSchedule'), now)
+        except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError): return False
+
     def finish_for_exit(self, timeout):
         """Update request: start no new collection and wait for the one in flight.
 

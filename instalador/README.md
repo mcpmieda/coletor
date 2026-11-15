@@ -1,22 +1,16 @@
-# Instaladores Windows — cinco últimas versões
+# Instalador do Coletor
 
-Esta pasta mantém os **cinco instaladores .exe mais recentes aprovados pelos testes Windows** após novas integrações na branch main. O processo começa a funcionar quando o workflow da PR #7 for integrado. Cada instalador se chama `COLETOR v<versão>.exe` (por exemplo, `COLETOR v0.4.286.exe`); o último número da versão é o build. O commit e a execução de CI de cada um ficam no versoes.json. Instaladores antigos com o nome longo (`ColetorFrequencia-v…-build…-windows-x64-setup.exe`) continuam na pasta até saírem das cinco versões mantidas.
+Os instaladores ficam nas **[Releases do GitHub](https://github.com/mcpmieda/coletor/releases/latest)**, não no repositório (decisão de 15/11/2026: o Git LFS guardava cada versão para sempre e ocupava a cota da conta).
 
-- **Baixar:** abra o arquivo .exe nesta pasta pelo GitHub, usando a opção de baixar o arquivo completo. Ele é armazenado no **Git LFS**, não como código de texto. Ao clonar o repositório, instale Git LFS e execute git lfs pull para obter os executáveis. Não tente executar um arquivo de ponteiro LFS.
-- **Verificar:** cada .exe possui um arquivo .exe.sha256. O versoes.json registra nome, versão, hash SHA-256, commit original e execução de CI.
-- **Retenção:** ao publicar a sexta versão validada, a mais antiga deixa de aparecer nesta pasta, mas seus dados históricos podem continuar contabilizados no Git LFS. A remoção da pasta **não equivale à eliminação do histórico de armazenamento LFS**.
-- **Segurança:** somente o job Windows do workflow Preview checks aprovado na main autoriza a publicação. O empacotamento usa o instalador Inno Setup real e o teste de instalação/desinstalação no Windows. O publicador nunca executa o .exe recebido.
-- **Compatibilidade:** instalador Windows x64, instalado por usuário, com Windows 10 ou superior e os pré-requisitos especificados em docs/WINDOWS_INSTALLER.md (WebView2, Edge e .NET Framework 4.8). A validação automatizada não substitui a homologação com a conta Microsoft, o Smecel e PCs físicos da escola.
-- **Assinatura:** o script de compilação assina o .exe apenas se os segredos de assinatura estiverem configurados. Sem eles, o instalador continuará sendo um executável Windows válido, mas pode exibir avisos do SmartScreen; não declarar a assinatura como concluída nesses casos.
+- **Baixar:** abra `baixar-instalador.cmd` nesta pasta. Ele baixa a versão mais nova, confere o SHA-256 e abre o instalador. Pelo navegador, use o link acima e baixe `COLETOR-v<versão>.exe`.
+- **Atualização automática:** um Coletor instalado confere as Releases ao abrir e a cada 6 horas. Quando há versão nova, ele baixa, confere tamanho, SHA-256 e cabeçalho do arquivo e instala em silêncio só quando nenhuma coleta ou relatório está em andamento ou próximo na agenda e o notebook não está com bateria abaixo de 40%. O instalador fecha o Coletor (terminando a coleta em andamento) e o reabre ao lado do relógio.
+- **Computador desligado no meio:** antes de instalar, o Coletor pede ao Windows para rodar o mesmo instalador no próximo login (RunOnce). A instalação concluída apaga esse pedido; uma interrompida é refeita no próximo login e reabre o Coletor. As configurações, a fila cifrada e a chave do computador ficam em `%LOCALAPPDATA%\ColetorFrequenciaSmecel` e o instalador não mexe nelas.
+- **Quem pode publicar:** o Coletor só instala uma Release criada, e com o instalador e o `atualizacao.json` enviados, pelo robô do GitHub Actions (`github-actions[bot]`), ou seja, pelo workflow de publicação depois de um PR revisado na `main`. Uma Release feita ou alterada por uma pessoa ou por outro app conectado ao GitHub é ignorada.
+- **Instalação que falha:** o Coletor é reaberto como estava e a mesma versão é tentada de novo no dia seguinte, no máximo 3 vezes. O resultado da última verificação fica em `%LOCALAPPDATA%\ColetorFrequenciaSmecel\atualizacao\estado.json` e o log do instalador em `instalacao.log`, na mesma pasta.
+- **Quando sai uma versão nova:** só mudanças no programa (`app/`, `ui/`, `installer/` e arquivos do build) geram Release. Documentação e testes não fazem os computadores reinstalarem. Para desfazer uma versão ruim, publique uma correção (ou a reversão) na `main`: instalar à mão uma versão antiga não adianta, porque o Coletor volta para a mais nova.
+- **Primeira vez:** versões até 0.4.329 não se atualizam sozinhas. Instale à mão uma vez a primeira versão com atualização automática; as seguintes chegam sozinhas.
+- **Publicação:** só o instalador aprovado no job Windows do workflow Preview checks na `main` vira Release (`v<versão>`, com o `.exe`, o `.sha256` e o `atualizacao.json`). São mantidas as cinco Releases mais recentes. O publicador nunca executa o `.exe`.
+- **Compatibilidade:** Windows 10 ou superior, x64, instalado por usuário, sem administrador; pré-requisitos em `docs/WINDOWS_INSTALLER.md` (WebView2, Edge e .NET Framework 4.8).
+- **Assinatura:** o instalador não tem assinatura digital paga; o SmartScreen pode avisar quando ele é baixado pelo navegador.
 
-O publicador **não executa push direto na `main`**, nem pula checks. A atualização da pasta ocorre por PR de arquivo versionado em Git LFS e depende da proteção de branch. A aprovação automatizada em CI não dispensa as permissões necessárias para integrá-la.
-
-Documentação complementar: docs/WINDOWS_INSTALLER.md.
-
-## Branch protegida e cinco versões
-
-**Esta pasta é o único lugar onde o instalador é publicado** (não há mais GitHub Releases). Após o CI Windows aprovado na `main`, o publicador grava o `.exe` e o `.sha256` aqui (Git LFS) numa PR da branch `automation/instalador-run-<id>`. No mesmo job, ele aprova a execução de checks dessa PR (a PR foi aberta pelo robô do Actions, por isso os checks ficam aguardando aprovação), espera `verify` e `windows-portable` passarem, confere que a PR só altera `instalador/` e a integra. A proteção da `main` continua valendo. Merges que alteram apenas `instalador/` não geram outro build.
-
-**Permissão do GitHub Actions:** precisa estar ativo **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**. Se algo impedir a atualização, o publicador **falha explicitamente**: `ARCHIVE_PR_NOT_CREATED` (não abriu a PR; o instalador fica na branch `automation/instalador-run-<id>`), `ARCHIVE_CHECKS_NOT_STARTED` ou `ARCHIVE_PR_NOT_MERGED` (a PR fica aberta). Não desative a proteção da `main` para contornar.
-
-**Como recuperar a pasta:** um mantenedor pode integrar a PR `automation/instalador-run-<id>` pendente depois dos dois checks. Não execute um ponteiro LFS de 133 bytes como instalador.
+Instaladores antigos continuam no histórico do Git LFS e não podem ser apagados um a um; só deixam de crescer.

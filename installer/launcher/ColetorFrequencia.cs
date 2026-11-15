@@ -60,10 +60,28 @@ static class Launcher
         return text.Append('\\', slashes * 2).Append('"').ToString();
     }
 
+    // Same names as app/coletor/updater.py and installer/Coletor.iss: an automatic update cut short
+    // (the computer turned off) is run again by Windows at sign-in; that installer reopens the Coletor.
+    const string RunOnceKey = @"Software\Microsoft\Windows\CurrentVersion\RunOnce";
+    const string ResumeValue = "!ColetorAtualizacao";
+
+    static bool UpdateResuming()
+    {
+        try
+        {
+            using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunOnceKey))
+                return key != null && key.GetValue(ResumeValue) != null;
+        }
+        catch { return false; }
+    }
+
     [STAThread]
     static int Main(string[] args)
     {
         bool background = Array.Exists(args, arg => String.Equals(arg, "--background", StringComparison.Ordinal));
+        // The sign-in start must not open the program from a folder the resumed installer is replacing.
+        // Opened by a person, it always starts.
+        if (background && UpdateResuming()) return 0;
         string folder = AppDomain.CurrentDomain.BaseDirectory;
         string runtime = Path.Combine(folder, "pythonw.exe");
         if (!File.Exists(runtime)) return Failed("runtime-missing", 2, background);

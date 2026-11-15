@@ -32,6 +32,9 @@ ChangesEnvironment=no
 DisableReadyPage=no
 DisableDirPage=auto
 UsePreviousAppDir=yes
+; One installer at a time: the Coletor's automatic update and a manual one never overlap.
+; Same name as INSTALLER_MUTEX in app/coletor/updater.py.
+SetupMutex=EcossistemaEscolar.ColetorFrequencia.Instalador
 SetupLogging=no
 UninstallLogMode=append
 
@@ -76,9 +79,15 @@ const
   // Versions up to 0.4.245 have no quit event: they are stopped after this.
   LegacyWaitSeconds = 5;
   EVENT_MODIFY_STATE = $0002;
+  // Same names as app/coletor/updater.py: before an automatic update the Coletor asks Windows to
+  // run this installer again at the next sign-in (RunOnce). A finished installation deletes it, so
+  // only one cut short (the computer turned off) runs again, and reopens the Coletor (/REABRIR=1).
+  RunOnceKey = 'Software\Microsoft\Windows\CurrentVersion\RunOnce';
+  ResumeValue = '!ColetorAtualizacao';
 
 var
   CollectorWasRunning: Boolean;
+  Installed: Boolean;
 
 function OpenEvent(Access: DWORD; Inherit: BOOL; Name: String): THandle;
   external 'OpenEventW@kernel32.dll stdcall';
@@ -265,7 +274,23 @@ begin
   if CurStep = ssPostInstall then
   begin
     if WizardIsTaskSelected('autostart') then RegisterLogonTask() else DeleteLogonTask();
-    if CollectorWasRunning then ReopenCollector();
+    RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
+    Installed := True;
+    if CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1') then ReopenCollector();
+  end;
+end;
+
+// An installation that stopped after closing the Coletor (a locked file, a full disk) must not
+// leave it closed: the Coletor already present opens again; its update retries on another day.
+procedure DeinitializeSetup();
+begin
+  if Installed or IsUninstaller then exit;
+  if not (CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1')) then exit;
+  RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
+  try
+    if FileExists(ExpandConstant('{app}\programa\ColetorFrequencia.exe')) then ReopenCollector();
+  except
+    Log('Coletor could not be reopened after a failed installation: ' + GetExceptionMessage);
   end;
 end;
 
@@ -276,6 +301,7 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     DeleteLogonTask();
+    RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
     Error := CloseCollector(ExpandConstant('{app}'), nil);
     if Error <> '' then Log(Error);
   end;

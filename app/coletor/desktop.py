@@ -1,6 +1,7 @@
 """Windows desktop entry point, based on the Atualizador's Python/webview pattern.
 
-No installer, scheduled task, persistent browser profile or login is created.
+No scheduled task, persistent browser profile or login is created here. An installed copy
+checks the repository's Releases and updates itself (updater.py).
 The trusted local UI is the only page ever loaded into the privileged webview.
 """
 from pathlib import Path
@@ -106,6 +107,10 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     geometry = centered_window_geometry(primary_work_area())
     window = webview.create_window(f"Coletor · {__version__}", str(entry) + "#coletor-desktop", js_api=api,
                           **geometry, background_color="#faf7f8", text_select=True)
+    from .local_settings import user_settings_directory
+    from .updater import Updater
+    updater = Updater(__version__, ROOT, settings_directory or user_settings_directory(),
+                      safe_now=lambda: api._collector.update_allowed(collecting=api._resume.active()))
     quit_requests = QuitRequests()
     ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).
     quit_requests.listen(lambda: quit_for_update(window, api, ready=ready))
@@ -134,11 +139,13 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
             # Opened with Windows: stay beside the clock; the fox opens the window.
             if api._tray is None or "error" in tray.hide(): window.minimize()
         api._start_resume()
+        updater.start()
         if callback: callback(window)
 
     try:
         webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)
     finally:
+        updater.stop()
         try:
             api._collector.shutdown()
         finally:
