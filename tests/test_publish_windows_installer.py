@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from scripts.publish_windows_installer import stage_release
+from scripts.publish_windows_installer import publish_decision, stage_release
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,13 +87,33 @@ class PublishInstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'output-must-be-empty'):
             self.run_stage()
 
+    def test_only_a_program_change_becomes_a_release(self):
+        decide = publish_decision
+        # First Release; then nothing new in the program; then a docs-only commit after an app change.
+        self.assertEqual(decide(newer_head_changes=[], since_release_changes=None), 'publish')
+        self.assertEqual(decide(newer_head_changes=[], since_release_changes=['docs/X.md', 'tests/test_x.py',
+                                                                              '.github/workflows/checks.yml']),
+                         'program-unchanged')
+        for path in ('app/coletor/updater.py', 'ui/src/App.tsx', 'installer/Coletor.iss',
+                     'scripts/build_windows_portable.py', 'requirements-windows-portable.txt',
+                     'docs/PORTABLE_LEIA_ME.txt'):
+            self.assertEqual(decide(newer_head_changes=[], since_release_changes=['README.md', path]), 'publish')
+        # A newer commit already on main: its own run publishes if it changes the program...
+        self.assertEqual(decide(newer_head_changes=['app/coletor/desktop.py'], since_release_changes=['app/x.py']),
+                         'newer-build-follows')
+        # ...and if it only changes docs or the installer page, this run's program is not lost.
+        self.assertEqual(decide(newer_head_changes=['instalador/README.md'], since_release_changes=['app/x.py']),
+                         'publish')
+
     def test_workflow_publishes_releases_not_repository_files(self):
         workflow = (ROOT / '.github/workflows/publish-installer.yml').read_text('utf8')
         for text in ('gh release create', '--latest', '--cleanup-tag', 'tail -n +6', 'sort -V'):
             self.assertIn(text, workflow)
         for text in ('git push', 'gh pr create', 'gh pr merge', 'git lfs', 'pull-requests: write'):
             self.assertNotIn(text, workflow)
-        self.assertIn('Installer publisher maintenance only', workflow)
+        self.assertIn('publish_windows_installer.py decide', workflow)
+        self.assertIn('isDraft', workflow)
+        self.assertIn('fetch-depth: 0', workflow)
         self.assertNotIn('instalador/*.exe', (ROOT / '.gitattributes').read_text('utf8'))
         self.assertEqual(list((ROOT / 'instalador').glob('*.sha256')), [])
         self.assertFalse((ROOT / 'instalador/versoes.json').exists())

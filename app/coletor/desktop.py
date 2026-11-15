@@ -110,7 +110,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     from .local_settings import user_settings_directory
     from .updater import Updater
     updater = Updater(__version__, ROOT, settings_directory or user_settings_directory(),
-                      safe_now=api._collector.update_allowed)
+                      safe_now=lambda: api._collector.update_allowed(collecting=api._resume.active()))
     quit_requests = QuitRequests()
     ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).
     quit_requests.listen(lambda: quit_for_update(window, api, ready=ready))

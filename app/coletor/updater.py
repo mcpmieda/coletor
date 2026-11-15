@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import subprocess
 import threading
+import time
 from urllib.parse import quote, urljoin, urlsplit
 
 REPOSITORY = 'mcpmieda/coletor'
@@ -39,6 +40,13 @@ SETUP_ARGUMENTS = ('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL'
 RESUME_ARGUMENT = '/REABRIR=1'
 RUN_ONCE_KEY = r'Software\Microsoft\Windows\CurrentVersion\RunOnce'
 RESUME_VALUE = '!ColetorAtualizacao'
+INSTALLER_MUTEX = 'EcossistemaEscolar.ColetorFrequencia.Instalador'
+SYNCHRONIZE = 0x00100000
+INSTALL_LOG = 'instalacao.log'
+ATTEMPTS_FILE = 'tentativas.json'
+STATE_FILE = 'estado.json'
+MAX_ATTEMPTS = 3
+ATTEMPT_SPACING_SECONDS = 24 * 3600
 
 
 class UpdateError(Exception):
@@ -191,56 +199,134 @@ def power_ok():
 
 
 def space_ok(folder, size):
-    """Room for the download plus the installed copy it replaces (about three times the installer)."""
+    """Room for the download plus the installed copy it replaces (DISK_FACTOR times the installer)."""
     import shutil
     probe = folder if folder.exists() else folder.parent
     try: return shutil.disk_usage(probe).free >= size * DISK_FACTOR
     except OSError: return False
 
 
-def remove_other_setups(folder, keep=None):
-    """Earlier downloads (an update already installed, or superseded) are not kept."""
+def downloaded_version(path):
+    match = re.fullmatch(r'COLETOR-v(\d{1,5}\.\d{1,5}\.\d{1,5})\.exe(\.part)?', path.name)
+    return parse_version(match.group(1)) if match else None
+
+
+def remove_other_setups(folder, keep=None, *, up_to=None):
+    """Earlier downloads are not kept: all but keep, or (offline, at start) those up to up_to."""
     if not folder.is_dir(): return
     for path in folder.iterdir():
-        if path.is_file() and path.name != keep and (path.suffix in {'.exe', '.part'}): path.unlink(missing_ok=True)
+        if not path.is_file() or path.name == keep or path.suffix not in {'.exe', '.part'}: continue
+        if up_to is not None and (downloaded_version(path) or (0, 0, 0)) > up_to: continue
+        path.unlink(missing_ok=True)
 
 
-def resume_command(path):
-    return subprocess.list2cmdline([str(path), *SETUP_ARGUMENTS, RESUME_ARGUMENT])
+def setup_arguments(log):
+    return [*SETUP_ARGUMENTS, f'/LOG={log}']
 
 
-def schedule_resume(path):
+def resume_command(path, log):
+    return subprocess.list2cmdline([str(path), *setup_arguments(log), RESUME_ARGUMENT])
+
+
+def schedule_resume(path, log):
     """If Windows turns off mid-install, the next sign-in runs the same installer again.
 
-    The '!' keeps the RunOnce value until that run ends; the installer deletes it when it finishes
-    (installer/Coletor.iss, RESUME_VALUE) and the reopened Coletor needs nothing else."""
+    The '!' keeps the RunOnce value until that run ends. The installer deletes it when it ends
+    (installer/Coletor.iss, ResumeValue); while it exists the launcher does not open the Coletor at
+    sign-in, so it never starts from a half-replaced folder (installer/launcher/ColetorFrequencia.cs)."""
     import winreg
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_ONCE_KEY, 0, winreg.KEY_SET_VALUE) as key:
-        winreg.SetValueEx(key, RESUME_VALUE, 0, winreg.REG_SZ, resume_command(path))
+        winreg.SetValueEx(key, RESUME_VALUE, 0, winreg.REG_SZ, resume_command(path, log))
+
+
+def cancel_resume():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_ONCE_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, RESUME_VALUE)
+    except OSError:
+        pass
+
+
+def installer_running():
+    """The installer holds SetupMutex (installer/Coletor.iss) while it runs."""
+    if os.name != 'nt': return False
+    import ctypes
+    handle = ctypes.windll.kernel32.OpenMutexW(SYNCHRONIZE, False, INSTALLER_MUTEX)
+    if not handle: return False
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return True
+
+
+def clear_stale_resume():
+    """Opened while no installer runs: a resume entry left behind (RunOnce disabled by policy, or
+    a resumed run that never came) must not keep the sign-in start from opening the Coletor."""
+    if os.name == 'nt' and not installer_running(): cancel_resume()
 
 
 def launch_setup(path):
     """Start the installer on its own: it outlives this app, which it asks to quit."""
-    schedule_resume(path)
+    log = path.parent / INSTALL_LOG
+    schedule_resume(path, log)
     flags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
     breakaway = getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0)
-    command = [str(path), *SETUP_ARGUMENTS]
+    command = [str(path), *setup_arguments(log)]
     try:
-        subprocess.Popen(command, creationflags=flags | breakaway, close_fds=True, cwd=str(path.parent))
-    except PermissionError:
-        # A job that forbids breakaway refuses the flag; the installer still outlives this process.
-        subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=str(path.parent))
+        try:
+            subprocess.Popen(command, creationflags=flags | breakaway, close_fds=True, cwd=str(path.parent))
+        except PermissionError:
+            # A job that forbids breakaway refuses the flag; the installer still outlives this process.
+            subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=str(path.parent))
+    except OSError:
+        cancel_resume()  # Never leave a sign-in install behind for an installer that did not start.
+        raise
+
+
+class Attempts:
+    """Installs tried per version, kept across openings: a version whose installer keeps failing is
+    tried at most MAX_ATTEMPTS times, ATTEMPT_SPACING_SECONDS apart, never in a loop."""
+
+    def __init__(self, folder, clock):
+        self.path, self._clock = folder / ATTEMPTS_FILE, clock
+
+    def _read(self):
+        try: value = json.loads(self.path.read_text(encoding='utf-8'))
+        except (OSError, ValueError): return None
+        if (isinstance(value, dict) and isinstance(value.get('versao'), str) and type(value.get('tentativas')) is int
+                and type(value.get('ultima')) in {int, float}):
+            return value
+        return None
+
+    def allowed(self, version):
+        value = self._read()
+        if value is None or value['versao'] != version: return True
+        if value['tentativas'] >= MAX_ATTEMPTS: return False
+        return not 0 <= self._clock() - value['ultima'] < ATTEMPT_SPACING_SECONDS
+
+    def record(self, version):
+        value = self._read()
+        count = value['tentativas'] + 1 if value and value['versao'] == version else 1
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        partial = self.path.with_suffix('.tmp')
+        partial.write_text(json.dumps({'versao': version, 'tentativas': count, 'ultima': self._clock()}),
+                           encoding='utf-8')
+        os.replace(partial, self.path)
+
+    def clear(self):
+        self.path.unlink(missing_ok=True)
 
 
 class Updater:
     def __init__(self, current_version, root, directory, *, safe_now, launch=launch_setup,
-                 fetch=fetch_small, download=download_setup, power=power_ok, space=space_ok):
+                 fetch=fetch_small, download=download_setup, power=power_ok, space=space_ok, clock=time.time,
+                 clear_resume=clear_stale_resume):
+        self._clear_resume = clear_resume
         self._current, self._root, self._folder = current_version, root, Path(directory) / 'atualizacao'
         self._safe_now, self._launch, self._fetch, self._download = safe_now, launch, fetch, download
-        self._power, self._space = power, space
+        self._power, self._space, self._clock = power, space, clock
+        self._attempts = Attempts(self._folder, clock)
         self._stop = threading.Event()
         self._thread = None
-        self.launched = None  # The version whose installer was started.
 
     def enabled(self):
         try: build = parse_version(self._current)[2]
@@ -249,6 +335,8 @@ class Updater:
 
     def start(self):
         if not self.enabled() or self._thread is not None: return False
+        try: self._clear_resume()
+        except OSError: pass
         self._thread = threading.Thread(target=self._loop, name='collector-updater', daemon=True)
         self._thread.start()
         return True
@@ -257,24 +345,41 @@ class Updater:
         self._stop.set()
 
     def _loop(self):
+        try: remove_other_setups(self._folder, up_to=parse_version(self._current))  # Even offline.
+        except OSError: pass
         if self._stop.wait(FIRST_CHECK_SECONDS): return
         while True:
             # After a started installer the app normally quits; still running later means it failed.
-            try: self.check_once()
-            except Exception: pass  # Offline, GitHub unavailable or a bad file: the next check tries again.
+            try: result = 'started' if self.check_once() else 'current'
+            except UpdateError as error: result = str(error)
+            except Exception as error: result = type(error).__name__
+            self._note(result)
             if self._stop.wait(CHECK_EVERY_SECONDS): return
+
+    def _note(self, result):
+        """Last check and its result only (no URL, path or content): what a support visit looks at."""
+        try:
+            self._folder.mkdir(parents=True, exist_ok=True)
+            (self._folder / STATE_FILE).write_text(
+                json.dumps({'em': int(self._clock()), 'versao': self._current, 'resultado': result}),
+                encoding='utf-8')
+        except OSError:
+            pass
 
     def check_once(self):
         """True once the installer of a newer version was started."""
         manifest = read_manifest(self._fetch(MANIFEST_URL))
-        if parse_version(manifest['versao']) <= parse_version(self._current):
+        version = manifest['versao']
+        if parse_version(version) <= parse_version(self._current):
             remove_other_setups(self._folder)
+            self._attempts.clear()
             return False
+        if not self._attempts.allowed(version): raise UpdateError('waiting-after-failed-install')
         remove_other_setups(self._folder, keep=manifest['arquivo'])
         if not self._space(self._folder, manifest['tamanho']): raise UpdateError('disk-full')
         setup = self._download(manifest, self._folder)
         while not (self._safe_now() and self._power()):
             if self._stop.wait(SAFE_RETRY_SECONDS): return False
+        self._attempts.record(version)
         self._launch(setup)
-        self.launched = manifest['versao']
         return True

@@ -35,32 +35,38 @@ jobs:
       UPSTREAM_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout main without downloading older installers
+      - name: Checkout main with its history and tags, without older installers
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
           lfs: false
 
-      - name: Ensure this was the latest source commit
+      - name: Decide whether this build becomes a Release
         id: current
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(git rev-parse HEAD)" != "$UPSTREAM_SHA" ]]; then
-            echo 'A newer commit already landed on main; skip obsolete installer.'
-            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          git diff --name-only "$UPSTREAM_SHA" HEAD > "$RUNNER_TEMP/newer-head.txt"
+          # 404 = no Release yet; any other API error stops instead of skipping the obsolete check.
+          since=()
+          latest=''
+          if latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
+            git diff --name-only "refs/tags/$latest^{commit}" "$UPSTREAM_SHA" > "$RUNNER_TEMP/since-release.txt"
+            since=(--since-release-changes "$RUNNER_TEMP/since-release.txt")
+          elif ! grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
+            cat "$RUNNER_TEMP/latest.err" >&2
+            exit 1
+          fi
+          decision="$(python3 scripts/publish_windows_installer.py decide \
+            --newer-head-changes "$RUNNER_TEMP/newer-head.txt" "${since[@]}")"
+          echo "Decision: $decision"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [[ "$decision" == 'publish' ]]; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
           else
-            changed="$(git diff --name-only HEAD^ HEAD)"
-            if [[ -n "$changed" ]] && ! grep -qvE '^(instalador/|\.github/workflows/publish-installer\.yml$|tests/test_publish_windows_installer\.py$)' <<< "$changed"; then
-              # These files govern distribution, not the Windows binary. Do not
-              # publish a fictitious newer build solely because they changed.
-              echo 'Installer publisher maintenance only: skip unchanged application build.'
-              echo 'publish=false' >> "$GITHUB_OUTPUT"
-            else
-              echo 'publish=true' >> "$GITHUB_OUTPUT"
-            fi
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download the exact successful upstream installer artifact
@@ -86,17 +92,23 @@ jobs:
       - name: Publish the Release and keep the five newest
         if: steps.current.outputs.publish == 'true'
         shell: bash
+        env:
+          latest: ${{ steps.current.outputs.latest }}
         run: |
           set -euo pipefail
           info="$RUNNER_TEMP/release.json"
           tag="$(jq -r .tag "$info")"
           version="$(jq -r .versao "$info")"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $tag already exists."
-            exit 0
+          if draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null)"; then
+            if [[ "$draft" == 'true' ]]; then
+              # An upload cut short leaves a draft: start it again rather than report success.
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+            else
+              echo "Release $tag already exists."
+              exit 0
+            fi
           fi
           # A slower older run must never become the latest, or Coletors would not see the newer one.
-          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2> /dev/null || true)"
           if [[ -n "$latest" && "$(printf '%s\n%s\n' "${latest#v}" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
             echo "Newer Release $latest exists; skip obsolete build $version."
             exit 0

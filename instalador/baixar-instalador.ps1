@@ -10,7 +10,7 @@ try {
     Invoke-WebRequest "$repository/latest/download/atualizacao.json" -OutFile $manifestFile -UseBasicParsing
     $manifest = Get-Content $manifestFile -Raw | ConvertFrom-Json
 } finally {
-    Remove-Item $manifestFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $manifestFile -ErrorAction SilentlyContinue
 }
 $version = [string]$manifest.versao
 if ($version -notmatch '^\d+\.\d+\.\d+$' -or $manifest.arquivo -ne "COLETOR-v$version.exe" -or

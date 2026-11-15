@@ -33,6 +33,7 @@ DisableReadyPage=no
 DisableDirPage=auto
 UsePreviousAppDir=yes
 ; One installer at a time: the Coletor's automatic update and a manual one never overlap.
+; Same name as INSTALLER_MUTEX in app/coletor/updater.py.
 SetupMutex=EcossistemaEscolar.ColetorFrequencia.Instalador
 SetupLogging=no
 UninstallLogMode=append
@@ -86,6 +87,7 @@ const
 
 var
   CollectorWasRunning: Boolean;
+  Installed: Boolean;
 
 function OpenEvent(Access: DWORD; Inherit: BOOL; Name: String): THandle;
   external 'OpenEventW@kernel32.dll stdcall';
@@ -273,7 +275,22 @@ begin
   begin
     if WizardIsTaskSelected('autostart') then RegisterLogonTask() else DeleteLogonTask();
     RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
+    Installed := True;
     if CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1') then ReopenCollector();
+  end;
+end;
+
+// An installation that stopped after closing the Coletor (a locked file, a full disk) must not
+// leave it closed: the Coletor already present opens again; its update retries on another day.
+procedure DeinitializeSetup();
+begin
+  if Installed or IsUninstaller then exit;
+  if not (CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1')) then exit;
+  RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
+  try
+    if FileExists(ExpandConstant('{app}\programa\ColetorFrequencia.exe')) then ReopenCollector();
+  except
+    Log('Coletor could not be reopened after a failed installation: ' + GetExceptionMessage);
   end;
 end;
 

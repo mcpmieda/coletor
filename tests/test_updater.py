@@ -144,7 +144,7 @@ class UpdaterTests(unittest.TestCase):
         self.launched = []
 
     def make(self, current='0.4.329', latest='0.4.330', *, safe=lambda: True, power=lambda: True,
-             space=lambda folder, size: True):
+             space=lambda folder, size: True, clock=lambda: 1_000_000):
         def download(manifest, folder):
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / manifest['arquivo']
@@ -152,6 +152,7 @@ class UpdaterTests(unittest.TestCase):
             return path
         return updater.Updater(current, self.install / 'programa', self.settings, safe_now=safe,
                                launch=self.launched.append, download=download, power=power, space=space,
+                               clock=clock, clear_resume=lambda: None,
                                fetch=lambda url: json.dumps(manifest_for(latest, self.raw)).encode())
 
     def test_only_an_installed_ci_build_updates_itself(self):
@@ -196,10 +197,13 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(self.launched, [])
 
     def test_resume_command_and_installer_agree(self):
-        command = updater.resume_command(Path(r'C:\Users\x\AppData\Local\ColetorFrequenciaSmecel\atualizacao\COLETOR-v0.4.330.exe'))
-        self.assertTrue(command.startswith('C:\\Users\\x\\'))
+        folder = Path(r'C:\Users\Nome Sobrenome\AppData\Local\ColetorFrequenciaSmecel\atualizacao')
+        command = updater.resume_command(folder / 'COLETOR-v0.4.330.exe', folder / updater.INSTALL_LOG)
+        self.assertTrue(command.startswith('"C:\\Users\\Nome Sobrenome\\'))
         for argument in (*updater.SETUP_ARGUMENTS, updater.RESUME_ARGUMENT):
             self.assertIn(argument, command)
+        self.assertIn('"/LOG=C:\\Users\\Nome Sobrenome\\', command)
+        self.assertIn(f"SetupMutex={updater.INSTALLER_MUTEX}", SCRIPT)
         self.assertEqual(re.search(r"^\s*ResumeValue = '(.+)';", SCRIPT, re.M).group(1), updater.RESUME_VALUE)
         self.assertIn(updater.RUN_ONCE_KEY, SCRIPT)
         self.assertEqual(updater.RESUME_ARGUMENT, '/REABRIR=1')
@@ -207,7 +211,42 @@ class UpdaterTests(unittest.TestCase):
         post = SCRIPT.split("procedure CurStepChanged", 1)[1]
         self.assertIn("RegDeleteValue(HKCU, RunOnceKey, ResumeValue);", post.split("procedure CurUninstallStepChanged")[0])
         self.assertIn("RegDeleteValue(HKCU, RunOnceKey, ResumeValue);", post.split("procedure CurUninstallStepChanged")[1])
-        self.assertIn("SetupMutex=", SCRIPT)
+        # A failed installation reopens the Coletor it closed and drops the sign-in resume.
+        failed = SCRIPT.split("procedure DeinitializeSetup", 1)[1].split("end;\n\n", 1)[0]
+        self.assertIn("if Installed or IsUninstaller then exit;", failed)
+        self.assertIn("RegDeleteValue(HKCU, RunOnceKey, ResumeValue);", failed)
+        self.assertIn("ReopenCollector();", failed)
+        # The sign-in start waits while the resumed installer replaces the folder.
+        launcher = (ROOT / "installer/launcher/ColetorFrequencia.cs").read_text(encoding="utf-8")
+        self.assertIn(f'ResumeValue = "{updater.RESUME_VALUE}"', launcher)
+        self.assertIn('@"' + updater.RUN_ONCE_KEY + '"', launcher)
+        self.assertIn("if (background && UpdateResuming()) return 0;", launcher)
+
+    def test_a_failing_install_is_retried_three_times_a_day_apart(self):
+        now = [1_000_000]
+        item = self.make(clock=lambda: now[0])
+        self.assertTrue(item.check_once())
+        with self.assertRaisesRegex(updater.UpdateError, 'waiting-after-failed-install'):
+            item.check_once()  # The Coletor reopened with the same version: not again today.
+        for _ in range(2):
+            now[0] += updater.ATTEMPT_SPACING_SECONDS
+            self.assertTrue(item.check_once())
+        now[0] += updater.ATTEMPT_SPACING_SECONDS
+        with self.assertRaisesRegex(updater.UpdateError, 'waiting-after-failed-install'):
+            item.check_once()
+        self.assertEqual(len(self.launched), 3)
+        # A newer version starts over; once installed, the record goes.
+        self.assertTrue(self.make(latest='0.4.331', clock=lambda: now[0]).check_once())
+        self.assertFalse(self.make(current='0.4.331', latest='0.4.331').check_once())
+        self.assertFalse((self.settings / 'atualizacao' / updater.ATTEMPTS_FILE).exists())
+
+    def test_offline_start_removes_only_installed_or_older_downloads(self):
+        folder = self.settings / 'atualizacao'
+        folder.mkdir(parents=True)
+        for name in ('COLETOR-v0.4.328.exe', 'COLETOR-v0.4.329.exe.part', 'COLETOR-v0.4.330.exe', 'instalacao.log'):
+            (folder / name).write_bytes(b'x')
+        updater.remove_other_setups(folder, up_to=(0, 4, 329))
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ['COLETOR-v0.4.330.exe', 'instalacao.log'])
 
 
 class Access:
@@ -229,6 +268,7 @@ class UpdateWindowTests(unittest.TestCase):
         now = datetime(2026, 11, 16, 3, 0, tzinfo=ZoneInfo('America/Bahia')).timestamp()
         item = self.runtime(now)
         self.assertTrue(item.update_allowed())  # Never activated on this computer.
+        self.assertFalse(item.update_allowed(collecting=True))  # Collecting, agenda not known yet.
         item._status = {'settings': {'schedule': self.schedule(['12:00']), 'reportSchedule': None}}
         self.assertTrue(item.update_allowed())
         item._status = {'settings': {'schedule': self.schedule(['03:05']), 'reportSchedule': None}}
@@ -246,7 +286,9 @@ class UpdateWindowTests(unittest.TestCase):
 class LoopTests(unittest.TestCase):
     def test_keeps_checking_after_a_failure(self):
         calls = []
-        item = updater.Updater('0.4.329', Path('.'), Path('.'), safe_now=lambda: True)
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(folder, ignore_errors=True))
+        item = updater.Updater('0.4.329', folder, folder, safe_now=lambda: True)
         item.check_once = lambda: calls.append(1) or (_ for _ in ()).throw(updater.UpdateError('network'))
         waits = iter([False, False, True])
         item._stop.wait = lambda seconds: next(waits)
@@ -254,6 +296,8 @@ class LoopTests(unittest.TestCase):
         thread.start()
         thread.join(5)
         self.assertEqual(len(calls), 2)
+        state = json.loads((folder / 'atualizacao' / updater.STATE_FILE).read_text(encoding='utf-8'))
+        self.assertEqual((state['versao'], state['resultado']), ('0.4.329', 'network'))
 
 
 if __name__ == '__main__':

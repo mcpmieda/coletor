@@ -105,8 +105,8 @@ Na abertura interativa aparece uma orientação de reinstalação/suporte; em
 Um pacote só recebe o artefato `windows-installer-candidate` se
 **essas duas fases** forem aprovadas. CI sintético nunca prova pareamento
 real de Entra, chave permanente do PC ou login no Smecel.
-Não fazer publicação produtiva antes da homologação em computador da escola,
-configuração aprovada da PR #1293 e assinatura corporativa quando exigida.
+Cada build aprovado na `main` que muda o programa vira Release e é instalado sozinho nos
+computadores da escola (seção seguinte): um merge na `main` é uma publicação produtiva.
 
 ## Publicação e atualização automática
 
@@ -116,5 +116,9 @@ via Git LFS. O Coletor instalado (`app/coletor/updater.py`) consulta só `github
 de arquivos de Release, baixa e confere a versão nova e roda o instalador com `/VERYSILENT` quando
 nenhuma coleta ou relatório está em andamento ou próximo na agenda. Antes disso registra uma entrada
 `RunOnce` do usuário que refaz a instalação no próximo login se o computador desligar no meio; o
-instalador apaga a entrada ao terminar. `SetupMutex` impede dois instaladores ao mesmo tempo.
+instalador apaga a entrada ao terminar; enquanto ela existe, a abertura com o Windows não inicia o
+programa. Uma instalação que falha reabre o Coletor; cada versão é tentada no máximo 3 vezes, uma
+por dia (`atualizacao/tentativas.json`; o último resultado fica em `estado.json` e o log do
+instalador em `instalacao.log`). `SetupMutex` impede dois instaladores ao mesmo tempo. Só
+mudanças em `app/`, `ui/`, `installer/` e nos arquivos do build geram Release.
 Detalhes de uso em [instalador/README.md](../instalador/README.md).

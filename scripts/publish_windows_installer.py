@@ -15,12 +15,37 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
 import struct
 
 SOURCE = re.compile(r"ColetorFrequencia-(\d+\.\d+\.\d+)-windows-x64-setup-candidato\.exe\Z")
 FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
 MANIFEST = 'atualizacao.json'
 KEEP = 5  # Releases kept: the newest and four to go back to by hand.
+
+
+# What goes into the installed program (scripts/build_windows_portable.py, installer/Coletor.iss).
+# Only a change here becomes a new Release: every installed Coletor reinstalls each one.
+BUNDLE_PATHS = re.compile(
+    r'(app/|ui/|installer/|scripts/build_windows_portable\.py\Z|requirements-windows-(build|portable)\.txt\Z'
+    r'|docs/PORTABLE_LEIA_ME\.txt\Z)')
+
+
+def touches_bundle(paths) -> bool:
+    return any(BUNDLE_PATHS.match(path) for path in paths if path)
+
+
+def publish_decision(*, newer_head_changes, since_release_changes) -> str:
+    """Whether the build of this run becomes a Release.
+
+    newer_head_changes: paths changed between this run's commit and main's head (empty when equal).
+    since_release_changes: paths changed between the latest Release's commit and this run's commit,
+    or None when there is no Release yet."""
+    if touches_bundle(newer_head_changes):
+        return 'newer-build-follows'  # The newer commit's own run publishes the newer program.
+    if since_release_changes is not None and not touches_bundle(since_release_changes):
+        return 'program-unchanged'
+    return 'publish'
 
 
 def asset_name(version: str) -> str:
@@ -100,7 +125,22 @@ def stage_release(artifact_dir: Path, output: Path, *, head_sha: str, run_id: in
                      f'SHA-256: `{expected}`'}
 
 
+def changed_paths(text: str | None):
+    return None if text is None else [line.strip() for line in text.splitlines() if line.strip()]
+
+
 def main() -> None:
+    if sys.argv[1:2] == ['decide']:
+        decide = argparse.ArgumentParser(description='Decide whether this run publishes a Release')
+        decide.add_argument('command')
+        decide.add_argument('--newer-head-changes', type=Path, required=True)
+        decide.add_argument('--since-release-changes', type=Path)
+        options = decide.parse_args()
+        since = options.since_release_changes
+        print(publish_decision(
+            newer_head_changes=changed_paths(options.newer_head_changes.read_text(encoding='utf-8')),
+            since_release_changes=changed_paths(since.read_text(encoding='utf-8')) if since else None))
+        return
     args = argparse.ArgumentParser(description='Stage a successful Windows-installer build as Release files')
     args.add_argument('--artifact-dir', type=Path, required=True)
     args.add_argument('--output', type=Path, required=True)
