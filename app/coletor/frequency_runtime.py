@@ -61,7 +61,9 @@ REPORT_KEYS = {'timezone', 'enabled', 'every', 'from', 'to', 'weekdays'}
 # edited agenda or a school pause. The ADM uses the same numbers (attendance/agenda-quiet-v2.ts).
 AGENDA_LEAD_SECONDS = 600
 AGENDA_TAIL_SECONDS = 300
-QUIET_REFRESH_SECONDS = 900
+# Shorter than AGENDA_LEAD_SECONDS (ecossistema#1450, finding 1): a time created or moved in the ADM at
+# least 10 min ahead is always seen before its near window starts.
+QUIET_REFRESH_SECONDS = 540
 
 
 def discard_confirmation():
@@ -166,6 +168,32 @@ def agenda_near(schedule, report_schedule, now_ts):
                 at = datetime(day.year, day.month, day.day, int(wall[:2]), int(wall[3:]), tzinfo=zone).timestamp()
                 if -AGENDA_TAIL_SECONDS <= at - now_ts <= AGENDA_LEAD_SECONDS: return True
     return False
+
+
+def missed_new_slots(old_status, old_at, new_status, now_ts):
+    """Today's collection times that the newer agenda has, the older one did not, and that already
+    passed since the older answer (ecossistema#1450, finding 1): a time created or moved in the ADM
+    while this computer was quiet runs once, late, instead of being skipped. Only within one quiet
+    refresh: a computer that was asleep or offline never replays."""
+    try:
+        if old_status is None or old_at is None: return set()
+        new, old = new_status['settings']['schedule'], old_status['settings']['schedule']
+        if not new or new == old: return set()
+        zone = ZoneInfo(new['timezone'])
+        now, since = datetime.fromtimestamp(now_ts, zone), datetime.fromtimestamp(old_at, zone)
+        if not 0 <= now_ts - old_at <= QUIET_REFRESH_SECONDS + 60 or since.date() != now.date(): return set()
+        weekday = (now.weekday() + 1) % 7
+
+        def slots(schedule):
+            return {(r['shift'], t) for r in ((schedule or {}).get('rules') or ()) if r['enabled'] and r['weekday'] == weekday
+                    for t in [*r['times'], *([r['recheck']] if r['recheck'] else [])]}
+        missed = set()
+        for shift, wall in slots(new) - slots(old):
+            at = now.replace(hour=int(wall[:2]), minute=int(wall[3:]), second=0, microsecond=0)
+            if since < at <= now: missed.add((now.date().isoformat(), shift, wall))
+        return missed
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+        return set()
 
 
 def report_hash(rows):
@@ -424,6 +452,7 @@ class FrequencyRuntime:
         # erased or used as if it belonged to the new one.
         self._bind_storage()
         with self._lock:
+            self._pending_slots |= missed_new_slots(self._status, self._status_at, value, received_at)
             self._status = value
             self._status_at = received_at
             self._school_paused = value['settings']['paused']
