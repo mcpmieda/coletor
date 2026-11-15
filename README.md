@@ -48,8 +48,8 @@ O fuso IANA é editável, com prévia da hora da escola e confirmação quando a
 
 O CI também produz um instalador **.exe** para Windows 10/11 x64, por usuário,
 sem exigir administrador. A opção Abrir o Coletor ao entrar no Windows vem
-marcada: cria só um atalho na pasta Inicializar do usuário (sem serviço ou
-tarefa agendada); desmarcada, o atalho é removido. Cria atalho no
+marcada: cria uma tarefa de login do próprio usuário que abre o Coletor ao lado
+do relógio (sem serviço nem administrador); desmarcada, a tarefa é removida. Cria atalho no
 menu Iniciar (e opcionalmente na área de trabalho); conserva a raposa, a
 bandeja, a interface e as operações do portátil. A janela abre centralizada
 no monitor principal. O pacote `windows-installer-candidate` só é publicado
@@ -59,6 +59,9 @@ backend da PR #1293 antes de uso produtivo. O instalador é assinado quando
 os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
 existem; certificado autoassinado identifica a escola, mas não remove o aviso
 do SmartScreen em outros computadores. Não contorne avisos de segurança.
+
+Cada build aprovado na `main` vira uma [Release](https://github.com/mcpmieda/coletor/releases/latest),
+e o Coletor instalado se atualiza sozinho a partir dela: veja [instalador/README.md](instalador/README.md).
 
 Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
 `installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador

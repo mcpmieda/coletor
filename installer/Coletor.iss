@@ -32,6 +32,8 @@ ChangesEnvironment=no
 DisableReadyPage=no
 DisableDirPage=auto
 UsePreviousAppDir=yes
+; One installer at a time: the Coletor's automatic update and a manual one never overlap.
+SetupMutex=EcossistemaEscolar.ColetorFrequencia.Instalador
 SetupLogging=no
 UninstallLogMode=append
 
@@ -76,6 +78,11 @@ const
   // Versions up to 0.4.245 have no quit event: they are stopped after this.
   LegacyWaitSeconds = 5;
   EVENT_MODIFY_STATE = $0002;
+  // Same names as app/coletor/updater.py: before an automatic update the Coletor asks Windows to
+  // run this installer again at the next sign-in (RunOnce). A finished installation deletes it, so
+  // only one cut short (the computer turned off) runs again, and reopens the Coletor (/REABRIR=1).
+  RunOnceKey = 'Software\Microsoft\Windows\CurrentVersion\RunOnce';
+  ResumeValue = '!ColetorAtualizacao';
 
 var
   CollectorWasRunning: Boolean;
@@ -265,7 +272,8 @@ begin
   if CurStep = ssPostInstall then
   begin
     if WizardIsTaskSelected('autostart') then RegisterLogonTask() else DeleteLogonTask();
-    if CollectorWasRunning then ReopenCollector();
+    RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
+    if CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1') then ReopenCollector();
   end;
 end;
 
@@ -276,6 +284,7 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     DeleteLogonTask();
+    RegDeleteValue(HKCU, RunOnceKey, ResumeValue);
     Error := CloseCollector(ExpandConstant('{app}'), nil);
     if Error <> '' then Log(Error);
   end;

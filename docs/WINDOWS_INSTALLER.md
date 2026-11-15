@@ -107,3 +107,14 @@ Um pacote só recebe o artefato `windows-installer-candidate` se
 real de Entra, chave permanente do PC ou login no Smecel.
 Não fazer publicação produtiva antes da homologação em computador da escola,
 configuração aprovada da PR #1293 e assinatura corporativa quando exigida.
+
+## Publicação e atualização automática
+
+Desde 15/11/2026 o instalador aprovado na `main` é publicado como GitHub Release (`v<versão>`,
+com `COLETOR-v<versão>.exe`, `.sha256` e `atualizacao.json`), não mais na pasta `instalador/`
+via Git LFS. O Coletor instalado (`app/coletor/updater.py`) consulta só `github.com` e os hosts
+de arquivos de Release, baixa e confere a versão nova e roda o instalador com `/VERYSILENT` quando
+nenhuma coleta ou relatório está em andamento ou próximo na agenda. Antes disso registra uma entrada
+`RunOnce` do usuário que refaz a instalação no próximo login se o computador desligar no meio; o
+instalador apaga a entrada ao terminar. `SetupMutex` impede dois instaladores ao mesmo tempo.
+Detalhes de uso em [instalador/README.md](../instalador/README.md).

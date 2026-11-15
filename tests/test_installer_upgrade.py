@@ -32,7 +32,7 @@ class InstallerQuitContractTests(unittest.TestCase):
         self.assertIn("function PrepareToInstall(", SCRIPT)
         self.assertIn("CloseCollector(ExpandConstant('{app}'), Page)", SCRIPT)
         post = SCRIPT.split("procedure CurStepChanged", 1)[1].split("end;\n\n", 1)[0]
-        self.assertIn("if CollectorWasRunning then ReopenCollector();", post)
+        self.assertIn("if CollectorWasRunning or (ExpandConstant('{param:REABRIR|0}') = '1') then ReopenCollector();", post)
         self.assertIn("'--background'", SCRIPT.split("procedure ReopenCollector", 1)[1])
         uninstall = SCRIPT.split("procedure CurUninstallStepChanged", 1)[1]
         self.assertIn("CloseCollector(ExpandConstant('{app}'), nil)", uninstall)
