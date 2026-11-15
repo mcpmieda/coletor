@@ -77,9 +77,15 @@ export function useColetor(): ColetorState {
   }, [refresh]);
 
   const collecting = status?.state === 'collecting' || status?.preparing === true;
+  // Each refresh asks the Ecossistema: while nothing is being collected the window asks once a minute,
+  // and not at all while it is hidden in the tray (ecossistema#1450, finding 7).
   useEffect(() => {
-    const timer = setInterval(() => { void refresh(); }, collecting ? 5_000 : 15_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void refresh();
+    }, collecting ? 5_000 : 60_000);
+    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    document.addEventListener('visibilitychange', visible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
   }, [refresh, collecting]);
 
   return { status, cached, history, prefs, error, version, refresh, setStatus, setPrefs };
