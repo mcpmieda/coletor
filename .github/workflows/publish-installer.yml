@@ -55,8 +55,14 @@ jobs:
           if latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err")"; then
             git diff --name-only "refs/tags/$latest^{commit}" "$UPSTREAM_SHA" > "$RUNNER_TEMP/since-release.txt"
             since=(--since-release-changes "$RUNNER_TEMP/since-release.txt")
-          elif ! grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
+            latest='' # gh prints the 404 body on stdout: it is not a tag.
+          else
             cat "$RUNNER_TEMP/latest.err" >&2
+            exit 1
+          fi
+          if [[ -n "$latest" && ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected latest Release tag: $latest" >&2
             exit 1
           fi
           decision="$(python3 scripts/publish_windows_installer.py decide \
