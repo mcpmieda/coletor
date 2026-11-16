@@ -13,7 +13,7 @@ from coletor.tray_animation import (
     TrayPresenter, TrayState, WORKING_SEQUENCE, STATIC_FRAMES,
     icon_paths, resolve_icon_paths, tooltip_for,
 )
-from coletor.tray import WindowsTray, ID_OPEN, ID_QUIT, WM_REFRESH, WM_TRAY
+from coletor.tray import WindowsTray, ID_OPEN, ID_QUIT, WM_TRAY
 
 
 class Clock:

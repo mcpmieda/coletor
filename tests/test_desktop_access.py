@@ -59,7 +59,6 @@ class DesktopAccessTests(unittest.TestCase):
 
     def test_concurrent_collection_blocks_logout_and_repairing_without_purge(self):
         import threading
-        import time
         from test_frequency_runtime import SyntheticCrypto
         with tempfile.TemporaryDirectory() as directory:
             access = SyntheticAccess()

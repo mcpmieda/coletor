@@ -4,7 +4,6 @@ No scheduled task, persistent browser profile or login is created here. An insta
 checks the repository's Releases and updates itself (updater.py).
 The trusted local UI is the only page ever loaded into the privileged webview.
 """
-from pathlib import Path
 import sys
 import threading
 from . import __version__

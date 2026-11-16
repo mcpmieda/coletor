@@ -1,6 +1,5 @@
 """The local queue heals itself while the computer is authorized."""
 from pathlib import Path
-import os
 import sys
 import tempfile
 import unittest

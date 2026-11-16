@@ -1,6 +1,5 @@
 """Two real processes using the same synthetic preference file."""
 import multiprocessing
-from pathlib import Path
 import tempfile
 import unittest
 from coletor.local_settings import LocalSettings, ScheduleConflict
