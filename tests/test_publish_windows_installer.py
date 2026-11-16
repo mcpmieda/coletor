@@ -105,6 +105,22 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertEqual(decide(newer_head_changes=['instalador/README.md'], since_release_changes=['app/x.py']),
                          'publish')
 
+    def test_instalador_folder_holds_only_the_always_current_installer(self):
+        """Owner request 16/11/2026: only "Instalar Coletor.exe", which downloads the newest Release."""
+        tracked = __import__('subprocess').run(['git', 'ls-files', 'instalador'], cwd=ROOT, capture_output=True,
+                                               text=True, check=True).stdout.split('\n')
+        self.assertEqual([p for p in tracked if p], ['instalador/Instalar Coletor.exe'])
+        self.assertEqual((ROOT / 'instalador/Instalar Coletor.exe').read_bytes()[:2], b'MZ')
+        source = (ROOT / 'scripts/bootstrap/InstalarColetor.cs').read_text(encoding='utf-8')
+        from coletor import updater
+        self.assertIn(f'const string Publisher = "{updater.PUBLISHER}"', source)
+        self.assertIn(f'const string Manifest = "{updater.MANIFEST_NAME}"', source)
+        self.assertIn('"COLETOR-v" + version + ".exe"', source)
+        self.assertIn(f'"https://api.github.com/repos/{updater.REPOSITORY}/releases/latest"', source)
+        # Changing the bootstrap never makes every installed Coletor reinstall.
+        self.assertEqual(publish_decision(newer_head_changes=[], since_release_changes=[
+            'instalador/Instalar Coletor.exe', 'scripts/bootstrap/InstalarColetor.cs']), 'program-unchanged')
+
     def test_workflow_publishes_releases_not_repository_files(self):
         workflow = (ROOT / '.github/workflows/publish-installer.yml').read_text('utf8')
         for text in ('gh release create', '--latest', '--cleanup-tag', 'tail -n +6', 'sort -V'):
@@ -117,7 +133,7 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertIn("latest='' # gh prints the 404 body on stdout", workflow)
         self.assertIn('Unexpected latest Release tag', workflow)
         self.assertIn('fetch-depth: 0', workflow)
-        self.assertNotIn('instalador/*.exe', (ROOT / '.gitattributes').read_text('utf8'))
+        self.assertNotIn('filter=lfs', (ROOT / '.gitattributes').read_text('utf8'))
         self.assertEqual(list((ROOT / 'instalador').glob('*.sha256')), [])
         self.assertFalse((ROOT / 'instalador/versoes.json').exists())
 

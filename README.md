@@ -61,7 +61,7 @@ existem; certificado autoassinado identifica a escola, mas não remove o aviso
 do SmartScreen em outros computadores. Não contorne avisos de segurança.
 
 Cada build aprovado na `main` vira uma [Release](https://github.com/mcpmieda/coletor/releases/latest),
-e o Coletor instalado se atualiza sozinho a partir dela: veja [instalador/README.md](instalador/README.md).
+e o Coletor instalado se atualiza sozinho a partir dela. Para instalar num computador novo, use `instalador/Instalar Coletor.exe`, que sempre baixa a versão mais nova: veja o [guia do instalador](docs/WINDOWS_INSTALLER.md#publicação-e-atualização-automática).
 
 Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
 `installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador
