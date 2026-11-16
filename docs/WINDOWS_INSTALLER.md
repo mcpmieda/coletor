@@ -121,4 +121,20 @@ programa. Uma instalação que falha reabre o Coletor; cada versão é tentada n
 por dia (`atualizacao/tentativas.json`; o último resultado fica em `estado.json` e o log do
 instalador em `instalacao.log`). `SetupMutex` impede dois instaladores ao mesmo tempo. Só
 mudanças em `app/`, `ui/`, `installer/` e nos arquivos do build geram Release.
-Detalhes de uso em [instalador/README.md](../instalador/README.md).
+Pontos de uso:
+
+- **Instalar num computador novo:** `instalador/Instalar Coletor.exe` (~20 KB, código em
+  `scripts/bootstrap/`, compilado por `scripts/bootstrap/build.ps1`) busca a última Release, só aceita
+  uma criada, com instalador e `atualizacao.json` enviados, por `github-actions[bot]`, confere tamanho,
+  SHA-256 e cabeçalho PE e abre o instalador normal. Precisa de internet. Pelo navegador, o instalador
+  também está em https://github.com/mcpmieda/coletor/releases/latest.
+- **Quem pode publicar:** o Coletor e o `Instalar Coletor.exe` só aceitam Release do workflow de
+  publicação (PR revisado na `main`); Release feita ou alterada por pessoa ou outro app é ignorada.
+- **Atualização:** confere ao abrir (2 min) e a cada 6 h; instala só fora de coleta, relatório e da janela
+  da agenda, com espaço em disco e sem bateria abaixo de 40%. Configurações, fila cifrada e chave ficam em
+  `%LOCALAPPDATA%\ColetorFrequenciaSmecel`; o instalador não mexe nelas.
+- **Versão com defeito:** publique a correção ou a reversão na `main`; instalar à mão uma versão antiga
+  não adianta, porque o Coletor volta para a mais nova.
+- **Primeira vez:** versões até 0.4.329 não se atualizam sozinhas; instale uma vez com o `Instalar Coletor.exe`.
+- **Assinatura:** sem assinatura digital paga, o SmartScreen pode avisar ao abrir o `Instalar Coletor.exe`
+  baixado pelo navegador.
