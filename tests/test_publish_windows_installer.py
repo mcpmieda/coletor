@@ -113,6 +113,9 @@ class PublishInstallerTests(unittest.TestCase):
             self.assertNotIn(text, workflow)
         self.assertIn('publish_windows_installer.py decide', workflow)
         self.assertIn('isDraft', workflow)
+        # 15/11/2026: on 404 gh printed the error body on stdout and it was taken as the latest tag.
+        self.assertIn("latest='' # gh prints the 404 body on stdout", workflow)
+        self.assertIn('Unexpected latest Release tag', workflow)
         self.assertIn('fetch-depth: 0', workflow)
         self.assertNotIn('instalador/*.exe', (ROOT / '.gitattributes').read_text('utf8'))
         self.assertEqual(list((ROOT / 'instalador').glob('*.sha256')), [])
