@@ -5,7 +5,7 @@ import argparse
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
-from coletor.demo import build_fixture, SLOT_STYLE
+from coletor.demo import build_fixture, SLOT_STYLE  # noqa: F401 - re-exported for tests/test_parser.py
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

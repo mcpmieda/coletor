@@ -5,9 +5,7 @@ No network, copied source HTML, real students, dates of birth or family data.
 """
 from __future__ import annotations
 
-import argparse
 from html import escape
-from pathlib import Path
 
 MONTHS = ("FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ")
 SLOT_STYLE = "width:16.666666666667%;float:left;border-left:#999 solid 1px;border-right:#999 solid 1px;"

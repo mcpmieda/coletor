@@ -706,7 +706,6 @@ class FrequencyRuntime:
     def tick(self):
         with self._lock:
             if self._closed or self._exiting or not self._active or self._paused: return
-            epoch = self._epoch
         if self._operation.locked():
             self._note_busy_slot()
             self._note_busy_report()
@@ -795,7 +794,9 @@ class FrequencyRuntime:
             shifts |= {k[1] for k in late}; keys |= late
             kind = 'login-catch-up' if late & self._login_missed else 'late-start'
             self._history.record(kind, label=', '.join(sorted({k[2] for k in late})))
-        self._login_missed &= self._pending_slots
+        # Kept only while still waiting: a slot requeued below stays a login catch-up next minute
+        # (self._pending_slots was just emptied, so intersecting with it lost that label).
+        self._login_missed &= late
         if shifts:
             # lease-fenced and revision-conflict are NOT blockers: a fenced batch
             # waits for a confirmed re-read and the next status carries the new
@@ -809,6 +810,7 @@ class FrequencyRuntime:
                 return
             try:
                 self._fired.update(keys)
+                self._login_missed -= keys
                 # The scheduler owns this lock until the worker finishes. This
                 # also releases it for injected test workers and early errors.
                 def run_scheduled():

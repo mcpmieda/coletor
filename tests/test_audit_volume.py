@@ -1,6 +1,5 @@
 import importlib.util
 from pathlib import Path
-import re
 import unittest
 from coletor.service import preview
 from coletor.limits import MAX_HTML_BYTES, MAX_REQUEST_BYTES

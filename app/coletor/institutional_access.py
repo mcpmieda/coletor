@@ -4,7 +4,7 @@ This module never treats the current /api/me identity response as a collector
 authorization or revocation receipt. No provider is installed by default.
 """
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 import threading
 import time
 from typing import Callable, Protocol, TypeVar

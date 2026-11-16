@@ -2,9 +2,8 @@ import json
 import threading
 import unittest
 from http.client import HTTPConnection
-from pathlib import Path
 from coletor.server import PreviewServer
-from coletor.service import PreviewApi, preview
+from coletor.service import PreviewApi
 
 
 class PreviewServiceTests(unittest.TestCase):
