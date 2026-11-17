@@ -39,6 +39,6 @@ cifrada, configurações pessoais ou dados de outros aplicativos. Ela também
 NÃO equivale à revogação de um computador autorizado. Não exclua arquivos de
 chave ou perfis para forçar o processo.
 
-O instalador ainda não tem assinatura digital reconhecida pelo Windows. Se
-o Windows avisar sobre o editor do instalador, não desative proteções: peça
-orientação.
+O instalador é assinado com o certificado da própria escola, que o Windows
+não reconhece como o de uma autoridade paga. Se o Windows avisar sobre o
+editor do instalador, não desative proteções: peça orientação.

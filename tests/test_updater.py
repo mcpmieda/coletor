@@ -16,6 +16,7 @@ from coletor import updater  # noqa: E402
 from coletor.frequency_runtime import FrequencyRuntime  # noqa: E402
 
 SCRIPT = (ROOT / "installer/Coletor.iss").read_text(encoding="utf-8-sig")
+SCHOOL = next(iter(updater.SIGNERS))
 
 
 def setup_bytes(size=1_200_000):
@@ -173,7 +174,7 @@ class UpdaterTests(unittest.TestCase):
         self.launched = []
 
     def make(self, current='0.4.329', latest='0.4.330', *, safe=lambda: True, power=lambda: True,
-             space=lambda folder, size: True, clock=lambda: 1_000_000):
+             space=lambda folder, size: True, clock=lambda: 1_000_000, signer=lambda path: SCHOOL):
         def download(manifest, folder):
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / manifest['arquivo']
@@ -181,7 +182,7 @@ class UpdaterTests(unittest.TestCase):
             return path
         return updater.Updater(current, self.install / 'programa', self.settings, safe_now=safe,
                                launch=self.launched.append, download=download, power=power, space=space,
-                               clock=clock, clear_resume=lambda: None,
+                               clock=clock, clear_resume=lambda: None, signer=signer,
                                fetch=lambda url, limit=None: json.dumps(
                                    release_for(manifest_for(latest, self.raw)) if 'api.github.com' in url
                                    else manifest_for(latest, self.raw)).encode())
@@ -195,6 +196,31 @@ class UpdaterTests(unittest.TestCase):
     def test_newer_version_is_installed(self):
         self.assertTrue(self.make().check_once())
         self.assertEqual([p.name for p in self.launched], ['COLETOR-v0.4.330.exe'])
+
+    def test_an_installer_the_school_did_not_sign_is_never_run(self):
+        # A Release can be written as github-actions[bot] by a workflow of any branch; only main signs.
+        for who in (None, 'f' * 64):  # No intact signature; someone else's certificate.
+            item = self.make(signer=lambda path, who=who: who)
+            with self.assertRaisesRegex(updater.UpdateError, 'untrusted-signature'):
+                item.check_once()
+            self.assertEqual(self.launched, [])
+            self.assertEqual(list((self.settings / 'atualizacao').glob('*.exe')), [])  # Not kept for a later try.
+
+    def test_the_installer_and_the_first_install_accept_the_same_certificates(self):
+        source = (ROOT / 'scripts/bootstrap/InstalarColetor.cs').read_text(encoding='utf-8')
+        listed = re.search(r'Signers = \{([^}]*)\}', source).group(1)
+        self.assertEqual(set(re.findall(r'"([0-9a-f]{64})"', listed)), set(updater.SIGNERS))
+        self.assertTrue(all(updater.HEX_HASH.fullmatch(item) for item in updater.SIGNERS))
+
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows Authenticode')
+    def test_a_file_with_no_signature_has_no_signer(self):
+        # Signed and changed files are checked with real certificates by scripts/check_windows_signature.py.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'setup.exe'
+            path.write_bytes(setup_bytes())
+            self.assertIsNone(updater.signer(path))
+            self.assertIsNone(updater.signer(Path(folder) / 'missing.exe'))
+        self.assertNotIn(updater.signer(sys.executable), updater.SIGNERS)
 
     def test_same_or_older_version_does_nothing_and_cleans_old_downloads(self):
         folder = self.settings / 'atualizacao'

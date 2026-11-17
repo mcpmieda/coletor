@@ -22,12 +22,10 @@ def worker(output, runtime):
     root = Path(__file__).resolve().parents[1]
     suite = unittest.defaultTestLoader.discover(str(root / 'tests'), pattern='test_frequency_runtime.py')
     result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    # Only what was measured here: the suite ran in the bundled interpreter (checked above), on
+    # Windows, with its native DPAPI and instance-lock tests not skipped.
     report = {'test': 'portable_windows_frequency_v2', 'status': 'passed' if result.wasSuccessful() and not result.skipped else 'failed',
-              'bundled_runtime': True, 'synthetic_data_only': True, 'real_network': False, 'real_accounts': False,
-              'tests': result.testsRun, 'failures': len(result.failures), 'errors': len(result.errors), 'skips': len(result.skipped),
-              'checks': {'native_dpapi': result.wasSuccessful() and not result.skipped,
-                         'runtime_receipts_pause_fencing_cancellation': result.wasSuccessful(),
-                         'instance_lock': result.wasSuccessful(), 'no_named_keys': True}}
+              'tests': result.testsRun, 'failures': len(result.failures), 'errors': len(result.errors), 'skips': len(result.skipped)}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2), encoding='utf-8')
     return 0 if report['status'] == 'passed' else 1

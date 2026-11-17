@@ -113,9 +113,15 @@ def run(installer, expected_sha, output):
         unrelated.mkdir()
         sentinel = unrelated / "do-not-touch.txt"
         sentinel.write_text("synthetic-sentinel", encoding="utf-8")
-        report = {"status": "failed", "checks": {}, "real_accounts": False, "real_network": False}
+        report = {"status": "failed", "checks": {}}
         uninstaller = installed / "unins000.exe"
+        # Shortcuts an older Coletor left (installer/Coletor.iss, [InstallDelete]): the installation removes them.
+        menu = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs"
+        legacy_shortcuts = [menu / "Startup/Coletor de Frequência.lnk", menu / "Coletor de Frequência.lnk"]
         try:
+            for shortcut in legacy_shortcuts:
+                shortcut.parent.mkdir(parents=True, exist_ok=True)
+                shortcut.write_bytes(b"synthetic-legacy-shortcut")
             command = [str(installer), *INSTALL_FLAGS, "/DIR=" + str(installed)]
             result = subprocess.run(command, capture_output=True, timeout=150, check=False)
             if result.returncode != 0:
@@ -132,6 +138,12 @@ def run(installer, expected_sha, output):
                 path = installed / item["path"]
                 if not path.is_file() or path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
                     raise RuntimeError("installer-file-hash-mismatch")
+            # The Coletor deletes, at its next opening, what the program folder holds beyond this
+            # inventory (app/coletor/leftovers.py): a file the installer puts there must be in it.
+            listed = {Path(item["path"]) for item in files}
+            unlisted = [p for p in (installed / "programa").rglob("*") if p.is_file() and p.relative_to(installed) not in listed]
+            if unlisted:
+                raise RuntimeError("installed-program-file-not-in-inventory")
             report["checks"]["source_commit_and_full_inventory"] = True
             from check_windows_launcher import builder
             launcher = installed / "programa/ColetorFrequencia.exe"
@@ -152,9 +164,9 @@ def run(installer, expected_sha, output):
             if help_run.returncode != 0 or b"--safe-removal" not in help_run.stdout:
                 raise RuntimeError("installed-runtime-unavailable")
             report["checks"]["installed_runtime_and_uninstaller"] = True
-            startup = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup/Coletor de Frequência.lnk"
-            if startup.exists():
-                raise RuntimeError("legacy-startup-shortcut-left")
+            if any(shortcut.exists() for shortcut in legacy_shortcuts):
+                raise RuntimeError("legacy-shortcut-left")
+            report["checks"]["legacy_shortcuts_removed"] = True
             query = subprocess.run(["schtasks", "/Query", "/TN", LOGON_TASK, "/XML"], capture_output=True, timeout=30)
             if query.returncode:
                 raise RuntimeError("logon-task-missing")
@@ -169,7 +181,6 @@ def run(installer, expected_sha, output):
                     or task.findtext("t:Principals/t:Principal/t:RunLevel", "LeastPrivilege", ns) != "LeastPrivilege"):
                 raise RuntimeError("installed-logon-task-contract-mismatch")
             report["checks"]["startup_targets_native_launcher_in_background"] = True
-            report["checks"]["opens_at_windows_sign_in_by_default"] = True
             check_upgrade_over_running_app(installer, installed, root, report)
             # The uninstaller closes the reopened Coletor before removing its files.
             # Outside the temporary folder: the uninstaller's own copy may still hold its log for a moment
@@ -197,6 +208,7 @@ def run(installer, expected_sha, output):
             report["checks"]["uninstall_preserves_unrelated_data"] = True
             report["status"] = "passed"
         finally:
+            for shortcut in legacy_shortcuts: shortcut.unlink(missing_ok=True)
             if installed.exists():
                 for pid in installed_processes(installed):
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=30)
