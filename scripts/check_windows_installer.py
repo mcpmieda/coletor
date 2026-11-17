@@ -138,13 +138,23 @@ def run(installer, expected_sha, output):
                 path = installed / item["path"]
                 if not path.is_file() or path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
                     raise RuntimeError("installer-file-hash-mismatch")
-            # The Coletor deletes, at its next opening, what the program folder holds beyond this
-            # inventory (app/coletor/leftovers.py): a file the installer puts there must be in it.
-            listed = {Path(item["path"]) for item in files}
-            unlisted = [p for p in (installed / "programa").rglob("*") if p.is_file() and p.relative_to(installed) not in listed]
-            if unlisted:
-                raise RuntimeError("installed-program-file-not-in-inventory")
             report["checks"]["source_commit_and_full_inventory"] = True
+            # At its next opening the Coletor deletes what the program folder holds beyond this inventory
+            # (app/coletor/leftovers.py), by this very rule: nothing the installer puts there may be
+            # taken for a leftover, and a file of an earlier version is.
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+            from coletor.leftovers import leftovers
+            module = installed / "programa/app/coletor/leftovers.py"
+            stale = installed / "programa/ui/dist/assets/index-versao-anterior.js"
+            stale.write_text("synthetic leftover", encoding="utf-8")
+            try:
+                found = leftovers(installed, manifest["product_version"], module)
+            finally:
+                stale.unlink()
+            if found != [stale.resolve()]:
+                print("taken for leftovers:", sorted(p.relative_to(installed.resolve()).as_posix() for p in found if p != stale.resolve())[:20], file=sys.stderr)
+                raise RuntimeError("installed-program-file-taken-for-a-leftover")
+            report["checks"]["only_an_earlier_version_s_files_are_leftovers"] = True
             from check_windows_launcher import builder
             launcher = installed / "programa/ColetorFrequencia.exe"
             metadata = builder.inspect_binary(launcher)

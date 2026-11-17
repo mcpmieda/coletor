@@ -138,6 +138,8 @@ jobs:
           # Every build runs the same signing and the same checks as a published one.
           $Bundle = powershell -NoProfile -ExecutionPolicy Bypass -File installer/new-signing-certificate.ps1 -Throwaway
           if ($LASTEXITCODE -ne 0 -or -not $Bundle) { throw 'Throwaway signing certificate unavailable' }
+          # Worth nothing outside this run, but a key all the same: never printed in the log.
+          Write-Output "::add-mask::$Bundle"
           "THROWAWAY_SIGNING_BUNDLE=$Bundle" >> $env:GITHUB_ENV
       - name: Assemble official embedded runtime and application
         env:
