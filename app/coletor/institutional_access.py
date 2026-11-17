@@ -10,7 +10,6 @@ import time
 from typing import Callable, Protocol, TypeVar
 
 OFFICIAL_ORIGIN = "https://admin.escolaieda.com"
-OFFICIAL_LOGIN_URL = OFFICIAL_ORIGIN + "/auth/login"
 # Proposed contract, not an assertion that this route exists in production.
 PROPOSED_ACCESS_URL = OFFICIAL_ORIGIN + "/api/frequency-collector/access"
 PROPOSED_CAPABILITY = "frequency.collector.use"
