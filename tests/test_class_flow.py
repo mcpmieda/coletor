@@ -53,6 +53,31 @@ class ClassFlowTests(unittest.TestCase):
         self.session.save_choices(gen, [], saved['selection_revision'], clear=True)
         self.assertFalse(self.session.has_saved_class_selection())
 
+    def test_a_run_finishes_the_cleanup_the_last_one_could_not(self):
+        class Storage:
+            def load_credential(self): return None
+            def load_session(self): return {'cookies': [], 'origins': []}
+            def save_session(self, state): pass
+        self.driver.export_state = lambda: {'cookies': [], 'origins': []}
+        storage = Storage()
+        self.session.operational_catalog(storage)
+        # The run ends; Windows still holds the browser's temporary files.
+        held = [True]
+        def close():
+            if held[0]: raise OSError('SYNTHETIC_PRIVATE_PATH_DO_NOT_ECHO')
+        self.driver.close = close
+        with self.assertRaises(SessionError): self.session.preserve_and_close(storage)
+        self.assertTrue(self.session.status()['cleanup_pending'])
+        # Still held at the next run: that run does not open a second browser.
+        with self.assertRaises(SessionError): self.session.operational_catalog(storage)
+        self.assertEqual(len(self.driver.opened), 1)
+        # Released: the next run finishes the cleanup and reads the list as usual.
+        held[0] = False
+        listed = self.session.operational_catalog(storage)
+        self.assertEqual(len(listed['catalog']['classes']), 2)
+        self.assertEqual(len(self.driver.opened), 2)
+        self.assertFalse(self.session.status()['cleanup_pending'])
+
     def test_login_first_does_not_open_diary_or_student_links(self):
         gen=self.enter()
         self.assertEqual(self.driver.opened,[list_url(2026)])
