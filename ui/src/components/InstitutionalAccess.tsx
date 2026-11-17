@@ -41,7 +41,6 @@ function loginFailureMessage(code?: string): string {
     DEVICE_KEY_UNAVAILABLE: 'O Windows não conseguiu preparar a chave protegida deste perfil. Confira as permissões do dispositivo.',
     DEVICE_KEY_MISSING: 'A chave protegida do computador não foi encontrada. Não exclua arquivos; solicite suporte.',
     DEVICE_STATE_INVALID: 'O estado de segurança deste computador está inconsistente. Não exclua chaves nem lotes; solicite suporte.',
-    DEVICE_ACTIVATION_CANCELLED: 'A autorização da chave do dispositivo foi cancelada na confirmação do Windows.',
     ACCESS_CLEANUP_PENDING: 'Há uma limpeza de acesso pendente; conclua a saída antes de tentar novamente.',
     SERVER_REVOCATION_PENDING: 'A revogação do vínculo anterior ainda precisa ser concluída.',
     PENDING_BATCHES: 'Há lotes sem recibo. Confira os recibos e não exclua dados antes de trocar o acesso.',

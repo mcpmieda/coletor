@@ -145,6 +145,11 @@ de criar chave Windows. TPM é padrão; Software KSP exige decisão adicional.
 A chave privada nunca é exportada. device.json guarda somente identificadores
 públicos e estado de limpeza, nunca senha, cookie, refresh ou segredo de polling.
 
+Desde 17/11/2026 (autorização em um clique) a confirmação nativa existe só para
+o Software KSP. Com chave no TPM, a decisão humana é o clique em Autorizar este
+computador no navegador oficial: uma chave que o servidor não aceitou não
+autoriza nada. A caixa do Software KSP abre na frente das outras janelas.
+
 O navegador oficial exige código de seis dígitos mostrado exclusivamente no PC,
 checkbox explícito, CSRF, state/nonce exclusivo e PKCE. Microsoft permanece no
 navegador; o callback valida o ID token e consulta somente o próprio usuário.

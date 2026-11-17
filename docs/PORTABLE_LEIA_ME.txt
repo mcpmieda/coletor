@@ -16,9 +16,11 @@ Requer Windows 10/11 x64, Microsoft Edge, WebView2 e .NET Framework 4.8 existent
 Nenhuma dependência, serviço ou tarefa de inicialização é instalada pelo pacote.
 
 ENTRAR E PREPARAR
-1. Entre no Ecossistema, pelo navegador oficial, com uma conta autorizada.
-2. Confirme na janela do Windows a autorização deste computador.
-   A chave fica protegida pelo Windows; TPM é padrão. Software exige outra confirmação.
+1. Clique em Entrar no Ecossistema. O navegador oficial abre: entre com uma
+   conta autorizada.
+2. No navegador, clique em Autorizar este computador. O Coletor continua sozinho.
+   A chave fica protegida pelo Windows, no TPM. Só em computador sem TPM o
+   Windows pergunta antes se pode guardar a chave por software.
    A senha e os tokens Microsoft não ficam no Coletor.
 3. Em Acesso ao Smecel, salve o e-mail e a senha do Smecel; ficam protegidos
    pelo Windows e permitem que o Coletor entre sozinho.

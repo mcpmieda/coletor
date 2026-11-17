@@ -27,7 +27,7 @@
 | Cifra servidor | Aprovar e configurar COLLECTOR_REFRESH_KEY, 32 bytes aleatórios em base64url sem padding, exclusivo da cifra. | Nunca SESSION_SECRET ou segredo no ZIP/PC; não gerar nem expor chave nesta preparação. |
 | Publicação | Autorizar merge/deploy das PRs e ativar COLLECTOR_ENABLED=true após gates. | PRs continuam draft; CI aprovado não autoriza publicação. OFFICIAL_ORIGIN deve ser https://admin.escolaieda.com. |
 | Microsoft | Operador valida próprio User.Read, auth_time, accountEnabled, marcador de revogação e grupo ADMIN. | Falta/null/403 bloqueiam; consentimento ou segurança adicional exigem confirmação própria. Não ampliar permissões. |
-| PC | Responsável confirma cada primeira criação de chave persistente. | TPM é padrão; Software KSP exige escolha adicional. QA anônimo não comprova TPM/persistência real. |
+| PC | Responsável autoriza o computador no navegador (Autorizar este computador). | TPM é padrão e não pergunta nada no Windows; Software KSP exige confirmação no Windows. QA anônimo não comprova TPM/persistência real. |
 
 Usar a credencial técnica Web existente. Não criar certificado novo ou permissão
 ampla para contornar configuração incompleta. A Biblioteca preserva o ZIP antigo;
