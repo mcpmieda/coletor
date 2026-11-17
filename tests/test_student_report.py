@@ -317,8 +317,11 @@ class ReportRunTests(unittest.TestCase):
         personal = {str(value) for value in PROFILE_SENT.values() if isinstance(value, str)} | {'ALUNA SINTETICA', 'MAE SINTETICA'}
         self.assertEqual(self.storage.load_copy('student-report'),
                          {'contentHash': report_hash(self.rows), 'sentOn': self.storage.load_copy('student-report')['sentOn']})
-        shown = json.dumps([self.runtime.recent_history(50), self.runtime.public_status(),
-                            self.sent('student-report-unchanged')], ensure_ascii=False, default=str)
+        # Without what changes from run to run (a random id, a duration): '120', the synthetic house
+        # number, turned up inside a requestId once in a few hundred runs (17/11/2026).
+        steady = lambda items, *drop: [{k: v for k, v in item.items() if k not in drop} for item in items]
+        shown = json.dumps([steady(self.runtime.recent_history(50), 'readMs', 'sendMs'), self.runtime.public_status(),
+                            steady(self.sent('student-report-unchanged'), 'requestId')], ensure_ascii=False, default=str)
         on_disk = b''.join(bytes(b ^ 91 for b in path.read_bytes()) + path.read_bytes()   # SyntheticCrypto is a XOR.
                            for path in Path(self.directory.name).rglob('*') if path.is_file())
         self.assertIn(b'contentHash', on_disk)
