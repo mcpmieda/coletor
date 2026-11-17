@@ -41,6 +41,19 @@ class StartupSnapshotTests(unittest.TestCase):
         from coletor import __version__
         self.assertEqual(snapshot['version'], __version__)
 
+    def test_the_summary_on_disk_never_names_a_student_of_the_report(self):
+        # The Ecossistema's notes of the last student report name the students of the rows it refused.
+        (self.path / 'device.json').write_text(json.dumps({'state': 'active'}), encoding='utf-8')
+        report = {'outcome': 'review', 'rows': 2, 'notes': {
+            'counts': {'rows': 2, 'linked': 1, 'pending': 1},
+            'invalid': [{'sourceRow': 3, 'name': 'ALUNA SINTETICA', 'classLabel': '6A', 'field': 'birthDate', 'reason': 'x'}],
+            'differences': ['ALUNA SINTETICA mudou de turma']}}
+        self.api._remember_status(self.status(studentReport=report))
+        self.assertNotIn('SINTETICA', (self.path / 'ui-snapshot.json').read_text(encoding='utf-8'))
+        kept = self.api.get_startup_snapshot()['status']['studentReport']
+        self.assertEqual((kept['outcome'], kept['notes']), ('review', {'counts': {'rows': 2, 'linked': 1, 'pending': 1}, 'invalid': [], 'differences': []}))
+        self.assertEqual(len(report['notes']['invalid']), 1)  # The live answer the window holds is untouched.
+
     def test_snapshot_saved_while_collecting_reopens_safe_and_without_history(self):
         (self.path / 'device.json').write_text(json.dumps({'state': 'active'}), encoding='utf-8')
         self.api._remember_status(self.status(state='collecting'))

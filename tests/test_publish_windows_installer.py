@@ -119,10 +119,15 @@ class PublishInstallerTests(unittest.TestCase):
 
     def test_the_first_install_program_is_built_by_the_ci_and_reads_what_the_updater_reads(self):
         """Owner request 16/11/2026: "Instalar Coletor.exe" downloads the newest Release. Since 17/11/2026 it
-        is built, signed and published by the CI with every Release, never compiled by hand into the repository."""
-        tracked = __import__('subprocess').run(['git', 'ls-files', '*.exe'], cwd=ROOT, capture_output=True,
-                                               text=True, check=True).stdout.split()
-        self.assertEqual(tracked, [])
+        is built, signed and published by the CI with every Release, never compiled by hand. The copy in
+        instalador/ (owner request 17/11/2026: easy to find) is one of those published files; the Windows
+        CI refuses it without the school's signature (scripts/check_windows_signature.py)."""
+        tracked = __import__('subprocess').run(['git', 'ls-files', '-z', '*.exe'], cwd=ROOT, capture_output=True,
+                                               text=True, check=True).stdout.split('\0')
+        self.assertEqual([path for path in tracked if path], ['instalador/Instalar Coletor.exe'])
+        self.assertEqual((ROOT / 'instalador/Instalar Coletor.exe').read_bytes()[:2], b'MZ')
+        self.assertEqual(publish_decision(newer_head_changes=[], since_release_changes=['instalador/Instalar Coletor.exe']),
+                         'program-unchanged')  # Refreshing the copy makes no computer reinstall.
         source = (ROOT / 'scripts/bootstrap/InstalarColetor.cs').read_text(encoding='utf-8')
         from coletor import updater
         self.assertIn(f'const string Publisher = "{updater.PUBLISHER}"', source)
@@ -132,6 +137,7 @@ class PublishInstallerTests(unittest.TestCase):
         checks = (ROOT / '.github/workflows/checks.yml').read_text('utf8')
         self.assertIn(f"$First = 'dist/windows-installer/{BOOTSTRAP}'", checks)
         self.assertIn('scripts/check_windows_signature.py', checks)
+        self.assertIn("--repository-copy 'instalador/Instalar Coletor.exe'", checks)
 
     def test_workflow_publishes_releases_not_repository_files(self):
         workflow = (ROOT / '.github/workflows/publish-installer.yml').read_text('utf8')

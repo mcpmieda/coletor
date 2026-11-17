@@ -222,6 +222,10 @@ class UpdaterTests(unittest.TestCase):
             self.assertIsNone(updater.signer(Path(folder) / 'missing.exe'))
         self.assertNotIn(updater.signer(sys.executable), updater.SIGNERS)
 
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows Authenticode')
+    def test_the_copy_in_the_instalador_folder_is_one_the_school_signed(self):
+        self.assertIn(updater.signer(ROOT / 'instalador' / 'Instalar Coletor.exe'), updater.SIGNERS)
+
     def test_same_or_older_version_does_nothing_and_cleans_old_downloads(self):
         folder = self.settings / 'atualizacao'
         folder.mkdir(parents=True)
@@ -367,8 +371,18 @@ class UpdateWindowTests(unittest.TestCase):
         self.assertFalse(item.update_allowed(collecting=True))  # Collecting, agenda not known yet.
         item._status = {'settings': {'schedule': self.schedule(['12:00']), 'reportSchedule': None}}
         self.assertTrue(item.update_allowed())
-        item._status = {'settings': {'schedule': self.schedule(['03:05']), 'reportSchedule': None}}
-        self.assertFalse(item.update_allowed())  # A collection in five minutes.
+        # Between one collection and the next (owner decision 17/11/2026), never right before or after one.
+        item._status = {'settings': {'schedule': self.schedule(['02:45', '03:05']), 'reportSchedule': None}}
+        self.assertTrue(item.update_allowed())  # The next one in five minutes: time enough.
+        item._status = {'settings': {'schedule': self.schedule(['03:03']), 'reportSchedule': None}}
+        self.assertFalse(item.update_allowed())  # In three minutes.
+        item._status = {'settings': {'schedule': self.schedule(['02:58']), 'reportSchedule': None}}
+        self.assertFalse(item.update_allowed())  # Two minutes ago: its run is about to begin.
+        item._status = {'settings': {'schedule': self.schedule(['02:57']), 'reportSchedule': None}}
+        self.assertTrue(item.update_allowed())
+        report = {'timezone': 'America/Bahia', 'enabled': True, 'every': 30, 'from': '03:02', 'to': '04:00', 'weekdays': list(range(7))}
+        item._status = {'settings': {'schedule': self.schedule(['12:00']), 'reportSchedule': report}}
+        self.assertFalse(item.update_allowed())  # A report in two minutes.
         item._status = {'settings': {'schedule': self.schedule(['12:00']), 'reportSchedule': None}}
         with item._operation:
             self.assertFalse(item.update_allowed())

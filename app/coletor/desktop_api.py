@@ -192,6 +192,11 @@ class DesktopApi(PreviewApi):
             # Read before the live access check: only whether an access exists,
             # never the (masked) account.
             clean['credential'] = {'saved': bool((clean.get('credential') or {}).get('saved'))}
+            # The report's notes name the students of the rows the Ecossistema refused or changed:
+            # the window shows them from the live answer, and this file keeps the counts alone.
+            report = clean.get('studentReport')
+            if isinstance(report, dict) and isinstance(report.get('notes'), dict):
+                clean['studentReport'] = {**report, 'notes': {**report['notes'], 'invalid': [], 'differences': []}}
             payload = json.dumps({'version': 1, 'savedAt': time.time(), 'status': clean}, ensure_ascii=False)
             if len(payload) > 64_000: return
             directory = self._snapshot_path().parent
