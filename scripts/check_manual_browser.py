@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKS = ["external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
           "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
           "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
-          "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored']
+          "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored',
+          'diary_read_without_opening']
 
 
 async def wait_for_popup_shutdown(context, timeout=5.0):
@@ -36,7 +37,7 @@ async def wait_for_popup_shutdown(context, timeout=5.0):
 async def exercise_browser(output):
     from coletor.demo import build_fixture
     from coletor.manual_session import captured_preview, source_url
-    from coletor.manual_worker import CAPTURE_JS, configure_context, configure_page, browser_options
+    from coletor.manual_worker import CAPTURE_JS, DIARY_JS, configure_context, configure_page, browser_options
     from coletor.origin_proxy import OriginProxy, verify_proxy
     from playwright.async_api import async_playwright
     spec = importlib.util.spec_from_file_location('qa_https', Path(__file__).with_name('qa_https.py'))
@@ -51,6 +52,9 @@ async def exercise_browser(output):
     <script>window.qaScript='QA_SCRIPT_SECRET';setTimeout(()=>document.querySelector('.container-fluid').insertAdjacentHTML('beforeend','<input class=qa-dynamic-field value=QA_DYNAMIC_SECRET>'),50)</script>
     <span data-secret="QA_ATTRIBUTE_SECRET" onclick="QA_EVENT_SECRET()" style="background:url(QA_STYLE_SECRET)"></span>"""
     raw = raw.replace('<div class="container-fluid">', '<div class="container-fluid">' + attack, 1)
+    # One student with a sixth field after the five known ones, as a transferred student has.
+    enrolled = 'Data da matrícula: <strong>[não coletado]</strong>'
+    raw = raw.replace(enrolled, enrolled + '<br>Situação: <strong>TRANSFERIDO</strong>', 1)
     url = source_url("13331", 2026)
     checks = {}
     with qa.SyntheticHttps(raw) as source, OriginProxy(dial=source.dial) as proxy:
@@ -79,6 +83,12 @@ async def exercise_browser(output):
                            'QA_SCRIPT_SECRET', 'QA_DYNAMIC_SECRET', 'QA_EVENT_SECRET', 'QA_STYLE_SECRET',
                            'QA_BIRTH_SECRET', 'QA_PARENT_SECRET', 'QA_ENROLLMENT_SECRET']
                 checks["credentials_removed"] = all(marker not in json.dumps(payload) for marker in markers) and '<script' not in payload['html']
+                # A collection reads the diary without opening it: the same capture, to the byte, from
+                # a document that ran none of the page's scripts; and never from a login page.
+                read = await page.evaluate(DIARY_JS, url)
+                moved = await page.evaluate(DIARY_JS, '/qa-allowed-redirect')
+                checks['diary_read_without_opening'] = (read == payload and bool(payload['html'])
+                                                        and moved.get('html') == '' and moved.get('url') != url)
                 result = captured_preview(payload, "13331", 2026)
                 checks["manual_preview_blocked"] = not result["validation"]["allowed"] and not result["capture"]["identity_verified"]
                 await page.evaluate("document.querySelector('.container-fluid').insertAdjacentHTML('beforeend','<input type=password value=QA_PASSWORD_SECRET>')")

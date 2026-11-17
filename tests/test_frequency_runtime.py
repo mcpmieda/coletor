@@ -141,6 +141,44 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.tick()  # Nothing waits to run again.
         self.assertEqual(self.source.reads, 1)
 
+    def test_a_heartbeat_never_carries_a_concession_being_replaced(self):
+        # 15 to 35 times a school day: the heartbeat read the concession, the class loop took a new
+        # one, and the heartbeat reached the Ecossistema after it ('lease-fenced' in the failure list).
+        self.runtime._acquire(self.runtime._fresh())
+        answer, sent, go, stale = self.provider.frequency_request, threading.Event(), threading.Event(), []
+        def frequency_request(payload):
+            if payload['operation'] == 'heartbeat':
+                sent.set()
+                go.wait(5)  # On its way to the Ecossistema.
+                if payload['fencingToken'] != self.provider.fence: stale.append(payload['fencingToken'])
+            return answer(payload)
+        self.provider.frequency_request = frequency_request
+        beat = threading.Thread(target=lambda: self.runtime._heartbeat(self.runtime._epoch))
+        beat.start()
+        self.assertTrue(sent.wait(5))
+        renew = threading.Thread(target=lambda: self.runtime._acquire(self.runtime._fresh(), force=True))
+        renew.start()
+        renew.join(0.3)  # The next class's concession waits for the heartbeat's answer.
+        self.assertEqual(self.provider.fence, 1)
+        go.set()
+        beat.join(5); renew.join(5)
+        self.assertEqual((stale, self.provider.fence, self.runtime._lease['fencingToken']), ([], 2, 2))
+
+    def test_a_lapsed_concession_is_not_released_on_closing_or_pausing(self):
+        # 16/11/2026: the installer closed the Coletor long after a run; the release of that run's
+        # lapsed concession was refused and listed as a failure.
+        for stop in (self.runtime.shutdown, lambda: self.runtime.cancel(pause=True)):
+            self.runtime._acquire(self.runtime._fresh(), force=True)
+            self.provider.requests.clear()
+            self.provider.now += frequency_runtime.LEASE_SECONDS
+            stop()
+            self.assertEqual([r['operation'] for r in self.provider.requests], [])
+            self.provider.now += 1
+        self.runtime._closed = False
+        self.runtime._acquire(self.runtime._fresh(), force=True)
+        self.runtime.shutdown()  # A live one is still given back.
+        self.assertEqual(self.provider.requests[-1]['operation'], 'release')
+
     def test_real_flow_selected_worker_sparse_sixth_slot_receipt_and_no_uid(self):
         outside, request = [], self.provider.frequency_request
         def bracketed(payload):
@@ -200,6 +238,7 @@ class RuntimeTests(unittest.TestCase):
         done = {**status, 'collections': [{'classId': 10, 'receivedAt': stamp(self.provider.now)}]}
         self.assertFalse(self.runtime._take_over(done, now))
         # It stopped before the class: this computer runs the slot once, at once.
+        self.provider.fail_lease = True; self.runtime.collect({'matutino'}); self.provider.fail_lease = False
         self.assertTrue(self.runtime._take_over(status, now))
         self.runtime._operation.acquire(); self.runtime._operation.release()
         self.assertEqual([p['classId'] for p in self.provider.requests if p['operation'] == 'collect'], [10])

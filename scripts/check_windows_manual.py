@@ -66,14 +66,14 @@ def synthetic_browser(progress):
     def configure_page(page):
         original_page(page)
         evaluate = page.evaluate
-        async def delayed(script):
+        async def delayed(script, *arguments):
             nonlocal captures
-            if script == module.CAPTURE_JS:
+            if script in (module.CAPTURE_JS, module.DIARY_JS):
                 captures += 1
                 if captures == 2:
                     Path(progress).with_name('second-capture-started.json').write_text('{"started":true}', encoding='utf-8')
                 await asyncio.sleep(1)
-            return await evaluate(script)
+            return await evaluate(script, *arguments)
         page.evaluate = delayed
     def no_network():
         raise OSError('synthetic_upstream_forbidden')

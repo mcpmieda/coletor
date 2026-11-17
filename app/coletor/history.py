@@ -20,6 +20,7 @@ from .local_settings import user_settings_directory
 RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_ENTRIES = 2000
 COMPACT_SLACK = 500  # Appended lines tolerated before rewriting the file.
+RETENTION_COMPACT_SECONDS = 3600  # Facts past the retention leave the disk at most this late.
 MAX_READ_BYTES = 2 * 1024 * 1024
 MAX_NOTICES = 20
 KINDS = {'activated', 'paused', 'resumed', 'collection-started', 'class-sent', 'collection-finished',
@@ -48,6 +49,7 @@ class CollectorHistory:
         self._lock = threading.Lock()
         self._lines = None  # Lines in the file, counted once, then tracked.
         self._oldest = self._last = None  # Oldest and newest 'at' in the file.
+        self._compacted = None  # When this opening last rewrote the file.
 
     def _read(self):
         try:
@@ -110,8 +112,9 @@ class CollectorHistory:
                 cutoff = self._clock() - RETENTION_SECONDS
                 # Compact when the file grew past the limit OR holds anything
                 # older than the retention: old facts leave the disk, not just the view.
-                if (self._lines < MAX_ENTRIES + COMPACT_SLACK and self._oldest >= cutoff
-                        and not self.path.is_symlink()):
+                stale = self._oldest < cutoff and (self._compacted is None
+                                                   or self._clock() - self._compacted >= RETENTION_COMPACT_SECONDS)
+                if self._lines < MAX_ENTRIES + COMPACT_SLACK and not stale and not self.path.is_symlink():
                     self.path.parent.mkdir(parents=True, exist_ok=True)
                     with self.path.open('a', encoding='utf-8', newline='\n') as file:
                         file.write(json.dumps(entry, ensure_ascii=False, separators=(',', ':')) + '\n')
@@ -119,6 +122,7 @@ class CollectorHistory:
                     return
                 kept = [e for e in self._read() if e['at'] >= cutoff][-(MAX_ENTRIES - 1):]
                 kept.append(entry)
+                self._compacted = self._clock()
                 self._lines = len(kept)
                 self._oldest = kept[0]['at']
                 self.path.parent.mkdir(parents=True, exist_ok=True)

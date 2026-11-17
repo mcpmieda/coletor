@@ -1,15 +1,17 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Modal, Table, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { AlertTriangle, Info, RefreshCw, XCircle } from 'lucide-react';
-import type { HistoryEntry } from '../collector';
+import { HISTORY_LIMIT, type HistoryEntry } from '../collector';
 import { fmtDate, fmtDuration, groupReportRuns, groupRuns, logEvents, runSummary, type Level } from './runs';
 import { StatusChip } from './ui';
 import type { ColetorState } from './useColetor';
 
 const seconds = (ms?: number) => (ms === undefined ? '—' : `${(ms / 1000).toFixed(1).replace('.', ',')} s`);
 
+// Both pages are memoised: the window renders again at every status poll (each 5 s while
+// collecting) and their lists, Registros with every event kept, only change with the history.
 // ------------------------------------------------------------------ Histórico
-export function HistoryPage({ history, inProgress }: Readonly<Pick<ColetorState, 'history' | 'inProgress'>>) {
+export const HistoryPage = memo(function HistoryPage({ history, inProgress }: Readonly<Pick<ColetorState, 'history' | 'inProgress'>>) {
   const runs = useMemo(() => groupRuns(history, inProgress.run), [history, inProgress.run]);
   const reports = useMemo(() => groupReportRuns(history, inProgress.report), [history, inProgress.report]);
   // The id, not the run: the details of a run still going follow it as its classes arrive.
@@ -114,7 +116,7 @@ export function HistoryPage({ history, inProgress }: Readonly<Pick<ColetorState,
       </Modal.Backdrop>
     </div>
   );
-}
+});
 
 // ------------------------------------------------------------------ Registros
 const LEVEL_ICON: Record<Level, ReactNode> = {
@@ -123,7 +125,7 @@ const LEVEL_ICON: Record<Level, ReactNode> = {
   error: <XCircle size={15} className="text-danger" />,
 };
 
-export function LogsPage({ history, error, onRetry }: Readonly<{ history: HistoryEntry[]; error?: string; onRetry?: () => void }>) {
+export const LogsPage = memo(function LogsPage({ history, error, onRetry }: Readonly<{ history: HistoryEntry[]; error?: string; onRetry?: () => void }>) {
   const [level, setLevel] = useState<'all' | 'warn' | 'error'>('all');
   const events = useMemo(() => logEvents(history).filter(e => level === 'all' || (level === 'warn' ? e.level !== 'info' : e.level === 'error')), [history, level]);
   return (
@@ -144,7 +146,7 @@ export function LogsPage({ history, error, onRetry }: Readonly<{ history: Histor
           <ToggleButton id="warn">Avisos</ToggleButton>
           <ToggleButton id="error">Erros</ToggleButton>
         </ToggleButtonGroup>
-        <span className="text-xs text-muted">Até 2.000 eventos recentes deste computador (no máximo 30 dias)</span>
+        <span className="text-xs text-muted">Até {HISTORY_LIMIT.toLocaleString('pt-BR')} eventos recentes deste computador (no máximo 30 dias)</span>
       </div>
       {events.length === 0 ? <p className="py-16 text-center text-muted">Nada por aqui.</p> : (
         <div className="flex flex-col divide-y divide-separator rounded-xl border border-separator bg-surface">
@@ -163,4 +165,4 @@ export function LogsPage({ history, error, onRetry }: Readonly<{ history: Histor
       )}
     </div>
   );
-}
+});

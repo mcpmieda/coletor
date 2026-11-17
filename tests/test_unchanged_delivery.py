@@ -64,6 +64,8 @@ class UnchangedDeliveryTests(unittest.TestCase):
         self.assertNotIn('coverage', brief)
         self.assertNotIn('marks', brief)
         self.assertEqual(brief['records'][0]['originalName'], 'ALUNO SINTÉTICO')
+        # The copy is what tells an unchanged diary: its hash and day, never the diary itself.
+        self.assertEqual(set(self.storage.load_copy('frequency-13331')), {'classId', 'sourceClassId', 'contentHash', 'fullOn'})
         # Nothing waits in the protected queue, and the receipt still shows on the window.
         self.assertEqual(self.storage.queue(), [])
         self.assertEqual(self.runtime.public_status()['lastReceipt']['resolvedRecords'], 1)

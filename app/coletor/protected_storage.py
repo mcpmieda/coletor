@@ -388,7 +388,10 @@ class ProtectedStorage:
                 # unreadable (without old generation entropy) encrypted empty
                 # queue that blocks a fresh safe-removal process. Unlink is
                 # atomic and failures propagate; never remove nonempty queues.
-                self.discard_confirmed_local_queue()
+                path = self.directory / 'queue.dpapi'
+                if self.directory.is_symlink() or path.is_symlink(): raise StorageError()
+                path.unlink(missing_ok=True)
+                self._memory.pop('queue', None)
 
     def load_copy(self, name):
         """The last copy saved under this name, or None when there is none or it cannot be read

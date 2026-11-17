@@ -1,8 +1,9 @@
 """Stage a Windows-tested installer as the files of one GitHub Release.
 
 Owner request 15/11/2026: installers no longer live in the repository (Git LFS kept every build
-forever). Each build becomes a Release with three files: the installer, its .sha256 and
-atualizacao.json, which installed Coletors read to update themselves (app/coletor/updater.py).
+forever). Each build becomes a Release with four files: the installer, its .sha256, atualizacao.json,
+which installed Coletors read to update themselves (app/coletor/updater.py), and "Instalar Coletor.exe",
+which installs the newest Release on a new computer (scripts/bootstrap/), built and signed by the same run.
 
 This tool only *copies* an already validated CI artifact. It never runs the EXE, contacts the
 internet or accesses real student records. The workflow creates the Release with these files.
@@ -21,13 +22,17 @@ import struct
 SOURCE = re.compile(r"ColetorFrequencia-(\d+\.\d+\.\d+)-windows-x64-setup-candidato\.exe\Z")
 FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
 MANIFEST = 'atualizacao.json'
+# No space: Release assets turn spaces into dots. Always at releases/latest/download/Instalar-Coletor.exe.
+BOOTSTRAP = 'Instalar-Coletor.exe'
+BOOTSTRAP_MINIMUM = 8_000
 
 
-# What goes into the installed program (scripts/build_windows_portable.py, installer/Coletor.iss).
-# Only a change here becomes a new Release: every installed Coletor reinstalls each one.
+# What goes into the installed program (scripts/build_windows_portable.py, installer/Coletor.iss) or
+# into "Instalar Coletor.exe". Only a change here becomes a new Release: every installed Coletor
+# reinstalls each one.
 BUNDLE_PATHS = re.compile(
-    r'(app/|ui/|installer/|scripts/build_windows_portable\.py\Z|requirements-windows-(build|portable)\.txt\Z'
-    r'|docs/PORTABLE_LEIA_ME\.txt\Z)')
+    r'(app/|ui/|installer/|scripts/bootstrap/|scripts/build_windows_portable\.py\Z'
+    r'|requirements-windows-(build|portable)\.txt\Z|docs/PORTABLE_LEIA_ME\.txt\Z)')
 
 
 def touches_bundle(paths) -> bool:
@@ -83,8 +88,9 @@ def original_setup(artifact_dir: Path, *, minimum_bytes: int) -> tuple[Path, str
     if any(not p.is_file() or p.is_symlink() for p in files):
         raise ValueError('artifact-must-contain-only-files')
     installers = [p for p in files if SOURCE.fullmatch(p.name)]
-    if len(installers) != 1 or set(files) != {installers[0], Path(str(installers[0]) + '.sha256')}:
-        raise ValueError('artifact-must-have-one-setup-and-one-sha256')
+    if len(installers) != 1 or set(files) != {installers[0], Path(str(installers[0]) + '.sha256'),
+                                              artifact_dir / BOOTSTRAP}:
+        raise ValueError('artifact-must-have-one-setup-its-sha256-and-the-first-install-program')
     setup = installers[0]
     version = SOURCE.fullmatch(setup.name).group(1)
     checksum = Path(str(setup) + '.sha256').read_text(encoding='ascii').strip()
@@ -95,6 +101,7 @@ def original_setup(artifact_dir: Path, *, minimum_bytes: int) -> tuple[Path, str
     if digest(setup) != expected:
         raise ValueError('setup-sha256-mismatch')
     verify_pe(setup, minimum_bytes)
+    verify_pe(artifact_dir / BOOTSTRAP, min(minimum_bytes, BOOTSTRAP_MINIMUM))
     return setup, version, expected
 
 
@@ -118,7 +125,8 @@ def stage_release(artifact_dir: Path, output: Path, *, head_sha: str, run_id: in
     (output / (name + '.sha256')).write_text(f'{expected}  {name}\n', encoding='ascii')
     manifest = {'versao': version, 'arquivo': name, 'sha256': expected, 'tamanho': target.stat().st_size}
     (output / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    return {'tag': f'v{version}', 'versao': version, 'arquivos': [name, name + '.sha256', MANIFEST],
+    shutil.copyfile(artifact_dir / BOOTSTRAP, output / BOOTSTRAP)
+    return {'tag': f'v{version}', 'versao': version, 'arquivos': [name, name + '.sha256', MANIFEST, BOOTSTRAP],
             'titulo': f'Coletor {version}',
             'notas': f'Instalador testado no Windows pela execução {run_id} (commit {head_sha}).\n\n'
                      f'SHA-256: `{expected}`'}

@@ -1,8 +1,9 @@
-// "Instalar Coletor.exe" (instalador/): always installs the newest Coletor (owner request 16/11/2026).
+// "Instalar Coletor.exe": always installs the newest Coletor (owner request 16/11/2026).
 // It reads the latest GitHub Release, accepts it only when the Release and its files were made by the
 // publishing workflow (github-actions[bot], as app/coletor/updater.py does), downloads the installer,
-// checks size, SHA-256 and PE header against atualizacao.json and opens it. Built by
-// scripts/bootstrap/build.ps1; nothing is installed or written besides the downloaded installer in %TEMP%.
+// checks size, SHA-256 and PE header against atualizacao.json and the school's signature, and opens it.
+// Built, signed and published with every Release by .github/workflows/checks.yml (scripts/bootstrap/build.ps1);
+// nothing is installed or written besides the downloaded installer in %TEMP%.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -10,7 +11,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -29,6 +32,8 @@ static class InstalarColetor
     const string Publisher = "github-actions[bot]";
     const string Manifest = "atualizacao.json";
     const long MinimumSize = 1000000, MaximumSize = 300L * 1024 * 1024;
+    // SHA-256 of the school's code-signing certificate: the same list as SIGNERS in app/coletor/updater.py.
+    static readonly string[] Signers = { "929ee6187af8e05d028893cb57d34400c7ec5762c3146763fafb6321dce4ceb0" };
 
     class Failure : Exception { public Failure(string message) : base(message) { } }
 
@@ -39,6 +44,12 @@ static class InstalarColetor
     [STAThread]
     static int Main(string[] args)
     {
+        // Tests only: 0 when the file carries the school's signature, 3 another intact one, 4 none.
+        if (args.Length == 2 && args[0] == "--conferir")
+        {
+            string who = Signer(args[1]);
+            return who == null ? 4 : Array.IndexOf(Signers, who) < 0 ? 3 : 0;
+        }
         bool open = Array.IndexOf(args, "--sem-abrir") < 0; // Checks without opening (tests only).
         ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
         Application.EnableVisualStyles();
@@ -154,7 +165,7 @@ static class InstalarColetor
         string folder = Path.Combine(Path.GetTempPath(), "Coletor");
         Directory.CreateDirectory(folder);
         string target = Path.Combine(folder, "COLETOR v" + version + ".exe"), partial = target + ".part";
-        if (File.Exists(target) && Matches(target, sha, size)) return target;
+        if (File.Exists(target) && Matches(target, sha, size) && Array.IndexOf(Signers, Signer(target)) >= 0) return target;
         Say("Baixando o Coletor " + version + "…", 0);
         using (var client = Client())
         {
@@ -174,10 +185,71 @@ static class InstalarColetor
             File.Delete(partial);
             throw new Failure("O arquivo baixado não confere com o publicado. Nada foi instalado; tente de novo.");
         }
+        // The Release's own hash only proves the download is whole; the signature proves who built it.
+        if (Array.IndexOf(Signers, Signer(partial)) < 0)
+        {
+            File.Delete(partial);
+            throw new Failure("O instalador baixado não tem a assinatura da escola. Nada foi instalado.");
+        }
         if (File.Exists(target)) File.Delete(target);
         File.Move(partial, target);
         Say("Abrindo o instalador…", 100);
         return target;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct TrustFile { public int Size; public string Path; public IntPtr File, Subject; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct TrustData
+    {
+        public int Size; public IntPtr Policy, Sip; public int Ui, Revocation, Choice; public IntPtr File;
+        public int Action; public IntPtr State, Url; public int Flags, Context; public IntPtr Settings;
+    }
+
+    [DllImport("wintrust.dll", ExactSpelling = true)]
+    static extern int WinVerifyTrust(IntPtr window, ref Guid action, ref TrustData data);
+    [DllImport("wintrust.dll", ExactSpelling = true)]
+    static extern IntPtr WTHelperProvDataFromStateData(IntPtr state);
+    [DllImport("wintrust.dll", ExactSpelling = true)]
+    static extern IntPtr WTHelperGetProvSignerFromChain(IntPtr provider, int signer, bool counter, int index);
+
+    // SHA-256 (hex) of the certificate whose Authenticode signature the file carries intact, else null:
+    // the same check as signer() in app/coletor/updater.py. Windows compares the signature with the
+    // file (no dialog, no network); the school's certificate is self-signed, so its root is unknown.
+    static string Signer(string path)
+    {
+        var action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+        var file = new TrustFile { Size = Marshal.SizeOf(typeof(TrustFile)), Path = path };
+        IntPtr pointer = Marshal.AllocHGlobal(file.Size);
+        Marshal.StructureToPtr(file, pointer, false);
+        var data = new TrustData { Size = Marshal.SizeOf(typeof(TrustData)), Ui = 2, Choice = 1, File = pointer, Action = 1, Flags = 0x1010 };
+        var none = new IntPtr(-1);
+        try
+        {
+            uint verdict = unchecked((uint)WinVerifyTrust(none, ref action, ref data));
+            if (verdict != 0 && verdict != 0x800B0109) return null;
+            IntPtr provider = WTHelperProvDataFromStateData(data.State);
+            IntPtr signer = provider == IntPtr.Zero ? IntPtr.Zero : WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+            // CRYPT_PROVIDER_SGNR: size, time, count, chain; CRYPT_PROVIDER_CERT: size, certificate.
+            if (signer == IntPtr.Zero || Marshal.ReadInt32(signer, 12) < 1) return null;
+            IntPtr chain = Marshal.ReadIntPtr(signer, 16);
+            IntPtr certificate = chain == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(chain, IntPtr.Size);
+            if (certificate == IntPtr.Zero) return null;
+            using (var hash = SHA256.Create())
+            {
+                var text = new StringBuilder();
+                foreach (byte b in hash.ComputeHash(new X509Certificate2(certificate).RawData)) text.Append(b.ToString("x2"));
+                return text.ToString();
+            }
+        }
+        finally
+        {
+            data.Action = 2; // Close the verification state.
+            WinVerifyTrust(none, ref action, ref data);
+            Marshal.DestroyStructure(pointer, typeof(TrustFile));
+            Marshal.FreeHGlobal(pointer);
+        }
     }
 
     static bool Matches(string path, string sha, long size)

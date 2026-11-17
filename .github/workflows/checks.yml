@@ -92,6 +92,9 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2022
     timeout-minutes: 25
+    # The school's signing certificate is a secret of this environment, which accepts only main
+    # (installer/new-signing-certificate.ps1): a workflow on any other branch cannot read it.
+    environment: ${{ github.ref == 'refs/heads/main' && 'assinatura' || '' }}
     env:
       # Every build gets a newer version (major.minor from app/coletor/__init__.py).
       COLETOR_BUILD: ${{ github.run_number }}
@@ -124,11 +127,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Product version unavailable' }
           "COLETOR_BUNDLE=dist/windows-portable/ColetorFrequencia-$Version-teste-windows-x64" >> $env:GITHUB_ENV
           "COLETOR_SETUP=dist/windows-installer/ColetorFrequencia-$Version-windows-x64-setup-candidato.exe" >> $env:GITHUB_ENV
+      - name: Sign with the school's certificate on main, with a throwaway one anywhere else
+        shell: pwsh
+        env:
+          SCHOOL_BUNDLE: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SCHOOL_BUNDLE) { exit 0 }
+          if ('${{ github.ref }}' -eq 'refs/heads/main') { throw 'main signs with the school certificate (environment "assinatura")' }
+          # Every build runs the same signing and the same checks as a published one.
+          $Bundle = powershell -NoProfile -ExecutionPolicy Bypass -File installer/new-signing-certificate.ps1 -Throwaway
+          if ($LASTEXITCODE -ne 0 -or -not $Bundle) { throw 'Throwaway signing certificate unavailable' }
+          # Worth nothing outside this run, but a key all the same: never printed in the log.
+          Write-Output "::add-mask::$Bundle"
+          "THROWAWAY_SIGNING_BUNDLE=$Bundle" >> $env:GITHUB_ENV
       - name: Assemble official embedded runtime and application
         env:
-          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 }}
-          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
-          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 || env.THROWAWAY_SIGNING_BUNDLE }}
         run: python scripts/build_windows_portable.py --source-commit "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Verify launcher compiler diagnostics and version regression tests
         run: python -m unittest discover -s tests -p test_portable_builder.py -v
@@ -172,6 +187,11 @@ jobs:
           $ToolExe = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
           $ToolDir = Join-Path $env:RUNNER_TEMP 'InnoCompiler'
           Invoke-WebRequest -Uri $ToolUrl -OutFile $ToolExe
+          # The exact file of this version (the digest GitHub publishes for the Release asset), like the
+          # gitleaks and Python archives: a publisher name alone would accept any other signed build.
+          if ((Get-FileHash $ToolExe -Algorithm SHA256).Hash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup compiler is not the pinned 6.7.3 file'
+          }
           $Signature = Get-AuthenticodeSignature $ToolExe
           if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') {
             throw 'Inno Setup compiler publisher signature invalid'
@@ -183,9 +203,7 @@ jobs:
       - name: Build per-user Windows installer only after full native success
         shell: pwsh
         env:
-          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 }}
-          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
-          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          WINDOWS_SIGNING_BUNDLE_BASE64: ${{ secrets.WINDOWS_SIGNING_BUNDLE_BASE64 || env.THROWAWAY_SIGNING_BUNDLE }}
         run: |
           $ErrorActionPreference = 'Stop'
           & "$env:RUNNER_TEMP/InnoCompiler/ISCC.exe" /Qp installer/Coletor.iss
@@ -196,6 +214,19 @@ jobs:
           ./installer/sign-installer.ps1 -Path $Setup
           $Digest = (Get-FileHash $Setup -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -Path "$Setup.sha256" -Value "$Digest  $(Split-Path $Setup -Leaf)" -Encoding ascii
+          # "Instalar Coletor.exe" (a new computer's first installation) is built from its source and
+          # signed here, and published with the installer: never a file compiled by hand.
+          $First = 'dist/windows-installer/Instalar-Coletor.exe'
+          ./scripts/bootstrap/build.ps1 -Out $First
+          ./installer/sign-installer.ps1 -Path $First
+          # What an installed Coletor and "Instalar Coletor.exe" will accept: the signer they both read
+          # is the one PowerShell reads, a changed copy is refused, and on main it is the school's.
+          $Certificate = (Get-AuthenticodeSignature $Setup).SignerCertificate
+          if (-not $Certificate) { throw 'Installer is not signed' }
+          $Expected = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::Create().ComputeHash([byte[]]$Certificate.RawData)).ToLowerInvariant()
+          $School = if ('${{ github.ref }}' -eq 'refs/heads/main') { '--school' } else { $null }
+          python scripts/check_windows_signature.py --setup $Setup --bootstrap $First --expected $Expected $School
+          if ($LASTEXITCODE -ne 0) { throw 'Signature check failed' }
       - name: Verify actual per-user installation, runtime and safe uninstall
         shell: pwsh
         run: |

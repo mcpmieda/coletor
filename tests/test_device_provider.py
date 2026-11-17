@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock
 from datetime import datetime, timezone
 
-from coletor.device_provider import DeviceProvider, OfficialTransport, PREFIX, compact, thumbprint
+from coletor.device_provider import DeviceProvider, KEEP_SECONDS, OfficialTransport, PREFIX, compact, thumbprint
 from coletor.institutional_access import AccessDenied, OnlineResponse, OFFICIAL_ORIGIN, validate_authorization
 from coletor.windows_device_key import WindowsDeviceKey, TPM_PROVIDER, SOFTWARE_PROVIDER, DeviceKeyError
 from test_windows_device_key import FakeCrypto
@@ -267,10 +267,45 @@ class DeviceProviderTests(unittest.TestCase):
                 connection = Mock()
                 connection.getresponse.return_value = reply
                 self.provider._transport = OfficialTransport(connection=lambda: connection)
-                with self.assertRaises(AccessDenied): self.provider.open_official_login()
+                with self.assertRaises(AccessDenied) as refused: self.provider.open_official_login()
+                # A gateway or server error is "no answer", retried; only a refusal asks for access again
+                # (17/11/2026: one 502 in the middle of a run was read as a revoked access and stopped it).
+                self.assertEqual(refused.exception.code, 'ACCESS_REQUIRED' if status == 403 else 'ACCESS_UNAVAILABLE')
                 self.assertEqual(self.provider._pending, old)
                 self.assertEqual(self.browser.call_count, 1)
                 connection.request.assert_called_once()
+
+    def test_requests_in_a_burst_share_one_connection_and_never_an_old_or_failed_one(self):
+        # About 270 requests per collection each opened its own TCP and TLS connection (17/11/2026).
+        opened, clock = [], [100.0]
+
+        def connect():
+            reply = Mock(status=200, will_close=False)
+            reply.getheader.side_effect = lambda name: {'Content-Type': 'application/json'}.get(name)
+            reply.read.return_value = b'{}'
+            reply.isclosed.return_value = True
+            connection = Mock()
+            connection.getresponse.return_value = reply
+            opened.append((connection, reply))
+            return connection
+        transport = OfficialTransport(connection=connect, monotonic=lambda: clock[0])
+        ask = lambda: transport.request('POST', PREFIX + 'challenge', {'purpose': 'collector-access'})
+        ask(); clock[0] += KEEP_SECONDS; ask()
+        self.assertEqual((len(opened), opened[0][0].request.call_count, opened[0][0].close.call_count), (1, 2, 0))
+        clock[0] += KEEP_SECONDS + 0.1; ask()  # After a pause: a new one, the old one closed.
+        self.assertEqual((len(opened), opened[0][0].close.call_count), (2, 1))
+        opened[1][1].status = 502  # A refusal or an error is never followed on the same connection.
+        with self.assertRaises(AccessDenied): ask()
+        ask()
+        self.assertEqual((len(opened), opened[1][0].close.call_count), (3, 1))
+        opened[2][1].will_close = True  # The server said it closes: not kept.
+        ask(); ask()
+        self.assertEqual((len(opened), opened[2][0].close.call_count), (4, 1))
+        opened[3][0].request.side_effect = OSError()  # The network dropped it: an ordinary "no answer".
+        with self.assertRaises(AccessDenied) as dropped: ask()
+        self.assertEqual((dropped.exception.code, opened[3][0].close.call_count), ('ACCESS_UNAVAILABLE', 1))
+        ask()
+        self.assertEqual(len(opened), 5)
 
     def test_pairing_signature_is_bound_and_only_nonsecret_metadata_persists(self):
         self.provider.open_official_login()

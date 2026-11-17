@@ -152,6 +152,21 @@ class ReaderTests(unittest.TestCase):
         # More digits than the document has, a fraction or no digit at all: nothing, never a guess.
         for cell in (123456789012, 1234567890.5, 'ISENTO', '', None):
             self.assertIsNone(self.read(cpf=cell)['cpf'])
+
+    def test_zeros_never_make_a_document_out_of_something_else(self):
+        # A date, part of a CPF or a phone typed in the CPF field, padded, looked like a document.
+        for cell in ('12/03/2010', '123.456.789', 0, '000.000.000-00', '(73) 99999-0000', 11111111111, 1234567891):
+            self.assertIsNone(self.read(cpf=cell)['cpf'], cell)
+            self.assertIsNone(self.read(guardianCpf=cell)['guardianCpf'], cell)
+        for cell in (4596, '4596', '999-999', 0):  # CEPs start at 01000-000.
+            self.assertIsNone(self.read(cep=cell)['cep'], cell)
+        self.assertEqual(self.read(cep=1000000)['cep'], '01000000')
+
+    def test_digits_of_another_script_are_no_number(self):
+        # The Ecossistema takes 0-9 only: one such cell had the whole report refused.
+        for cell in ('０１２３４５６７８９０', '0123456789٠', '७३९९९९९००००'):
+            profile = self.read(cpf=cell, mobile=cell, sus=cell, cep=cell)
+            self.assertEqual((profile['cpf'], profile['mobile'], profile['sus'], profile['cep']), (None, None, None, None))
         self.assertIsNone(self.read(cep=123456789)['cep'])
 
     def test_a_number_cell_is_written_out_in_full_never_in_scientific_notation(self):
@@ -171,8 +186,10 @@ class ReaderTests(unittest.TestCase):
         profile = self.read(address='  RUA   SINTETICA \t 2 ', addressNumber='S/N', addressComplement='   ', rgIssuer=2403769002)
         self.assertEqual((profile['address'], profile['addressNumber'], profile['addressComplement'], profile['rgIssuer']),
                          ('RUA SINTETICA 2', 'S/N', None, '2403769002'))
-        with self.assertRaisesRegex(ValueError, 'Texto acima do limite'):
-            self.read(address='A' * 301)
+        # A text longer than the Ecossistema takes is left out; the rest of the report still goes.
+        profile = self.read(address='A' * 301, allergyDetail='B ' * 200, mobile='9' * 301, district='C' * 300)
+        self.assertEqual((profile['address'], profile['allergyDetail'], profile['mobile'], profile['district'], profile['cpf']),
+                         (None, None, None, 'C' * 300, PROFILE_SENT['cpf']))
 
     def test_guardian_degree_is_one_to_four(self):
         for cell, sent in ((1, 1), (4, 4), ('2', 2), (0, None), (5, None), (2.5, None), ('TIO', None), (None, None)):
@@ -317,8 +334,11 @@ class ReportRunTests(unittest.TestCase):
         personal = {str(value) for value in PROFILE_SENT.values() if isinstance(value, str)} | {'ALUNA SINTETICA', 'MAE SINTETICA'}
         self.assertEqual(self.storage.load_copy('student-report'),
                          {'contentHash': report_hash(self.rows), 'sentOn': self.storage.load_copy('student-report')['sentOn']})
-        shown = json.dumps([self.runtime.recent_history(50), self.runtime.public_status(),
-                            self.sent('student-report-unchanged')], ensure_ascii=False, default=str)
+        # Without what changes from run to run (a random id, a duration): '120', the synthetic house
+        # number, turned up inside a requestId once in a few hundred runs (17/11/2026).
+        steady = lambda items, *drop: [{k: v for k, v in item.items() if k not in drop} for item in items]
+        shown = json.dumps([steady(self.runtime.recent_history(50), 'readMs', 'sendMs'), self.runtime.public_status(),
+                            steady(self.sent('student-report-unchanged'), 'requestId')], ensure_ascii=False, default=str)
         on_disk = b''.join(bytes(b ^ 91 for b in path.read_bytes()) + path.read_bytes()   # SyntheticCrypto is a XOR.
                            for path in Path(self.directory.name).rglob('*') if path.is_file())
         self.assertIn(b'contentHash', on_disk)

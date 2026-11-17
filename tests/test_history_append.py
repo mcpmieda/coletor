@@ -68,6 +68,24 @@ class HistoryCursorAndRetentionTests(unittest.TestCase):
             after = [e for e in log.recent(10) if e['at'] > newest]
             self.assertEqual([e['kind'] for e in after], ['collection-finished'])
 
+    def test_retention_rewrites_the_file_at_most_hourly_not_at_every_event(self):
+        # With 30 days in the file each new event pushed an old one past the retention and rewrote
+        # the whole file: 59 rewrites for the 60 events of a day.
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1_800_000_000.0]
+            log = CollectorHistory(directory, clock=lambda: now[0])
+            for hour in range(30 * 24):
+                now[0] += 3600; log.record('class-sent', label='TURMA SINTETICA', sent=1)
+            rewrites, replace = [], module.os.replace
+            self.addCleanup(setattr, module.os, 'replace', replace)
+            module.os.replace = lambda source, target: (rewrites.append(1), replace(source, target))[1]
+            for _ in range(60):  # One run: an event a minute.
+                now[0] += 60; log.record('class-sent', label='TURMA SINTETICA', sent=1)
+            self.assertLessEqual(len(rewrites), 2)
+            self.assertEqual(log.recent(1)[0]['kind'], 'class-sent')
+            # What the window lists never includes a fact past the retention, rewritten or not.
+            self.assertTrue(all(entry['at'] >= now[0] - module.RETENTION_SECONDS for entry in log.recent(module.MAX_ENTRIES)))
+
     def test_facts_older_than_30_days_leave_the_file_itself(self):
         with tempfile.TemporaryDirectory() as directory:
             now = [1_800_000_000.0]

@@ -73,7 +73,7 @@ class PortableBuildTests(unittest.TestCase):
     def test_native_compiler_future_version_and_useful_invalid_input_errors(self):
         with tempfile.TemporaryDirectory(prefix="coletor-compiler-test-") as temporary:
             root = Path(temporary)
-            with patch.dict(os.environ, {key: "" for key in ("WINDOWS_SIGNING_BUNDLE_BASE64", "WINDOWS_SIGNING_PFX_BASE64", "WINDOWS_SIGNING_PFX_PASSWORD")}):
+            with patch.dict(os.environ, {"WINDOWS_SIGNING_BUNDLE_BASE64": ""}):
                 metadata = builder.build_launcher(root, version="8.12.3")
                 self.assertEqual(metadata["file_version"], "8.12.3.0")
                 self.assertEqual(metadata["product_version"], "8.12.3")

@@ -19,7 +19,7 @@ def preview(html: str, class_id: str, year: int, mode: str = "local", validate: 
         raise ValueError("Confira o código da turma.")
     if type(year) is not int or not 2000 <= year <= 2100:
         raise ValueError("Informe um ano entre 2000 e 2100.")
-    snapshot = parse_annual_html(html, class_id.strip(), year)
+    snapshot = parse_annual_html(html, class_id.strip(), year, identify=validate)
     result = {"snapshot": plain(snapshot), "mode": mode, "processed_at": datetime.now(timezone.utc).isoformat()}
     if validate:
         result["validation"] = plain(validate_for_transmission(snapshot))

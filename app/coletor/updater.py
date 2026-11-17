@@ -2,8 +2,8 @@
 
 Only an installed Coletor (Inno Setup uninstaller beside programa/) with a CI build number updates
 itself. It reads a small manifest of the latest Release, downloads that version's installer from
-the fixed Release URL, checks its size, SHA-256 and PE header, and runs it silently only when no
-collection or report is running or due. The installer asks this app to quit (it finishes a run in
+the fixed Release URL, checks its size, SHA-256, PE header and the school's signature, and runs it
+silently only when no collection or report is running or due. The installer asks this app to quit (it finishes a run in
 flight first), replaces the files and reopens it beside the clock. Only github.com and GitHub's
 release-asset hosts are contacted, over HTTPS; no token, account or student data is involved.
 """
@@ -20,14 +20,16 @@ import threading
 import time
 from urllib.parse import quote, urljoin, urlsplit
 
+from .leftovers import remove_leftovers
+
 REPOSITORY = 'mcpmieda/coletor'
 MANIFEST_NAME = 'atualizacao.json'
 MANIFEST_URL = f'https://github.com/{REPOSITORY}/releases/latest/download/{MANIFEST_NAME}'
 ALLOWED_HOSTS = frozenset({'github.com', 'api.github.com', 'release-assets.githubusercontent.com',
                            'objects.githubusercontent.com'})
-# Only .github/workflows/publish-installer.yml writes Releases with this identity: main needs a reviewed
-# PR, and the repository's other workflows get read-only tokens. A Release made or changed by anyone
-# else (a person, another installed GitHub App) is never installed (owner request 15/11/2026).
+# .github/workflows/publish-installer.yml writes Releases with this identity. A Release made or changed
+# by anyone else (a person, another installed GitHub App) is never installed (owner request 15/11/2026).
+# A workflow pushed on another branch could use the same identity: the signature settles that (SIGNERS).
 PUBLISHER = 'github-actions[bot]'
 RELEASE_URL = f'https://api.github.com/repos/{REPOSITORY}/releases/tags/v{{version}}'
 RELEASE_LIMIT = 256 * 1024
@@ -208,6 +210,76 @@ def _is_pe(path):
         return file.read(4) == b'PE\x00\x00'
 
 
+# The school's code-signing certificate (installer/new-signing-certificate.ps1): SHA-256 of the
+# certificate itself. Its key exists only as a secret of the GitHub environment "assinatura", which
+# only workflows of the main branch may use. More than one entry while a certificate is replaced.
+SIGNERS = frozenset({'929ee6187af8e05d028893cb57d34400c7ec5762c3146763fafb6321dce4ceb0'})
+WINTRUST_VERIFY = (0x00AAC56B, 0xCD44, 0x11D0, (0x8C, 0xC2, 0x00, 0xC0, 0x4F, 0xC2, 0x95, 0xEE))
+# Intact and trusted, or intact with a root Windows does not know: the certificate is self-signed.
+INTACT_SIGNATURE = frozenset({0, 0x800B0109})
+
+
+def signer(path):
+    """SHA-256 (hex) of the certificate whose Authenticode signature this file carries intact, else None.
+
+    Windows itself checks the signature against the file (WinVerifyTrust, no dialog, no network);
+    a file with no signature or changed after signing gets another verdict and is refused."""
+    if os.name != 'nt': return None
+    import ctypes
+    from ctypes import wintypes
+
+    class Guid(ctypes.Structure):
+        _fields_ = [('a', wintypes.DWORD), ('b', wintypes.WORD), ('c', wintypes.WORD), ('d', ctypes.c_ubyte * 8)]
+
+    class FileInfo(ctypes.Structure):
+        _fields_ = [('size', wintypes.DWORD), ('path', wintypes.LPCWSTR), ('file', wintypes.HANDLE),
+                    ('subject', ctypes.c_void_p)]
+
+    class TrustData(ctypes.Structure):
+        _fields_ = [('size', wintypes.DWORD), ('policy', ctypes.c_void_p), ('sip', ctypes.c_void_p),
+                    ('ui', wintypes.DWORD), ('revocation', wintypes.DWORD), ('choice', wintypes.DWORD),
+                    ('file', ctypes.POINTER(FileInfo)), ('action', wintypes.DWORD), ('state', wintypes.HANDLE),
+                    ('url', wintypes.LPCWSTR), ('flags', wintypes.DWORD), ('context', wintypes.DWORD),
+                    ('settings', ctypes.c_void_p)]
+
+    class Signer(ctypes.Structure):  # CRYPT_PROVIDER_SGNR, up to the chain.
+        _fields_ = [('size', wintypes.DWORD), ('verified', wintypes.FILETIME), ('count', wintypes.DWORD),
+                    ('chain', ctypes.c_void_p)]
+
+    class ChainCertificate(ctypes.Structure):  # CRYPT_PROVIDER_CERT, up to the certificate.
+        _fields_ = [('size', wintypes.DWORD), ('certificate', ctypes.c_void_p)]
+
+    class Certificate(ctypes.Structure):  # CERT_CONTEXT, up to the encoded certificate.
+        _fields_ = [('encoding', wintypes.DWORD), ('encoded', ctypes.POINTER(ctypes.c_ubyte)), ('length', wintypes.DWORD)]
+
+    trust = ctypes.WinDLL('wintrust.dll')
+    trust.WinVerifyTrust.argtypes = [wintypes.HANDLE, ctypes.POINTER(Guid), ctypes.POINTER(TrustData)]
+    trust.WinVerifyTrust.restype = wintypes.LONG
+    trust.WTHelperProvDataFromStateData.argtypes = [wintypes.HANDLE]
+    trust.WTHelperProvDataFromStateData.restype = ctypes.c_void_p
+    trust.WTHelperGetProvSignerFromChain.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    trust.WTHelperGetProvSignerFromChain.restype = ctypes.POINTER(Signer)
+    a, b, c, d = WINTRUST_VERIFY
+    action = Guid(a, b, c, (ctypes.c_ubyte * 8)(*d))
+    file = FileInfo(ctypes.sizeof(FileInfo), str(path), None, None)
+    # No dialog (2), no revocation lookup (0 and 0x10), a file (1), cached URLs only (0x1000): nothing leaves this computer.
+    data = TrustData(ctypes.sizeof(TrustData), None, None, 2, 0, 1, ctypes.pointer(file), 1, None, None, 0x1010, 0, None)
+    no_window = wintypes.HANDLE(-1)
+    verdict = trust.WinVerifyTrust(no_window, ctypes.byref(action), ctypes.byref(data)) & 0xFFFFFFFF
+    try:
+        if verdict not in INTACT_SIGNATURE: return None
+        provider = trust.WTHelperProvDataFromStateData(data.state)
+        found = trust.WTHelperGetProvSignerFromChain(provider, 0, False, 0) if provider else None
+        if not found or not found.contents.count or not found.contents.chain: return None
+        leaf = ctypes.cast(found.contents.chain, ctypes.POINTER(ChainCertificate)).contents.certificate
+        if not leaf: return None
+        certificate = ctypes.cast(leaf, ctypes.POINTER(Certificate)).contents
+        return hashlib.sha256(ctypes.string_at(certificate.encoded, certificate.length)).hexdigest()
+    finally:
+        data.action = 2  # Close the verification state.
+        trust.WinVerifyTrust(no_window, ctypes.byref(action), ctypes.byref(data))
+
+
 def power_ok():
     """Not on a battery below BATTERY_MINIMUM %: a notebook must not die halfway through."""
     if os.name != 'nt': return True
@@ -345,8 +417,8 @@ class Attempts:
 class Updater:
     def __init__(self, current_version, root, directory, *, safe_now, launch=launch_setup,
                  fetch=fetch_small, download=download_setup, power=power_ok, space=space_ok, clock=time.time,
-                 clear_resume=clear_stale_resume):
-        self._clear_resume = clear_resume
+                 clear_resume=clear_stale_resume, signer=signer):
+        self._clear_resume, self._signer = clear_resume, signer
         self._current, self._root, self._folder = current_version, root, Path(directory) / 'atualizacao'
         self._safe_now, self._launch, self._fetch, self._download = safe_now, launch, fetch, download
         self._power, self._space, self._clock = power, space, clock
@@ -374,6 +446,10 @@ class Updater:
         try: remove_other_setups(self._folder, up_to=parse_version(self._current))  # Even offline.
         except OSError: pass
         if self._stop.wait(FIRST_CHECK_SECONDS): return
+        # What the version before this one left in the program folder. Not at once: the installer that
+        # has just reopened this program is still finishing, and nothing is deleted while one runs.
+        folder = installed_folder(self._root)
+        if folder is not None and not installer_running(): remove_leftovers(folder, self._current)
         while True:
             # After a started installer the app normally quits; still running later means it failed.
             try: result = 'started' if self.check_once() else 'current'
@@ -405,6 +481,11 @@ class Updater:
         remove_other_setups(self._folder, keep=manifest['arquivo'])
         if not self._space(self._folder, manifest['tamanho']): raise UpdateError('disk-full')
         setup = self._download(manifest, self._folder)
+        # The Release's own hash only proves the download is whole; the signature proves who built it.
+        # A workflow on any branch can write a Release as github-actions[bot], but only main can sign.
+        if self._signer(setup) not in SIGNERS:
+            setup.unlink(missing_ok=True)
+            raise UpdateError('untrusted-signature')
         while not (self._safe_now() and self._power()):
             if self._stop.wait(SAFE_RETRY_SECONDS): return False
         self._attempts.record(version)

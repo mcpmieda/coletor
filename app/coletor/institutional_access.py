@@ -10,7 +10,6 @@ import time
 from typing import Callable, Protocol, TypeVar
 
 OFFICIAL_ORIGIN = "https://admin.escolaieda.com"
-OFFICIAL_LOGIN_URL = OFFICIAL_ORIGIN + "/auth/login"
 # Proposed contract, not an assertion that this route exists in production.
 PROPOSED_ACCESS_URL = OFFICIAL_ORIGIN + "/api/frequency-collector/access"
 PROPOSED_CAPABILITY = "frequency.collector.use"
@@ -66,7 +65,7 @@ def _timestamp(value):
         raise AccessDenied("INVALID_ACCESS_RESPONSE") from None
 
 
-def validate_authorization(response, now):
+def validate_authorization(response, now, started=None):
     import json
     if (not isinstance(response, OnlineResponse) or response.status != 200
             or response.url != PROPOSED_ACCESS_URL or not isinstance(response.body, bytes)
@@ -91,6 +90,10 @@ def validate_authorization(response, now):
     expiry, checked = _timestamp(body["expiresAt"]), _timestamp(body["checkedAt"])
     directory_checked = _timestamp(body["directoryCheckedAt"])
     directory_until = _timestamp(body["directoryValidUntil"])
+    # The server stamps its check between this request's start and its answer (5 s of tolerance, as
+    # the collector's own status check): outside that, this computer's clock is the one that is off.
+    if started is not None and (checked < started - 5 or checked > now + 5):
+        raise AccessDenied("CLOCK_OUT_OF_SYNC")
     if expiry <= now or checked > now + 5 or now - checked > 10 or checked >= expiry:
         raise AccessDenied("ACCESS_EXPIRED")
     if (directory_checked > now + 5 or directory_until <= now
@@ -146,7 +149,8 @@ class InstitutionalAccess:
         if self._provider is None:
             raise AccessDenied("ACCESS_NOT_CONFIGURED")
         try:
-            return validate_authorization(self._provider.verify_online(), self._clock())
+            started = self._clock()
+            return validate_authorization(self._provider.verify_online(), self._clock(), started)
         except AccessDenied:
             raise
         except Exception:
@@ -221,7 +225,7 @@ class InstitutionalAccess:
         return proof
 
     def _fence(self, code):
-        transient = code == 'ACCESS_UNAVAILABLE'
+        transient = code in {'ACCESS_UNAVAILABLE', 'CLOCK_OUT_OF_SYNC'}
         with self._lock:
             # A concurrent transient heartbeat/status request cannot fence a
             # valid in-flight capture. Its own request still fails closed; the

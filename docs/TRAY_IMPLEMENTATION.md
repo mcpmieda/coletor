@@ -3,7 +3,6 @@
 A janela desktop agora inicia `tray_winforms.py` na mesma thread WinForms do
 pywebview. Reutiliza `tray_animation.py` e os ICOs locais. Não exige pywin32,
 instalador, serviço, subprocesso, tarefa de inicialização ou acesso externo.
-O adaptador antigo `tray.py` continua isolado e não é iniciado pelo launcher.
 
 ## Controles reais
 

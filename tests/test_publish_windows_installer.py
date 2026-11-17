@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from scripts.publish_windows_installer import publish_decision, stage_release
+from scripts.publish_windows_installer import BOOTSTRAP, publish_decision, stage_release
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +31,7 @@ class PublishInstallerTests(unittest.TestCase):
         (self.artifact / name).write_bytes(raw)
         sha = hashlib.sha256(raw).hexdigest() if correct_hash else '0' * 64
         (self.artifact / (name + '.sha256')).write_text(f'{sha}  {name}\n', encoding='ascii')
+        (self.artifact / BOOTSTRAP).write_bytes(raw[:200])  # "Instalar Coletor.exe" of the same build.
         return bytes(raw)
 
     def run_stage(self, number=7):
@@ -41,8 +42,10 @@ class PublishInstallerTests(unittest.TestCase):
         raw = self.stage()
         result = self.run_stage()
         self.assertEqual(result['tag'], 'v0.4.7')
-        self.assertEqual(result['arquivos'], ['COLETOR-v0.4.7.exe', 'COLETOR-v0.4.7.exe.sha256', 'atualizacao.json'])
+        self.assertEqual(result['arquivos'], ['COLETOR-v0.4.7.exe', 'COLETOR-v0.4.7.exe.sha256', 'atualizacao.json',
+                                              'Instalar-Coletor.exe'])
         self.assertEqual(sorted(p.name for p in self.output.iterdir()), sorted(result['arquivos']))
+        self.assertEqual((self.output / 'Instalar-Coletor.exe').read_bytes(), raw[:200])
         sha = hashlib.sha256(raw).hexdigest()
         self.assertEqual((self.output / 'COLETOR-v0.4.7.exe').read_bytes(), raw)
         self.assertEqual((self.output / 'COLETOR-v0.4.7.exe.sha256').read_text('ascii'), f'{sha}  COLETOR-v0.4.7.exe\n')
@@ -78,6 +81,15 @@ class PublishInstallerTests(unittest.TestCase):
         sidecar.write_text('1' * 64 + '  wrong.exe\n', encoding='ascii')
         with self.assertRaisesRegex(ValueError, 'invalid-setup-sha256-sidecar'):
             self.run_stage()
+        # A build without "Instalar Coletor.exe", or with something that is not a program in its place.
+        self.stage()
+        (self.artifact / BOOTSTRAP).unlink()
+        with self.assertRaisesRegex(ValueError, 'first-install-program'):
+            self.run_stage()
+        self.stage()
+        (self.artifact / BOOTSTRAP).write_bytes(b'x' * 200)
+        with self.assertRaisesRegex(ValueError, 'not-Windows-PE-MZ'):
+            self.run_stage()
         self.assertFalse(self.output.exists())
 
     def test_output_must_start_empty(self):
@@ -96,30 +108,30 @@ class PublishInstallerTests(unittest.TestCase):
                          'program-unchanged')
         for path in ('app/coletor/updater.py', 'ui/src/App.tsx', 'installer/Coletor.iss',
                      'scripts/build_windows_portable.py', 'requirements-windows-portable.txt',
-                     'docs/PORTABLE_LEIA_ME.txt'):
+                     'docs/PORTABLE_LEIA_ME.txt', 'scripts/bootstrap/InstalarColetor.cs'):
             self.assertEqual(decide(newer_head_changes=[], since_release_changes=['README.md', path]), 'publish')
         # A newer commit already on main: its own run publishes if it changes the program...
         self.assertEqual(decide(newer_head_changes=['app/coletor/desktop.py'], since_release_changes=['app/x.py']),
                          'newer-build-follows')
-        # ...and if it only changes docs or the installer page, this run's program is not lost.
-        self.assertEqual(decide(newer_head_changes=['instalador/README.md'], since_release_changes=['app/x.py']),
+        # ...and if it only changes docs, this run's program is not lost.
+        self.assertEqual(decide(newer_head_changes=['docs/WINDOWS_INSTALLER.md'], since_release_changes=['app/x.py']),
                          'publish')
 
-    def test_instalador_folder_holds_only_the_always_current_installer(self):
-        """Owner request 16/11/2026: only "Instalar Coletor.exe", which downloads the newest Release."""
-        tracked = __import__('subprocess').run(['git', 'ls-files', 'instalador'], cwd=ROOT, capture_output=True,
-                                               text=True, check=True).stdout.split('\n')
-        self.assertEqual([p for p in tracked if p], ['instalador/Instalar Coletor.exe'])
-        self.assertEqual((ROOT / 'instalador/Instalar Coletor.exe').read_bytes()[:2], b'MZ')
+    def test_the_first_install_program_is_built_by_the_ci_and_reads_what_the_updater_reads(self):
+        """Owner request 16/11/2026: "Instalar Coletor.exe" downloads the newest Release. Since 17/11/2026 it
+        is built, signed and published by the CI with every Release, never compiled by hand into the repository."""
+        tracked = __import__('subprocess').run(['git', 'ls-files', '*.exe'], cwd=ROOT, capture_output=True,
+                                               text=True, check=True).stdout.split()
+        self.assertEqual(tracked, [])
         source = (ROOT / 'scripts/bootstrap/InstalarColetor.cs').read_text(encoding='utf-8')
         from coletor import updater
         self.assertIn(f'const string Publisher = "{updater.PUBLISHER}"', source)
         self.assertIn(f'const string Manifest = "{updater.MANIFEST_NAME}"', source)
         self.assertIn('"COLETOR-v" + version + ".exe"', source)
         self.assertIn(f'"https://api.github.com/repos/{updater.REPOSITORY}/releases/latest"', source)
-        # Changing the bootstrap never makes every installed Coletor reinstall.
-        self.assertEqual(publish_decision(newer_head_changes=[], since_release_changes=[
-            'instalador/Instalar Coletor.exe', 'scripts/bootstrap/InstalarColetor.cs']), 'program-unchanged')
+        checks = (ROOT / '.github/workflows/checks.yml').read_text('utf8')
+        self.assertIn(f"$First = 'dist/windows-installer/{BOOTSTRAP}'", checks)
+        self.assertIn('scripts/check_windows_signature.py', checks)
 
     def test_workflow_publishes_releases_not_repository_files(self):
         workflow = (ROOT / '.github/workflows/publish-installer.yml').read_text('utf8')
@@ -134,8 +146,6 @@ class PublishInstallerTests(unittest.TestCase):
         self.assertIn('Unexpected latest Release tag', workflow)
         self.assertIn('fetch-depth: 0', workflow)
         self.assertNotIn('filter=lfs', (ROOT / '.gitattributes').read_text('utf8'))
-        self.assertEqual(list((ROOT / 'instalador').glob('*.sha256')), [])
-        self.assertFalse((ROOT / 'instalador/versoes.json').exists())
 
 
 if __name__ == '__main__':

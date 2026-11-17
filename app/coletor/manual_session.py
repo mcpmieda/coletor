@@ -22,7 +22,7 @@ class SessionError(ValueError):
 # Short, data-free causes of a failed read, shown in Registros by the window.
 REASONS = {"smecel-timeout", "worker-timeout", "network", "login-page", "class-not-listed", "diary-structure",
            "page-changed", "too-large", "browser-closed", "unrecognized", "session-reset", "list-reload-failed",
-           "two-in-a-row"}
+           "two-in-a-row", "browser-closing"}
 
 
 def failure_reason(error, fallback=None):
@@ -266,8 +266,11 @@ class ManualSession:
             driver, state, scope = self._driver, self._state, self._scope
         if driver is not None and state == 'closed':
             # The last run's browser could not be closed (its temporary files were still held):
-            # that cleanup is finished now, and raises again while it still cannot.
-            self.close()
+            # that cleanup is finished now. Still held, this run is a read that failed, tried again
+            # at the next time: never a request to sign in, which waits for a person when no login
+            # is saved.
+            try: self.close()
+            except SessionError: raise SessionError('SOURCE_READ_FAILED', 'browser-closing') from None
             driver = None
         if driver is None:
             saved = storage.load_session()
@@ -335,6 +338,10 @@ class ManualSession:
         if driver is not None:
             try: storage.save_session(driver.export_state())
             finally: self.close()
+
+    def ready(self):
+        """A class list open in this program: the only moment its Smecel session can be remembered."""
+        with self._lock: return self._driver is not None and self._state in {'list_ready', 'preview_ready'}
 
     def remember_if_ready(self, storage):
         with self._lock:

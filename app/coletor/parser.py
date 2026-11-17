@@ -130,12 +130,14 @@ def _feed_serialized(tree: "_TreeReader", html: str) -> bool:
             tree.handle_data(unescape(text))
             continue
         tag = name.lower()
-        if tag not in _PLAIN_ELEMENTS or (closing and attributes):
+        # An entity inside an attribute follows html.parser's own rules ("&ltx" stays as written
+        # there, and is "<x" in a text): a diary's class, style, colspan and rowspan never have one.
+        if tag not in _PLAIN_ELEMENTS or (attributes and (closing or '&' in attributes)):
             return False
         if closing:
             tree.handle_endtag(tag)
         else:
-            tree.handle_starttag(tag, [(key.lower(), unescape(value)) for key, value in _ATTRIBUTE.findall(attributes)]
+            tree.handle_starttag(tag, [(key.lower(), value) for key, value in _ATTRIBUTE.findall(attributes)]
                                  if attributes else [])
     return position == len(html)
 
@@ -188,7 +190,7 @@ def _student_header(small: "_Node") -> dict[str, str] | None:
     return dict(pairs[:len(HEADER_LABELS)])
 
 
-def _finish(class_id, year, complete, source_format, students, records, issues):
+def _finish(class_id, year, complete, source_format, students, records, issues, identify=True):
     students.sort(key=lambda student: student.source_student_ref)
     records.sort(key=lambda record: (record.source_student_ref, record.date, record.lesson))
     issues.sort(key=lambda issue: (issue.code, issue.source_student_ref or "", issue.date or "", issue.lesson or 0))
@@ -199,10 +201,10 @@ def _finish(class_id, year, complete, source_format, students, records, issues):
         summary=SnapshotSummary(len(students), len(records), dict(sorted(Counter(r.state for r in records).items())),
                                 sum(i.severity == "error" for i in issues)),
     )
-    return replace(snapshot, snapshot_id=canonical_snapshot_id(snapshot))
+    return replace(snapshot, snapshot_id=canonical_snapshot_id(snapshot)) if identify else snapshot
 
 
-def parse_annual_html(html: str, class_id: str, year: int) -> AnnualSnapshot:
+def parse_annual_html(html: str, class_id: str, year: int, identify: bool = True) -> AnnualSnapshot:
     """Parse one fully captured annual report; return blockers instead of logging.
 
     ``class_id`` and ``year`` are expected values and must agree with the report.
@@ -248,7 +250,7 @@ def parse_annual_html(html: str, class_id: str, year: int) -> AnnualSnapshot:
 
     if containers:
         try:
-            return _parse_smecel_grid(containers, class_id, year, structurally_closed, issues)
+            return _parse_smecel_grid(containers, class_id, year, structurally_closed, issues, identify)
         except _VolumeExceeded as error:
             issues.extend(error.issues)
             issues.append(Issue("REPORT_VOLUME_EXCEEDED", "error", "O relatório excede o volume seguro de uma turma; nenhuma prévia parcial foi mantida."))
@@ -266,7 +268,7 @@ def _has_class(node: _Node, value: str) -> bool:
     return value in node.attrs.get("class", "").split()
 
 
-def _parse_smecel_grid(containers, class_id, year, structurally_closed, initial_issues):
+def _parse_smecel_grid(containers, class_id, year, structurally_closed, initial_issues, identify=True):
     """Read the observed annual grid. Its visual row position is not identity.
 
     Evidence for the adapter is a sanitized structural inspection. Raw source
@@ -442,7 +444,7 @@ def _parse_smecel_grid(containers, class_id, year, structurally_closed, initial_
             issue("DUPLICATE_CARD_CONTENT", "Duas fichas possuem conteúdo repetido; confirme a captura antes de continuar.", ref)
         seen_card_signatures.add(signature)
     complete = structurally_closed and bool(cards) and not any(i.severity == "error" for i in issues)
-    return _finish(class_id, year, complete, source_format, students, records, issues)
+    return _finish(class_id, year, complete, source_format, students, records, issues, identify)
 
 
 def _plain(value: str) -> str:

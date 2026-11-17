@@ -55,13 +55,14 @@ bandeja, a interface e as operações do portátil. A janela abre centralizada
 no monitor principal. O pacote `windows-installer-candidate` só é publicado
 depois de testes Windows nativos e instalação/desinstalação reais em pasta
 descartável. Ele ainda depende da homologação Microsoft/TPM/Smecel e do
-backend da PR #1293 antes de uso produtivo. O instalador é assinado quando
-os secrets `WINDOWS_SIGNING_PFX_BASE64` e `WINDOWS_SIGNING_PFX_PASSWORD`
-existem; certificado autoassinado identifica a escola, mas não remove o aviso
-do SmartScreen em outros computadores. Não contorne avisos de segurança.
+backend da PR #1293 antes de uso produtivo. O instalador publicado é assinado
+com o certificado da escola (ambiente `assinatura` do GitHub, só a `main`), e o
+Coletor só se atualiza com um instalador que tenha essa assinatura; o
+certificado autoassinado identifica a escola, mas não remove o aviso do
+SmartScreen em outros computadores. Não contorne avisos de segurança.
 
 Cada build aprovado na `main` vira uma [Release](https://github.com/mcpmieda/coletor/releases/latest),
-e o Coletor instalado se atualiza sozinho a partir dela. Para instalar num computador novo, use `instalador/Instalar Coletor.exe`, que sempre baixa a versão mais nova: veja o [guia do instalador](docs/WINDOWS_INSTALLER.md#publicação-e-atualização-automática).
+e o Coletor instalado se atualiza sozinho a partir dela. Para instalar num computador novo, baixe o [Instalar Coletor.exe](https://github.com/mcpmieda/coletor/releases/latest/download/Instalar-Coletor.exe), que sempre instala a versão mais nova: veja o [guia do instalador](docs/WINDOWS_INSTALLER.md#publicação-e-atualização-automática).
 
 Leia o [guia do instalador](docs/WINDOWS_INSTALLER.md) e as instruções
 `installer/LEIA-ME-INSTALADOR.txt`. A remoção do vínculo do computador

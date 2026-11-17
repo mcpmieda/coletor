@@ -6,6 +6,7 @@ from .manual_session import ManualSession, SessionError
 from .institutional_access import InstitutionalAccess, AccessDenied
 from .device_provider import DeviceProvider
 from .frequency_runtime import FrequencyRuntime
+from .history import MAX_ENTRIES
 from .protected_storage import StorageError
 from .resume_store import ResumeStore, report_pause_store
 from functools import wraps
@@ -145,7 +146,7 @@ class DesktopApi(PreviewApi):
             if status.get('authenticated') and status.get('authorized'):
                 result = self._operational(self._collector.activate)
                 if 'error' not in result: return True
-            elif status.get('code') not in {'ACCESS_UNAVAILABLE', 'LOGIN_UNAVAILABLE'}:
+            elif status.get('code') not in {'ACCESS_UNAVAILABLE', 'LOGIN_UNAVAILABLE', 'CLOCK_OUT_OF_SYNC'}:
                 self._alert('ACCESS_REQUIRED')
                 return False
         return False
@@ -282,10 +283,10 @@ class DesktopApi(PreviewApi):
         return result
 
     def get_collector_history(self, after=None):
-        # Everything the log keeps (2000 events, 30 days at most), so the 24 h
+        # Everything the log keeps (MAX_ENTRIES events, 30 days at most), so the 24 h
         # indicators and Registros never miss an older failure. Polls pass the
         # newest 'at' they have and receive only what came after it.
-        entries = self._collector.recent_history(2000)
+        entries = self._collector.recent_history(MAX_ENTRIES)
         if type(after) in {int, float}:
             entries = [e for e in entries if e['at'] > after]
         return {'entries': entries}
