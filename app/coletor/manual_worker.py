@@ -86,6 +86,9 @@ READ_SKIPPED_TYPES = {"image", "font", "media"}
 # the worker alone navigated the window, and for at most this many seconds.
 CATALOG_REUSE_SECONDS = 300
 LIST_PAGE_REUSE_SECONDS = 60
+# One command line of the private pipe after the first. The longest is the login: a 254-character
+# e-mail and a 256-character password, each character up to 12 in JSON ("\ud83d\ude00").
+MAX_COMMAND_CHARS = 8192
 
 
 def reading_page_asset(request):
@@ -468,6 +471,36 @@ async def browser_session(initial):
                         return cached[0]
                     return await read_catalog(year)
 
+                def reply(payload):
+                    encoded = json.dumps(payload, ensure_ascii=False)
+                    if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
+                        encoded = '{"error":"transport_limit"}'
+                    print(encoded, flush=True)
+
+                async def read_page(target, matches, read, unavailable):
+                    """Another page of the class list's session (the operational one), read as
+                    structured fields, never as HTML. `unavailable`: the page redirected (login)."""
+                    if not listing_mode:
+                        raise ValueError("outside_list")
+                    await load(target)
+                    before = page.url
+                    if not matches(before):
+                        payload = {"error": unavailable}
+                    else:
+                        payload = await read()
+                        if page.url != before or payload.get("url", before) != before:
+                            payload = {"error": "page_changed"}
+                    owned["url"] = None  # The list is loaded again when needed.
+                    reply(payload)
+
+                async def read_schedule():
+                    # Each class's table arrives only once it is in view: bring every one in and
+                    # wait; a page still loading is never read.
+                    loaded = await page.evaluate(SCHEDULE_LOAD_JS)
+                    if not isinstance(loaded, dict) or loaded.get("pending") != 0:
+                        return {"error": "schedule_incomplete"}
+                    return await page.evaluate(SCHEDULE_JS)
+
                 async def capture_reply(command):
                     try:
                         if command['command'] == 'state':
@@ -491,71 +524,21 @@ async def browser_session(initial):
                             payload = await read_catalog(command["year"])
                             print(json.dumps(payload, ensure_ascii=False), flush=True)
                             return
+                        year = command.get("year")
                         if command["command"] == "schedule":
-                            # Only from the class list's session (the operational one); the grid
-                            # page is read like the list: structured fields, never its HTML.
-                            if not listing_mode:
-                                raise ValueError("schedule_outside_list")
-                            target = grade_url()
-                            await load(target)
-                            before = page.url
-                            if not matches_grade(before):
-                                payload = {"error": "schedule_unavailable"}  # Login redirect.
-                            else:
-                                # Each class's table arrives only once it is in view: bring every
-                                # one in and wait; a page still loading is never read.
-                                loaded = await page.evaluate(SCHEDULE_LOAD_JS)
-                                if not isinstance(loaded, dict) or loaded.get("pending") != 0:
-                                    payload = {"error": "schedule_incomplete"}
-                                else:
-                                    payload = await page.evaluate(SCHEDULE_JS)
-                                if page.url != before or payload.get("url", before) != before:
-                                    payload = {"error": "page_changed"}
-                            owned["url"] = None  # The list is loaded again when needed.
-                            encoded = json.dumps(payload, ensure_ascii=False)
-                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
-                                encoded = '{"error":"transport_limit"}'
-                            print(encoded, flush=True)
+                            await read_page(grade_url(), matches_grade, read_schedule, "schedule_unavailable")
                             return
                         if command["command"] == "incidents":
-                            # Like the grid: only from the class list's session, read as structured
-                            # fields (the list's counts and each student's records), never as HTML.
-                            if not listing_mode:
-                                raise ValueError("incidents_outside_list")
-                            year = command.get("year")
-                            await load(incidents_url(year))
-                            before = page.url
-                            if not matches_incidents(before, year):
-                                payload = {"error": "incidents_unavailable"}  # Login redirect.
-                            else:
-                                payload = await page.evaluate(INCIDENTS_JS, year)
-                                if page.url != before or payload.get("url", before) != before:
-                                    payload = {"error": "page_changed"}
-                            owned["url"] = None  # The list is loaded again when needed.
-                            encoded = json.dumps(payload, ensure_ascii=False)
-                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
-                                encoded = '{"error":"transport_limit"}'
-                            print(encoded, flush=True)
+                            # The list's counts and each student's records.
+                            await read_page(incidents_url(year), lambda url: matches_incidents(url, year),
+                                            lambda: page.evaluate(INCIDENTS_JS, year), "incidents_unavailable")
                             return
                         if command["command"] == "student-report":
-                            # Like the incidents: only from the class list's session; the export
-                            # is fetched by the form page itself and comes back as bytes, never a file.
-                            if not listing_mode:
-                                raise ValueError("report_outside_list")
-                            year = command.get("year")
-                            await load(report_url(year))
-                            before = page.url
-                            if not matches_report(before, year):
-                                payload = {"error": "report_unavailable"}  # Login redirect.
-                            else:
-                                payload = await page.evaluate(REPORT_JS, {"year": year, "query": export_query()})
-                                if page.url != before or payload.get("url", before) != before:
-                                    payload = {"error": "page_changed"}
-                            owned["url"] = None  # The list is loaded again when needed.
-                            encoded = json.dumps(payload, ensure_ascii=False)
-                            if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
-                                encoded = '{"error":"transport_limit"}'
-                            print(encoded, flush=True)
+                            # The export is fetched by the form page itself and comes back as bytes,
+                            # never a file.
+                            await read_page(report_url(year), lambda url: matches_report(url, year),
+                                            lambda: page.evaluate(REPORT_JS, {"year": year, "query": export_query()}),
+                                            "report_unavailable")
                             return
                         class_id, year = params.get("ct"), params.get("ano")
                         if listing_mode:
@@ -576,14 +559,11 @@ async def browser_session(initial):
                                 payload = {"error": "page_changed"}
                             elif len(payload.get("html", "").encode("utf-8")) > MAX_HTML_BYTES:
                                 payload = {"error": "report_too_large"}
-                        encoded = json.dumps(payload, ensure_ascii=False)
-                        if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
-                            encoded = '{"error":"transport_limit"}'
-                        print(encoded, flush=True)
+                        reply(payload)
                     except Exception as error:
                         forget()
                         print(json.dumps({"error": failure_kind(error)}), flush=True)
-                reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
+                reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, MAX_COMMAND_CHARS))
                 capture = None
                 try:
                     while True:
@@ -604,7 +584,7 @@ async def browser_session(initial):
                             capture = asyncio.create_task(capture_reply(command))
                             # Continue listening while capture runs: EOF must
                             # interrupt it immediately, rather than wait for it.
-                            reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, 2048))
+                            reader = asyncio.create_task(asyncio.to_thread(sys.stdin.readline, MAX_COMMAND_CHARS))
                 finally:
                     if capture is not None:
                         capture.cancel()

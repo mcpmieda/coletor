@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Button, Chip, Spinner } from '@heroui/react';
 import { History, LayoutList, Minimize2, ScrollText, Settings } from 'lucide-react';
-import { useDesktopTray } from '../desktop';
+import { useDesktopTray, useNow } from '../desktop';
+import { usePaintedTheme } from '../theme';
 import FoxPet from './FoxPet';
 import type { FoxMood } from './foxPhrases';
 import { HistoryPage, LogsPage } from './HistoryPages';
@@ -53,8 +54,11 @@ export default function DesktopApp() {
   const state = useColetor();
   const [page, setPage] = useState<Page>('tasks');
   const tray = useDesktopTray(state.status?.state === 'collecting' ? 'reading' : 'idle');
-  const errors24h = useMemo(() => failures24h(state.history), [state.history]);
-  const runs = useMemo(() => groupRuns(state.history), [state.history]);
+  usePaintedTheme(state.prefs?.theme);
+  // Recounted every minute: a failure leaves the 24 h count even when nothing new happens.
+  const now = useNow(60_000);
+  const errors24h = useMemo(() => failures24h(state.history, now), [state.history, now]);
+  const runs = useMemo(() => groupRuns(state.history, state.inProgress.run), [state.history, state.inProgress.run]);
   const title = NAV.find(n => n.id === page)!.label;
 
   return (
@@ -93,8 +97,8 @@ export default function DesktopApp() {
           {tray.available && <Button size="sm" variant="secondary" onPress={() => { void tray.hide(); }}><Minimize2 size={14} /> Ocultar na bandeja</Button>}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
-          {page === 'tasks' && <TasksPage state={state} onOpenSettings={() => setPage('settings')} />}
-          {page === 'history' && <HistoryPage history={state.history} />}
+          {page === 'tasks' && <TasksPage state={state} errors24h={errors24h} onOpenSettings={() => setPage('settings')} />}
+          {page === 'history' && <HistoryPage history={state.history} inProgress={state.inProgress} />}
           {page === 'logs' && <LogsPage history={state.history} error={state.error} onRetry={() => { void state.refresh(); }} />}
           {page === 'settings' && <SettingsPage state={state} />}
         </div>

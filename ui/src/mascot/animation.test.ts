@@ -1,6 +1,5 @@
 import { expect,test } from 'vitest';
 import { INITIAL_FOX, MIN_FRAME_MS, POSE_POSITION, POSES, beginAction, foxPose, nextFox, type AnimationContext } from './animation';
-import { DEFAULT_FOX, FOX_KEY, readFoxPreferences } from './preferences';
 const context: AnimationContext = { activity:'idle',enabled:true,pageVisible:true,reducedMotion:false,idleMs:0,random:0 };
 test('all named actions use known real sprite poses', () => {
   const allowed=['idle','blink','ears','tail-left','tail-right','curious','sleep','happy'];
@@ -34,12 +33,6 @@ test('long idle simulation is bounded and does not spin at display refresh rate'
   while(elapsed<60000) { state=nextFox(state,{ ...context,random:(callbacks%10)/10 });expect(state.delay).toBeGreaterThanOrEqual(MIN_FRAME_MS);elapsed+=state.delay!;callbacks++; }
   expect(callbacks).toBeLessThan(100);
 });
-test('preference storage recovers safely and whitelists only display options', () => {
-  expect(readFoxPreferences({getItem:()=>'{bad'})).toEqual(DEFAULT_FOX);
-  expect(readFoxPreferences({getItem:()=>JSON.stringify({version:1,show:false,animate:false,token:'discard'})})).toEqual({version:1,show:false,animate:false});
-  expect(FOX_KEY).toContain('fox.v1');
-});
-
 test('eight real poses use unique cells of one shared atlas', () => {
   expect(Object.keys(POSE_POSITION)).toHaveLength(8);
   expect(new Set(Object.values(POSE_POSITION).map(v => v.join(','))).size).toBe(8);

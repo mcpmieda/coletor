@@ -17,9 +17,89 @@ fixture_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture_module)
 build_fixture = fixture_module.build_fixture
 
-from coletor.models import MappingValidation
-from coletor.parser import parse_annual_html
+from coletor.models import MappingValidation, plain
+from coletor.parser import _TreeReader, _feed_serialized, _read_tree, parse_annual_html
 from coletor.validation import build_safe_payload, canonical_snapshot_id, validate_for_transmission
+
+
+def shape(node):
+    """A tree as nested tuples; neighbouring text chunks as one (their split never matters)."""
+    children, text = [], []
+    for child in node.children:
+        if isinstance(child, str):
+            text.append(child)
+            continue
+        if text: children.append(''.join(text)); text = []
+        children.append(shape(child))
+    if text: children.append(''.join(text))
+    return (node.tag, tuple(sorted(node.attrs.items())), tuple(children))
+
+
+def slow_tree(html):
+    tree = _TreeReader()
+    tree.feed(html)
+    tree.close()
+    return tree
+
+
+def captured(html):
+    """The fixture as the worker captures a diary: only the report, written by the browser itself."""
+    start, end = html.index('<div class="container-fluid"'), html.rindex('</div>') + len('</div>')
+    return '<html><body>' + html[start:end] + '</body></html>'
+
+
+class SerializedReaderTests(unittest.TestCase):
+    """The fast reading of a browser-written diary gives exactly what html.parser gives."""
+
+    def same(self, html):
+        fast = _TreeReader()
+        self.assertTrue(_feed_serialized(fast, html), html[:80])
+        slow = slow_tree(html)
+        self.assertEqual(shape(fast.root), shape(slow.root))
+        self.assertEqual((fast.malformed, fast.closed_tags, fast.node_count, [n.tag for n in fast.stack]),
+                         (slow.malformed, slow.closed_tags, slow.node_count, [n.tag for n in slow.stack]))
+
+    def test_a_captured_diary_reads_the_same_either_way(self):
+        for edge in (False, True):
+            html = captured(build_fixture(include_edge_cases=edge))
+            self.same(html)
+            fast = parse_annual_html(html, "TESTE-A", 2026)
+            # The same diary with a comment the fast reading leaves alone goes through html.parser:
+            # the result is the same.
+            other = html.replace('<body>', '<body><!-- a -- b -->', 1)
+            self.assertFalse(_feed_serialized(_TreeReader(), other))
+            self.assertEqual(asdict(fast), asdict(parse_annual_html(other, "TESTE-A", 2026)))
+            self.assertEqual(len(fast.students), 3)
+
+    def test_entities_attributes_void_and_unbalanced_tags(self):
+        for html in ('<html><body><div class="a b" colspan="2">D&apos;AVILA &amp; C&#233;u&nbsp;x &lt;b&gt;</div></body></html>',
+                     '<HTML><BODY><DIV CLASS="x">a<BR>b<hr></DIV></BODY></HTML>',
+                     '<html><body><p title="a &amp; &quot;b&quot;">x</p> \n </body></html>\n',
+                     '<html><body><div><span>sem fechar</div></body></html>',
+                     '<html><body></p><div></div></span></body></html>',
+                     '<html><body><div class="">&notanentity; &amp</div></body>',
+                     '<html><body><div>antes<!-- comentário\n de <b>duas</b> linhas -->depois</div><!----></body></html>',
+                     'texto solto &amp; nada mais'):
+            self.same(html)
+
+    def test_anything_else_is_left_to_html_parser(self):
+        for html in ('<!doctype html><html><body></body></html>', '<html><body><!-- a -- b --></body></html>',
+                     '<html><body><!--> x --></body></html>', '<html><body><!---> x --></body></html>',
+                     '<html><body><!-- sem fim </body></html>', '<html><body><!-- a --!></body></html>',
+                     '<html><body><script>if (a < b) {}</script></body></html>', '<html><body><style>p{}</style></body></html>',
+                     '<html><head><title>a</title></head><body></body></html>', "<html><body><div class='x'></div></body></html>",
+                     '<html><body><div class=x></div></body></html>', '<html><body><input disabled></body></html>',
+                     '<html><body><br/></body></html>', '<html><body>1 < 2</body></html>', '<html><body><div  class="x"></div></body></html>',
+                     '<html><body><div class="a>b"></div></body></html>', '<html><body></div class="x"></body></html>',
+                     '<html><body><textarea><b></textarea></body></html>', '<html><body><?php ?></body></html>'):
+            self.assertFalse(_feed_serialized(_TreeReader(), html), html)
+            self.assertEqual(shape(_read_tree(html).root), shape(slow_tree(html).root))
+
+    def test_the_limits_hold_in_the_fast_reading_too(self):
+        with self.assertRaises(ValueError):
+            _feed_serialized(_TreeReader(), '<html><body>' + '<div>' * 300 + '</div>' * 300 + '</body></html>')
+        snapshot = parse_annual_html('<html><body>' + '<div>' * 300 + '</div>' * 300 + '</body></html>', "TESTE-A", 2026)
+        self.assertEqual([issue.code for issue in snapshot.issues], ["DOCUMENT_MALFORMED"])
 
 
 class AnnualParserTests(unittest.TestCase):
@@ -32,6 +112,11 @@ class AnnualParserTests(unittest.TestCase):
 
     def codes(self, snapshot):
         return {issue.code for issue in snapshot.issues}
+
+    def test_plain_is_asdict(self):
+        for value in (self.clean, self.edge, validate_for_transmission(self.edge)):
+            self.assertEqual(plain(value), asdict(value))
+            self.assertEqual(list(plain(value)), list(asdict(value)))  # Same key order: same snapshot id.
 
     def mapping(self, snapshot=None):
         snapshot = snapshot or self.clean

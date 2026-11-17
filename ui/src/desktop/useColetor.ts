@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HistoryEntry } from '../collector';
+import { onWindowVisibility, windowVisible } from '../desktop';
 import { call, native, type Preferences, type Status } from './bridge';
 
 export interface ColetorState {
@@ -7,6 +8,9 @@ export interface ColetorState {
   /** True while the shown status is the local summary and the live check is pending. */
   cached: boolean;
   history: HistoryEntry[];
+  /** Whether a collection and a report reading were going on at the poll that brought `history`:
+   *  only then is a run with no closing fact in it still going (not cut by a shutdown). */
+  inProgress: { run: boolean; report: boolean };
   prefs: Preferences | null;
   error: string;
   /** The running program's version (as in the window title); null outside the desktop window. */
@@ -21,6 +25,7 @@ export function useColetor(): ColetorState {
   const [status, setLiveStatus] = useState<Status | null>(null);
   const [cached, setCached] = useState(true);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [inProgress, setInProgress] = useState({ run: false, report: false });
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [error, setError] = useState('');
   // The running program's version (startup snapshot); unknown outside the desktop window.
@@ -46,6 +51,8 @@ export function useColetor(): ColetorState {
       if (stamp.current === started) setLiveStatus(live);
       setCached(false); setError('');
       if (recent) {
+        const run = live.state === 'collecting' || live.preparing === true, report = live.report?.running === true;
+        setInProgress(current => (current.run === run && current.report === report ? current : { run, report }));
         // Only what is new since the last poll; the same array when nothing is.
         const fresh = after === null ? recent.entries : recent.entries.filter(e => e.at > after);
         if (fresh.length || after === null) {
@@ -54,7 +61,8 @@ export function useColetor(): ColetorState {
         }
       }
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : 'Não foi possível verificar a coleta.');
+      // The check ended, without an answer: the panel says "não confirmado", not "verificando" forever.
+      if (mounted.current) { setCached(false); setError(e instanceof Error ? e.message : 'Não foi possível verificar a coleta.'); }
     } finally {
       busy.current = false;
       if (again.current && mounted.current) { again.current = false; void refresh(); }
@@ -78,15 +86,14 @@ export function useColetor(): ColetorState {
 
   const collecting = status?.state === 'collecting' || status?.preparing === true;
   // Each refresh asks the Ecossistema: while nothing is being collected the window asks once a minute,
-  // and not at all while it is hidden in the tray (ecossistema#1450, finding 7).
+  // and not at all while it is hidden in the tray (ecossistema#1450, finding 7). The tray has its
+  // own signal: WebView2 keeps the document "visible" there.
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState !== 'hidden') void refresh();
-    }, collecting ? 5_000 : 60_000);
-    const visible = () => { if (document.visibilityState === 'visible') void refresh(); };
-    document.addEventListener('visibilitychange', visible);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
+    const visible = () => { if (windowVisible()) void refresh(); };
+    const timer = setInterval(visible, collecting ? 5_000 : 60_000);
+    const stop = onWindowVisibility(visible);
+    return () => { clearInterval(timer); stop(); };
   }, [refresh, collecting]);
 
-  return { status, cached, history, prefs, error, version, refresh, setStatus, setPrefs };
+  return { status, cached, history, inProgress, prefs, error, version, refresh, setStatus, setPrefs };
 }

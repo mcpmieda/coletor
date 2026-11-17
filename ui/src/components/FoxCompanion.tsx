@@ -1,29 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
+import { onWindowVisibility, windowVisible } from '../desktop';
 import { INITIAL_FOX, POSE_POSITION, beginAction, foxPose, nextFox, type FoxActivity } from '../mascot/animation';
 
 const CAPTIONS: Record<FoxActivity, string> = { idle:'Pronta para ajudar.', reading:'Lendo o diário…', review:'Há pontos para conferir.', error:'O arquivo precisa de atenção.' };
 /** Always present; it moves only while visible and when the system allows motion. */
 export default function FoxCompanion({ activity, caption: showCaption = true, onPet }: Readonly<{ activity: FoxActivity; caption?: boolean; onPet?: () => void }>) {
   const [animation, setAnimation] = useState(INITIAL_FOX);
-  const [visible, setVisible] = useState(() => typeof document === 'undefined' || (!document.hidden && window.__coletorWindowVisible !== false));
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || windowVisible());
   const [reduced, setReduced] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [inLayout, setInLayout] = useState(() => typeof matchMedia === 'undefined' || matchMedia('(min-width: 761px)').matches);
   const lastInput = useRef(0);
   useEffect(() => {
     lastInput.current = performance.now();
     const touch = () => { lastInput.current = performance.now(); };
-    const visibility = () => setVisible(!document.hidden && window.__coletorWindowVisible !== false);
+    const stopVisibility = onWindowVisibility(() => setVisible(windowVisible()));
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const motion = () => setReduced(media.matches);
     const layout = matchMedia('(min-width: 761px)');
     const layoutChanged = () => setInLayout(layout.matches);
     layout.addEventListener('change', layoutChanged);
-    document.addEventListener('visibilitychange', visibility);
-    window.addEventListener('coletorwindowvisibility', visibility);
     window.addEventListener('pointermove', touch, { passive:true });
     window.addEventListener('keydown', touch);
     media.addEventListener('change', motion);
-    return () => { document.removeEventListener('visibilitychange', visibility); window.removeEventListener('coletorwindowvisibility', visibility); window.removeEventListener('pointermove', touch); window.removeEventListener('keydown', touch); media.removeEventListener('change', motion); layout.removeEventListener('change',layoutChanged); };
+    return () => { stopVisibility(); window.removeEventListener('pointermove', touch); window.removeEventListener('keydown', touch); media.removeEventListener('change', motion); layout.removeEventListener('change',layoutChanged); };
   }, []);
   useEffect(() => {
     setAnimation(s => nextFox(s, { activity, enabled: inLayout, pageVisible:visible, reducedMotion:reduced, idleMs:0, random:0 }));

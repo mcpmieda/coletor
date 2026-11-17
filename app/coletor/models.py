@@ -5,11 +5,26 @@ studentUid, MAT, or a stable identifier, and must not be reused across snapshots
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from typing import Literal
 
 AttendanceState = Literal["present", "absent", "excused_absent", "non_school_day", "outside_enrollment", "planned_unknown", "unmarked", "unknown"]
 Severity = Literal["error", "warning"]
+
+
+def plain(value):
+    """The same dict as dataclasses.asdict for these models (flat fields, lists of flat models, one
+    dict of counts), without its recursive deep copy: a class's diary has 80,000 records, and
+    asdict took about a second each of the three times a reading called it."""
+    result = dict(vars(value))
+    for key, item in result.items():
+        if isinstance(item, list):
+            result[key] = [dict(vars(entry)) if is_dataclass(entry) else entry for entry in item]
+        elif is_dataclass(item):
+            result[key] = plain(item)
+        elif isinstance(item, dict):
+            result[key] = dict(item)
+    return result
 
 
 @dataclass(frozen=True)

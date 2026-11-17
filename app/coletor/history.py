@@ -52,11 +52,15 @@ class CollectorHistory:
     def _read(self):
         try:
             if self.path.is_symlink(): return []
-            with self.path.open('rb') as file: raw = file.read(MAX_READ_BYTES + 1)
-        except FileNotFoundError: return []
+            with self.path.open('rb') as file:
+                # Past the limit (long incident notices), the newest part is the one read: reading the
+                # start would show old events as the latest and drop the new ones at the next rewrite.
+                cut = file.seek(0, 2) > MAX_READ_BYTES
+                file.seek(-MAX_READ_BYTES if cut else 0, 2 if cut else 0)
+                raw = file.read(MAX_READ_BYTES)
         except OSError: return []
         entries = []
-        for line in raw[:MAX_READ_BYTES].decode('utf-8', 'ignore').splitlines():
+        for line in raw.decode('utf-8', 'ignore').splitlines()[1 if cut else 0:]:  # A cut first line is no event.
             try: value = json.loads(line)
             except ValueError: continue
             if isinstance(value, dict) and value.get('kind') in KINDS and type(value.get('at')) in {int, float}:

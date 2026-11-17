@@ -20,7 +20,7 @@ import time
 import uuid
 import webbrowser
 
-from .institutional_access import AccessDenied, OnlineResponse, OFFICIAL_ORIGIN
+from .institutional_access import AccessDenied, OnlineResponse, OFFICIAL_ORIGIN, unique
 from .local_settings import LocalSettings, user_settings_directory
 from .windows_device_key import WindowsDeviceKey, DeviceKeyError, TPM_PROVIDER, SOFTWARE_PROVIDER
 
@@ -69,15 +69,6 @@ class FrequencyError(AccessDenied):
 
 def compact(value):
     return json.dumps(value, separators=(',', ':'), ensure_ascii=True).encode('ascii')
-
-
-def unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError()
-        result[key] = value
-    return result
 
 
 def decode(response):

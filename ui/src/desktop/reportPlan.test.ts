@@ -41,6 +41,14 @@ describe('student report agenda', () => {
     expect(frequencyMinutes(history)).toBe(11);
     expect(reportMinutes(history)).toBe(2);
     expect(reportMinutes([])).toBe(0);
+    // A grid or incidents failure is only noted: the run is measured up to its own end.
+    const noted: HistoryEntry[] = [
+      { at: 1000, kind: 'collection-started' }, { at: 1130, kind: 'failure', code: 'SOURCE_READ_FAILED', label: 'Grade de horários' },
+      { at: 1501, kind: 'collection-finished' },
+    ];
+    expect(frequencyMinutes(noted)).toBe(9);
+    // A failure that stops the run still ends it.
+    expect(frequencyMinutes([{ at: 1000, kind: 'collection-started' }, { at: 1130, kind: 'failure', code: 'lease-fenced' }])).toBe(3);
   });
 
   it('its own history', () => {
@@ -57,5 +65,9 @@ describe('student report agenda', () => {
     const failed = logEvents(history).find(e => e.message.startsWith('Relatório de alunos não lido'));
     expect(failed?.level).toBe('error');
     expect(failed?.message).toContain('gerar o relatório');
+    // A reading with no closing fact is still going only while the Coletor says so.
+    const open: HistoryEntry[] = [{ at: 400, kind: 'report-started' }];
+    expect(groupReportRuns(open)[0]!.status).toBe('running');
+    expect(groupReportRuns(open, false)[0]).toMatchObject({ status: 'error', finished: null, detail: 'Interrompida antes de terminar.' });
   });
 });

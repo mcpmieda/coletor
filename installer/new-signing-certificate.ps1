@@ -13,10 +13,13 @@
 #   warning. That needs a certificate from a recognized authority.
 param(
     [string]$Name = 'Escola Ieda Alves de Oliveira - Coletor de Frequencia',
-    [string]$Repository = 'mcpmieda/coletor-frequencia-smecel'
+    # The repository of this checkout (gh reads its remote), unless another one is given.
+    [string]$Repository = ''
 )
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI (gh) not found' }
+if (-not $Repository) { $Repository = gh repo view --json nameWithOwner --jq .nameWithOwner }
+if ($LASTEXITCODE -ne 0 -or -not $Repository) { throw 'Repository not found. Run inside the checkout or pass -Repository owner/name.' }
 $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=$Name" -FriendlyName "$Name - assinatura de codigo" `
     -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(10) `
     -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.19={critical}{text}ca=false')
@@ -38,7 +41,8 @@ try {
 } finally {
     Remove-Item $pfx -Force -ErrorAction SilentlyContinue
     if ($published) {
-        Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+        # -DeleteKey: the private key leaves this PC too, not only the certificate entry.
+        Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue
     } else {
         Write-Warning "Upload not confirmed. Local certificate retained in CurrentUser/My (thumbprint: $($cert.Thumbprint))."
     }

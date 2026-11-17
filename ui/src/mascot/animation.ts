@@ -1,7 +1,7 @@
 /** Deterministic, bounded animation policy. It never schedules collection work. */
 export type FoxActivity = 'idle' | 'reading' | 'review' | 'error';
-export type FoxPose = 'idle' | 'blink' | 'ears' | 'tail-left' | 'tail-right' | 'curious' | 'sleep' | 'happy';
-export type FoxAction = 'idle' | 'blink' | 'ears' | 'tail' | 'curious' | 'hop' | 'walk' | 'sleep' | 'wake' | 'reading' | 'review' | 'error' | 'pet';
+type FoxPose ='idle' | 'blink' | 'ears' | 'tail-left' | 'tail-right' | 'curious' | 'sleep' | 'happy';
+type FoxAction ='idle' | 'blink' | 'ears' | 'tail' | 'curious' | 'hop' | 'walk' | 'sleep' | 'wake' | 'reading' | 'review' | 'error' | 'pet';
 export const POSE_POSITION: Record<FoxPose, readonly [number,number]> = { idle:[0,0], blink:[1,0], ears:[2,0], curious:[3,0], 'tail-left':[0,1], 'tail-right':[1,1], sleep:[2,1], happy:[3,1] };
 export const POSES: Record<FoxAction, readonly FoxPose[]> = {
   idle: ['idle'], blink: ['idle','blink','idle'], ears: ['idle','ears','idle','ears','idle'],
@@ -11,7 +11,7 @@ export const POSES: Record<FoxAction, readonly FoxPose[]> = {
   reading: ['curious','tail-left','curious','tail-right'], review: ['curious','blink','idle'],
   error: ['curious','ears','curious','idle'], pet: ['curious','happy','happy','blink','idle'],
 };
-export interface FoxAnimation { action: FoxAction; frame: number; activity: FoxActivity; delay: number | null }
+interface FoxAnimation { action: FoxAction; frame: number; activity: FoxActivity; delay: number | null }
 export interface AnimationContext { activity: FoxActivity; enabled: boolean; pageVisible: boolean; reducedMotion: boolean; idleMs: number; random: number }
 export const INITIAL_FOX: FoxAnimation = { action:'idle', frame:0, activity:'idle', delay:1800 };
 export const MIN_FRAME_MS = 160;

@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date
+from html import unescape
 from html.parser import HTMLParser
 import re
 import unicodedata
@@ -25,6 +26,7 @@ class _VolumeExceeded(ValueError):
 
 MONTHS = {"FEV": 2, "MAR": 3, "ABR": 4, "MAI": 5, "JUN": 6,
           "JUL": 7, "AGO": 8, "SET": 9, "OUT": 10, "NOV": 11, "DEZ": 12}
+MONTH_NUMBERS = tuple(MONTHS.values())
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
 
@@ -38,11 +40,18 @@ class _Node:
         return "".join(child if isinstance(child, str) else child.text() for child in self.children)
 
     def walk(self, tag: str | None = None):
-        for child in self.children:
-            if isinstance(child, _Node):
-                if tag is None or child.tag == tag:
-                    yield child
-                yield from child.walk(tag)
+        """Every descendant in document order. One loop over a stack: a generator per level made a
+        whole diary (100,000 nodes, read five times) cost over a second."""
+        pending = [iter(self.children)]
+        while pending:
+            for child in pending[-1]:
+                if isinstance(child, _Node):
+                    if tag is None or child.tag == tag:
+                        yield child
+                    pending.append(iter(child.children))
+                    break
+            else:
+                pending.pop()
 
 
 class _TreeReader(HTMLParser):
@@ -90,8 +99,58 @@ class _TreeReader(HTMLParser):
         self.stack[-1].children.append(data)
 
 
+# The diary as the browser itself writes it (outerHTML of the report, as the worker captures it):
+# plain elements, double-quoted attributes, text and plain comments (the Smecel's diary has one).
+# Read with one regular expression, it gives the tree the same events html.parser would, several
+# times faster (a class's diary has 200,000 tags). Anything else in the document (a doctype, a
+# script, another quoting, a stray "<", a comment with "--" inside) is not read this way at all:
+# the whole document goes through html.parser, as before.
+_SERIALIZED = re.compile(r'<(/?)([A-Za-z][A-Za-z0-9]*)((?: [A-Za-z][A-Za-z0-9-]*="[^"<>]*")*)>|([^<]+)'
+                         r'|(<!--(?!-?>)(?:(?!--)[\s\S])*-->)')
+_ATTRIBUTE = re.compile(r' ([A-Za-z][A-Za-z0-9-]*)="([^"<>]*)"')
+# Elements whose content html.parser reads as markup like any other (never script, style, title,
+# textarea and the like, which it reads as raw text).
+_PLAIN_ELEMENTS = frozenset((
+    "html body div p span small strong b i em u br hr table thead tbody tfoot tr td th "
+    "h1 h2 h3 h4 h5 h6 a ul ol li footer header section article main nav label center font sup sub").split())
+
+
+def _feed_serialized(tree: "_TreeReader", html: str) -> bool:
+    """Feeds a browser-serialized document to the tree; False (tree to be discarded) when the
+    document is anything else."""
+    position = 0
+    for match in _SERIALIZED.finditer(html):
+        if match.start() != position:
+            return False
+        position = match.end()
+        closing, name, attributes, text, comment = match.groups()
+        if comment is not None:
+            continue  # html.parser reads it and gives the tree nothing.
+        if text is not None:
+            tree.handle_data(unescape(text))
+            continue
+        tag = name.lower()
+        if tag not in _PLAIN_ELEMENTS or (closing and attributes):
+            return False
+        if closing:
+            tree.handle_endtag(tag)
+        else:
+            tree.handle_starttag(tag, [(key.lower(), unescape(value)) for key, value in _ATTRIBUTE.findall(attributes)]
+                                 if attributes else [])
+    return position == len(html)
+
+
+def _read_tree(html: str) -> "_TreeReader":
+    tree = _TreeReader()
+    if not _feed_serialized(tree, html):
+        tree = _TreeReader()
+        tree.feed(html)
+        tree.close()
+    return tree
+
+
 def _normalized(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).split())
+    return " ".join(unicodedata.normalize("NFKC", value).split()) if value else ""
 
 
 # Student card header, located by label rather than by field count: since
@@ -168,10 +227,8 @@ def parse_annual_html(html: str, class_id: str, year: int) -> AnnualSnapshot:
     if len(html.encode("utf-8")) > MAX_HTML_BYTES:
         issue("DOCUMENT_TOO_LARGE", "O documento excede o limite seguro de leitura.")
         return _finish(class_id, year, False, "unrecognized", students, records, issues)
-    tree = _TreeReader()
     try:
-        tree.feed(html)
-        tree.close()
+        tree = _read_tree(html)
     except (ValueError, RecursionError):
         issue("DOCUMENT_MALFORMED", "O documento HTML não pôde ser lido com segurança.")
         return _finish(class_id, year, False, "unrecognized", students, records, issues)
@@ -179,14 +236,19 @@ def parse_annual_html(html: str, class_id: str, year: int) -> AnnualSnapshot:
                            and {"html", "body"}.issubset(tree.closed_tags))
     if not structurally_closed:
         issue("DOCUMENT_MALFORMED", "O HTML está incompleto ou sua estrutura não é suportada.")
-    if any(node.attrs.get("type", "").lower() == "password" for node in tree.root.walk("input")):
+    login, containers = False, []
+    for node in tree.root.walk():  # One pass over the document for both questions.
+        if node.tag == "input" and node.attrs.get("type", "").lower() == "password":
+            login = True
+        elif node.tag == "div" and _has_class(node, "container-fluid"):
+            containers.append(node)
+    if login:
         issue("LOGIN_PAGE", "A captura contém uma página de autenticação.")
         return _finish(class_id, year, False, "login", students, records, issues)
 
-    real_containers = [node for node in tree.root.walk("div") if "container-fluid" in node.attrs.get("class", "").split()]
-    if real_containers:
+    if containers:
         try:
-            return _parse_smecel_grid(tree, class_id, year, structurally_closed, issues)
+            return _parse_smecel_grid(containers, class_id, year, structurally_closed, issues)
         except _VolumeExceeded as error:
             issues.extend(error.issues)
             issues.append(Issue("REPORT_VOLUME_EXCEEDED", "error", "O relatório excede o volume seguro de uma turma; nenhuma prévia parcial foi mantida."))
@@ -204,7 +266,7 @@ def _has_class(node: _Node, value: str) -> bool:
     return value in node.attrs.get("class", "").split()
 
 
-def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues):
+def _parse_smecel_grid(containers, class_id, year, structurally_closed, initial_issues):
     """Read the observed annual grid. Its visual row position is not identity.
 
     Evidence for the adapter is a sanitized structural inspection. Raw source
@@ -227,7 +289,6 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
             raise _VolumeExceeded(issues)
         issues.append(Issue(code, severity, message, ref, when, lesson))
 
-    containers = [node for node in tree.root.walk("div") if _has_class(node, "container-fluid")]
     if len(containers) != 1:
         issue("REPORT_STRUCTURE_UNSUPPORTED", "A estrutura do relatório anual não pôde ser identificada de forma única.")
         return _finish(class_id, year, False, "unrecognized", students, records, issues)
@@ -331,8 +392,9 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
         if [(_normalized(cells[0].text()) if cells else "") for cells in day_rows] != [str(i) for i in range(1, 32)]:
             issue("GRID_COVERAGE_INVALID", "As linhas de dias precisam conter 1 a 31, sem repetição e na ordem original.", ref)
         legend_nodes = [node for node in card.walk("i")]
-        legend = _plain(" ".join(node.text() for node in legend_nodes))
-        if not legend or "aula prevista/presenca" not in legend.replace(" / ", "/"):
+        # "aula prevista / presença" and "aula prevista/presença" are the same legend entry.
+        legend = _plain(" ".join(node.text() for node in legend_nodes)).replace(" / ", "/")
+        if not legend or "aula prevista/presenca" not in legend:
             issue("LEGEND_UNVERIFIED", "A legenda de frequência está ausente ou não foi reconhecida.", ref)
         card_symbols = []
         for cells in day_rows:
@@ -340,8 +402,11 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
             if len(cells) != 12 or not day_text.isdigit() or not 1 <= int(day_text) <= 31:
                 issue("GRID_COVERAGE_INVALID", "Uma linha de dias não contém as onze colunas mensais esperadas.", ref)
                 continue
-            for month_index, cell in enumerate(cells[1:]):
-                month = list(MONTHS.values())[month_index]
+            for month, cell in zip(MONTH_NUMBERS, cells[1:]):
+                try:
+                    when = date(year, month, int(day_text)).isoformat()
+                except ValueError:
+                    when = None  # 30 February: the grid has the position, the calendar has no such day.
                 slots = _direct(cell, "div")
                 if not slots and not _normalized(cell.text()) and not _direct(cell):
                     # Observed empty monthly cells retain six unmarked slots.
@@ -356,9 +421,7 @@ def _parse_smecel_grid(tree, class_id, year, structurally_closed, initial_issues
                         issue("SOURCE_SYMBOL_TOO_LONG", "Uma posição de aula contém conteúdo inesperado.", ref)
                     state, symbol = _source_state(symbol, slot, legend)
                     card_symbols.append((month, int(day_text), lesson, symbol, state))
-                    try:
-                        when = date(year, month, int(day_text)).isoformat()
-                    except ValueError:
+                    if when is None:
                         if state not in {"unmarked", "non_school_day", "outside_enrollment"}:
                             issue("INVALID_DATE_MARKED", "Existe marcação em um dia que não existe no calendário.", ref, None, lesson)
                         continue
@@ -387,11 +450,12 @@ def _plain(value: str) -> str:
 
 
 def _source_state(symbol, slot, legend):
-    """Require the observed symbol, shape and legend together; never color alone."""
-    direct = _direct(slot)
+    """Require the observed symbol, shape and legend together; never color alone.
+    legend: the card's, plain and with " / " as "/" (see the caller)."""
+    direct = _direct(slot) if slot.children else ()
     if not symbol and not direct:
         return "unmarked", ""
-    if symbol == "•" and not direct and "aula prevista/presenca" in legend.replace(" / ", "/"):
+    if symbol == "•" and not direct and "aula prevista/presenca" in legend:
         return "planned_unknown", symbol
     if len(direct) == 1 and direct[0].tag == "strong":
         spans = _direct(direct[0], "span")

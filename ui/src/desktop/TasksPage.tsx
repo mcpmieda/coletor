@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Button, Card, Chip, ProgressBar } from '@heroui/react';
 import { notify } from './foxSay';
 import { Activity, CalendarClock, CalendarDays, FileSpreadsheet, KeyRound, LayoutList, Pause, Pencil, Play, RefreshCw, School, Settings, ShieldCheck } from 'lucide-react';
 import { COLLECTOR_CODES } from '../collector';
+import { useNow } from '../desktop';
 import { call, type Status } from './bridge';
 import { fromShared, nextSharedRun, scheduleText } from './periods';
-import { failures24h, fmtCountdown, fmtDate, groupReportRuns, groupRuns, runSummary } from './runs';
+import { fmtCountdown, fmtDate, groupReportRuns, groupRuns, runSummary } from './runs';
 import ScheduleEditor from './ScheduleEditor';
 import ReportScheduleEditor from './ReportScheduleEditor';
 import { nextReportRun, reportText } from './reportPlan';
@@ -15,22 +16,20 @@ import type { ColetorState } from './useColetor';
 // Routine waits, never shown as a problem on this page.
 const QUIET_CODES = new Set(['lease-busy', 'CANCELLED', 'NO_CLASSES_IN_SHIFT']);
 
-export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: ColetorState; onOpenSettings: () => void }>) {
-  const { status, history, setStatus, refresh } = state;
+export default function TasksPage({ state, errors24h, onOpenSettings }: Readonly<{ state: ColetorState; errors24h: number; onOpenSettings: () => void }>) {
+  const { status, history, inProgress, setStatus, refresh } = state;
   const [editing, setEditing] = useState(false), [editingReport, setEditingReport] = useState(false);
   const [startingReport, setStartingReport] = useState(false);
   const [busy, setBusy] = useState(false), [starting, setStarting] = useState(false);
-  const [nowMs, setNowMs] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNowMs(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const nowMs = useNow(1000);
 
-  const runs = useMemo(() => groupRuns(history), [history]);
+  const runs = useMemo(() => groupRuns(history, inProgress.run), [history, inProgress.run]);
   const last = runs.find(r => r.status !== 'running') ?? null;
   const schedule = status?.settings?.schedule ?? null;
   const draft = useMemo(() => fromShared(schedule), [schedule]);
   // From the agenda exactly as saved: per-day or per-shift times made in the
   // Ecossistema are not collapsed into the editor's summary.
   const next = status?.active && !status.localPaused && !status.settings?.paused ? nextSharedRun(schedule, new Date(nowMs)) : null;
-  const errors24h = useMemo(() => failures24h(history), [history]);
   const collecting = status?.state === 'collecting';
   // From the click on (owner request 29/10/2026): the button goes and the bar shows at once, while
   // the Coletor still signs in to the Smecel and reads the class list ("Preparando").
@@ -38,7 +37,7 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
   // The student report is a run of its own and never runs with the frequency (owner decision 29/10/2026).
   const reportRunning = startingReport || status?.report?.running === true;
   const reportSchedule = status?.settings?.reportSchedule ?? null;
-  const reportRuns = useMemo(() => groupReportRuns(history), [history]);
+  const reportRuns = useMemo(() => groupReportRuns(history, inProgress.report), [history, inProgress.report]);
   const lastReport = reportRuns.find(r => r.status !== 'running') ?? null;
   // The report alone can be paused on this computer (owner request 05/11/2026); the frequency's
   // pause still stops both.
@@ -230,10 +229,11 @@ export default function TasksPage({ state, onOpenSettings }: Readonly<{ state: C
         </Card.Content>
       </Card>
 
-      <ReportScheduleEditor open={editingReport} status={status} history={history} onClose={() => setEditingReport(false)}
-        onSaved={saved => { setStatus(saved); setEditingReport(false); void refresh(); }} />
-      <ScheduleEditor open={editing} status={status} history={history} onClose={() => setEditing(false)}
-        onSaved={saved => { setStatus(saved); setEditing(false); void refresh(); }} />
+      {/* Mounted only while open: each opening starts from the saved agenda, and a closed editor costs nothing. */}
+      {editingReport && <ReportScheduleEditor status={status} history={history} onClose={() => setEditingReport(false)}
+        onSaved={saved => { setStatus(saved); setEditingReport(false); void refresh(); }} />}
+      {editing && <ScheduleEditor status={status} history={history} onClose={() => setEditing(false)}
+        onSaved={saved => { setStatus(saved); setEditing(false); void refresh(); }} />}
     </div>
   );
 }

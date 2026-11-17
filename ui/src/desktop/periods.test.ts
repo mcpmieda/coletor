@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import agendaFixture from '../../../fixtures/agenda-heterogeneous.json';
 import type { SharedSchedule } from '../collector';
-import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextRun, nextSharedRun, nextTimeField, sharedScheduleProblem, timezoneProblem, scheduleText, toShared, type PeriodDraft } from './periods';
+import { DEFAULT_DRAFT, MAX_PER_DAY, dayTimes, draftProblem, fromShared, nextSharedRun, nextTimeField, sharedScheduleProblem, timezoneProblem, scheduleText, toShared, type PeriodDraft } from './periods';
 
 const draft = (patch: Partial<PeriodDraft> = {}): PeriodDraft => ({ ...DEFAULT_DRAFT, ...patch });
 
@@ -35,7 +35,9 @@ test('problems are explained before saving', () => {
   expect(draftProblem(draft())).toBeNull();
   expect(draftProblem(draft({ weekdays: [] }))).toMatch(/dia/);
   expect(draftProblem(draft({ from: '18:00', to: '07:00' }))).toMatch(/depois do início/);
-  expect(draftProblem(draft({ every: 5, from: '00:00', to: '23:55' }))).toMatch(new RegExp(`limite é ${MAX_PER_DAY}`));
+  // The real count of the day, not the limit plus one.
+  expect(draftProblem(draft({ every: 5, from: '00:00', to: '23:55' }))).toMatch(new RegExp(`São 288 coletas por dia; o limite é ${MAX_PER_DAY}`));
+  expect(draftProblem(draft({ every: 4 }))).toMatch(/entre 5 e 720 minutos/);
   expect(draftProblem(draft({ finalCheck: '12:00' }))).toMatch(/conferência final/);
   expect(draftProblem(draft({ mode: 'times', times: [] }))).toMatch(/horário/);
 });
@@ -48,11 +50,12 @@ test('plain sentence for the task card', () => {
 
 test('next collection in the school time zone', () => {
   // Monday 2026-10-19 10:10 in Bahia (UTC-3) = 13:10Z.
-  const next = nextRun(draft({ every: 30, from: '07:00', to: '17:30' }), new Date('2026-10-19T13:10:00Z'));
+  const next = nextSharedRun(toShared(draft({ every: 30, from: '07:00', to: '17:30' })), new Date('2026-10-19T13:10:00Z'));
   expect(next?.toISOString()).toBe('2026-10-19T13:30:00.000Z');
   // Friday after the last time goes to Monday 07:00.
-  expect(nextRun(draft(), new Date('2026-10-23T21:00:00Z'))?.toISOString()).toBe('2026-10-26T10:00:00.000Z');
-  expect(nextRun(draft({ mode: 'off' }))).toBeNull();
+  expect(nextSharedRun(toShared(draft()), new Date('2026-10-23T21:00:00Z'))?.toISOString()).toBe('2026-10-26T10:00:00.000Z');
+  expect(nextSharedRun(toShared(draft({ mode: 'off' })))).toBeNull();
+  expect(nextSharedRun(null)).toBeNull();
 });
 
 test('a day with only one shift enabled is not silently widened', () => {

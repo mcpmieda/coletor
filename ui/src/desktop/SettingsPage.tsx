@@ -33,6 +33,11 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
     const timer = setInterval(read, 10_000);
     return () => clearInterval(timer);
   }, []);
+  // The tray menu changes preferences too: read again when Ajustes opens, unless one was saved here meanwhile.
+  const prefSaved = useRef(false);
+  useEffect(() => {
+    void call(api => api.get_local_settings()).then(r => { if (!prefSaved.current) setPrefs(r.settings); }).catch(() => undefined);
+  }, [setPrefs]);
   const saved = status?.credential?.saved === true;
   const mode = prefs?.classes.mode ?? status?.classesMode ?? 'all';
 
@@ -59,7 +64,7 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
     } finally { closingRef.current = false; setClosing(false); void refresh(); }
   }
   const pref = (work: Parameters<typeof call<{ settings: Preferences }>>[0], message?: string) =>
-    run(work, (r: { settings: Preferences }) => { setPrefs(r.settings); void refresh(); }, message);
+    run(work, (r: { settings: Preferences }) => { prefSaved.current = true; setPrefs(r.settings); void refresh(); }, message);
 
   return (
     <div className="grid grid-cols-2 gap-4">
@@ -77,7 +82,7 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
               <TextInput label="Senha do Smecel" value={password} onChange={setPassword} type="password" autoComplete="off" />
               <div className="flex gap-2">
                 <Button type="submit" size="sm" variant="primary" isPending={busy} isDisabled={!email.trim() || !password}><KeyRound size={15} /> Salvar acesso</Button>
-                {changing && <Button size="sm" variant="tertiary" onPress={() => setChanging(false)}>Cancelar</Button>}
+                {changing && <Button size="sm" variant="tertiary" onPress={() => { setChanging(false); setPassword(''); }}>Cancelar</Button>}
               </div>
             </form>
           )}

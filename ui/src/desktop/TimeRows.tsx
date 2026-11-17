@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { Plus, X } from 'lucide-react';
-import { nextTimeField } from './periods';
+import { MAX_PER_DAY, nextTimeField } from './periods';
 import { IconButton, TimeInput } from './ui';
 
 export default function TimeRows({ values, onChange }: Readonly<{ values: string[]; onChange: (values: string[]) => void }>) {
@@ -36,6 +36,6 @@ export default function TimeRows({ values, onChange }: Readonly<{ values: string
     </div>
     <Button data-add-time size="sm" variant="secondary" className="self-start" isDisabled={!addition.allowed}
       onPress={() => publish([...rows, makeRow(addition.value)])}><Plus size={14} /> Adicionar horário</Button>
-    {!addition.allowed && values.length < 48 && values.every(Boolean) && <span className="text-xs text-muted">Não há mais horários disponíveis neste dia.</span>}
+    {!addition.allowed && values.length < MAX_PER_DAY && values.every(Boolean) && <span className="text-xs text-muted">Não há mais horários disponíveis neste dia.</span>}
   </div>;
 }

@@ -24,7 +24,7 @@ import re
 from datetime import date
 from urllib.parse import parse_qsl, urlsplit
 
-from .class_catalog import ORGANIZATION, SCHOOL
+from .class_catalog import CONTEXT_JS, ORGANIZATION, SCHOOL
 from .class_selection import ORIGIN
 
 LIST_PATH = "/sistema/escola/ocorrencias.php"
@@ -52,8 +52,7 @@ INCIDENTS_JS = """async (year) => {
     if(r.status!==200)throw new Error('status');return parse(await r.text());};
   const text=norm(document.body.innerText);
   const scope={url:location.href,password_form:!!document.querySelector('input[type=password]'),
-    context_organization:text.includes('SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO'),
-    context_school:text.includes('ESCOLA IEDA ALVES DE OLIVEIRA MCPM'),
+    CONTEXT_JS,
     year_selected:document.querySelector('select[name=ano]')?.value??null};
   const counter=text.match(/(\\d+) alunos e turmas no filtro atual, (\\d+) por página/);
   if(!counter)return {...scope,error:'incidents_counter_missing'};
@@ -93,7 +92,7 @@ INCIDENTS_JS = """async (year) => {
   for(let i=0;i<hrefs.length;i+=8)
     await Promise.all(hrefs.slice(i,i+8).map(async href=>{try{students[href]=await student(href);}catch{failedStudents.push(href);}}));
   return {...scope,total,per_page:perPage,pages,failed_pages:failedPages,rows,students,failed_students:failedStudents};
-}"""
+}""".replace("CONTEXT_JS", CONTEXT_JS)
 
 
 def list_url(year):

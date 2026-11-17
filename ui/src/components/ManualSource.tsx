@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Label, TextField } from '@heroui/react';
 import { nativeApi } from '../api';
 
-export interface ManualStatus {
+interface ManualStatus {
   generation: number; state: string; cleanup_pending?: boolean;
   scope: { class_id?: string; year: number; url: string } | null;
   identity_verified: false; transmission_enabled: false; notice: string;

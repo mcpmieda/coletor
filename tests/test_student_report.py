@@ -2,40 +2,79 @@
 import base64
 from datetime import datetime
 import io
+import json
+from pathlib import Path
 import threading
 import unittest
 import zipfile
+from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
 
 from coletor.device_provider import FrequencyError
 from coletor.frequency_runtime import report_hash, report_times, validate_report_schedule
 from coletor.manual_session import SessionError
-from coletor.student_report import FIELDS, export_query, report_from_observation, rows_from_workbook
+from coletor.student_report import (FIELDS, NEVER_ASKED, PROFILE, export_query, report_from_observation,
+                                    rows_from_workbook)
 import tempfile
 from coletor.frequency_runtime import FrequencyRuntime
 from coletor.protected_storage import ProtectedStorage
 from test_frequency_runtime import DEVICE, NOW, Access, Provider, Source, SyntheticCrypto
 
-TITLES = ['Nome do aluno', 'Escola', 'Turma', 'Turno', 'Etapa', 'Situação da matrícula', 'Data da matrícula',
-          'Data da transferência', 'Hash da matrícula', 'Código INEP', 'Nascimento', 'Filiação 1']
+CORE_TITLES = ['Nome do aluno', 'Escola', 'Turma', 'Turno', 'Etapa', 'Situação da matrícula', 'Data da matrícula',
+               'Data da transferência', 'Hash da matrícula', 'Código INEP', 'Nascimento', 'Filiação 1']
+# The enrolment form's columns (issue #91) as the Smecel titles them, each with a synthetic cell as the
+# export lays it (a CPF, a CEP and the phones as numbers, SIM/NAO as text, empties) and what is sent.
+FORM = [('Sexo', 'FEMININO', 'FEMININO'), ('Nacionalidade', 'BRASILEIRA', 'BRASILEIRA'), ('UF nascimento', 'BA', 'BA'),
+        ('Município nascimento', 'CIDADE  SINTETICA', 'CIDADE SINTETICA'), ('CPF', 1234567890, '01234567890'),
+        ('Filiação 2', ' PAI SINTETICO ', 'PAI SINTETICO'), ('RG filiação 1', 1234567890, '1234567890'),
+        ('RG filiação 2', None, None), ('RG', '12.345.678-90', '12.345.678-90'), ('Órgão emissor', 'SSP', 'SSP'),
+        ('UF emissor', 'BA', 'BA'), ('CNS/SUS', 700000000000001, '700000000000001'), ('Raça/cor', 'PARDA', 'PARDA'),
+        ('Celular', 73999990000, '73999990000'), ('CEP', 5990000, '05990000'), ('Endereço', 'RUA SINTETICA', 'RUA SINTETICA'),
+        ('Número', 120, '120'), ('Complemento', None, None), ('Bairro', 'CENTRO', 'CENTRO'),
+        ('Município residência', 'CIDADE SINTETICA', 'CIDADE SINTETICA'), ('UF residência', 'BA', 'BA'),
+        ('Telefone filiação 1', 73999990001, '73999990001'), ('Telefone filiação 2', None, None),
+        ('Responsável legal', 'AVO SINTETICA', 'AVO SINTETICA'), ('Grau do responsável', 3, 3),
+        ('CPF responsável', '00000000191', '00000000191'), ('Transporte escolar', 'SIM', True), ('Alergia', 'NAO', False),
+        ('Qual alergia', None, None), ('Bolsa Família', 'SIM', True), ('Pessoa com deficiência', 'NAO', False),
+        ('Baixa visão', 'NAO', False), ('Cegueira', 'NAO', False), ('Deficiência auditiva', 'NAO', False),
+        ('Deficiência física', 'NAO', False), ('Deficiência intelectual', 'NAO', False), ('TEA/autismo', 'NAO', False)]
+TITLES = CORE_TITLES + [title for title, _, _ in FORM]
+PROFILE_SENT = {item[2]: sent for item, (_, _, sent) in zip(PROFILE, FORM)}
 SCHOOL = 'ESCOLA IEDA ALVES DE OLIVEIRA MCPM'
 
 
-def line(name='ALUNA SINTETICA UM', school=SCHOOL, transferred=None, status='MATRICULADO'):
+def line(name='ALUNA SINTETICA UM', school=SCHOOL, transferred=None, status='MATRICULADO', **form):
+    """One row of the export; form: a column of the enrolment form (by its profile key) with another cell."""
+    cells = {item[2]: cell for item, (_, cell, _) in zip(PROFILE, FORM)}
+    cells.update(form)
     return [name, school, '6A 2026 - MATUTINO', 'MATUTINO', 'ENSINO FUNDAMENTAL DE 9 ANOS - 6º ANO', status,
-            46023, transferred, 'hash-sintetico', 123456789012, 41640, 'MAE SINTETICA']
+            46023, transferred, 'hash-sintetico', 123456789012, 41640, 'MAE SINTETICA', *cells.values()]
+
+
+def letters(column):
+    """The sheet's column name: 0 = A, 25 = Z, 26 = AA (the export has 49 columns)."""
+    name = ''
+    column += 1
+    while column:
+        column, rest = divmod(column - 1, 26)
+        name = chr(65 + rest) + name
+    return name
+
+
+class Raw(str):
+    """A number cell whose value is written in the sheet's XML exactly as given."""
 
 
 def xlsx(lines, titles=TITLES, date1904=False, formula=False):
     """A workbook shaped like the Smecel's export (SimpleXLSXGen): shared strings, numbers, empties."""
     strings, cells = [], []
-    def ref(column, row): return f'{chr(65 + column)}{row}'
+    def ref(column, row): return f'{letters(column)}{row}'
     for row, values in enumerate([titles, *lines], start=1):
         out = []
         for column, value in enumerate(values):
             if value is None: out.append(f'<c r="{ref(column, row)}"/>')
-            elif isinstance(value, str):
+            elif isinstance(value, str) and not isinstance(value, Raw):
                 strings.append(value)
                 out.append(f'<c r="{ref(column, row)}" t="s"><v>{len(strings) - 1}</v></c>')
             else:
@@ -58,16 +97,24 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(rows[0], {'sourceRow': 2, 'name': 'ALUNA SINTETICA UM', 'classLabel': '6A 2026 - MATUTINO',
                                    'shift': 'MATUTINO', 'stageLabel': 'ENSINO FUNDAMENTAL DE 9 ANOS - 6º ANO',
                                    'status': 'MATRICULADO', 'enrollmentHash': 'hash-sintetico', 'filiation1': 'MAE SINTETICA',
-                                   'inep': 123456789012, 'birthDate': 41640, 'enrolledAt': 46023, 'transferredAt': None})
+                                   'inep': 123456789012, 'birthDate': 41640, 'enrolledAt': 46023, 'transferredAt': None,
+                                   'profile': PROFILE_SENT})
         self.assertEqual((rows[1]['sourceRow'], rows[1]['transferredAt'], rows[1]['status']), (3, 46300, 'TRANSFERIDO'))
         # Integral Excel numbers stay ints: the hash is the same bytes as the Ecossistema's.
         self.assertIs(type(rows[1]['transferredAt']), int)
 
     def test_only_the_asked_columns_and_this_school(self):
-        with self.assertRaisesRegex(ValueError, 'Coluna não reconhecida'):
-            rows_from_workbook(xlsx([line() + ['000.000.000-00']], titles=TITLES + ['CPF']))
-        with self.assertRaisesRegex(ValueError, 'Colunas ausentes'):
+        for extra in ('NIS', 'CPF filiação 1', 'Telefone', 'E-mail', 'Tipo sanguíneo'):  # Never asked for.
+            with self.assertRaisesRegex(ValueError, 'Coluna não reconhecida'):
+                rows_from_workbook(xlsx([line() + ['dado sintetico']], titles=TITLES + [extra]))
+        with self.assertRaisesRegex(ValueError, 'Coluna não reconhecida'):  # The same column twice.
+            rows_from_workbook(xlsx([line() + ['BA']], titles=TITLES + ['UF emissor']))
+        # A column that did not come is named, so the failure says what is missing.
+        with self.assertRaisesRegex(ValueError, r'Colunas ausentes no relatório: TEA/AUTISMO\.'):
             rows_from_workbook(xlsx([line()[:-1]], titles=TITLES[:-1]))
+        without = [i for i, title in enumerate(TITLES) if title not in ('CPF', 'Filiação 1')]
+        with self.assertRaisesRegex(ValueError, r'Colunas ausentes no relatório: CPF, FILIACAO 1\.'):
+            rows_from_workbook(xlsx([[line()[i] for i in without]], titles=[TITLES[i] for i in without]))
         with self.assertRaisesRegex(ValueError, 'escola reconhecida'):
             rows_from_workbook(xlsx([line(school='OUTRA ESCOLA SINTETICA')]))
         with self.assertRaisesRegex(ValueError, 'Época de datas'):
@@ -77,13 +124,68 @@ class ReaderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rows_from_workbook(b'not a zip')
 
-    def test_the_export_asks_eleven_fields_every_situation_curricular_classes(self):
+    def test_the_export_asks_only_the_listed_fields_every_situation_curricular_classes(self):
         query = export_query()
-        self.assertEqual(len(FIELDS), 11)
+        asked = [value for key, value in parse_qsl(query, keep_blank_values=True) if key == 'campos[]']
+        # Exactly the Conciliação's 11 and the enrolment form's 37 (issue #91), each once.
+        self.assertEqual(asked, [*FIELDS, *(item[0] for item in PROFILE)])
+        self.assertEqual((len(FIELDS), len(PROFILE), len(set(asked))), (11, 37, 48))
+        self.assertEqual(set(asked) & NEVER_ASKED, set())
+        self.assertEqual(len(NEVER_ASKED), 24)
         self.assertIn('situacao=&', query)
         self.assertIn('tipo_turma=C', query)
-        self.assertNotIn('cpf', query)
         self.assertNotIn('escola_id', query)  # The page adds the session's own school.
+
+    def read(self, **form):
+        return rows_from_workbook(xlsx([line(**form)]))[0]['profile']
+
+    def test_cpf_and_cep_keep_their_leading_zeros(self):
+        # A number cell lost them: they come back.
+        self.assertEqual(self.read(cpf=1234567890)['cpf'], '01234567890')
+        self.assertEqual(self.read(cpf=191)['cpf'], '00000000191')
+        self.assertEqual(self.read(guardianCpf=12345678909)['guardianCpf'], '12345678909')
+        self.assertEqual(self.read(cpf='012.345.678-90')['cpf'], '01234567890')
+        self.assertEqual(self.read(cpf='01234567890')['cpf'], '01234567890')
+        self.assertEqual(self.read(cep=5990000)['cep'], '05990000')
+        self.assertEqual(self.read(cep='05990-000')['cep'], '05990000')
+        self.assertEqual(self.read(cep=45960000)['cep'], '45960000')
+        # More digits than the document has, a fraction or no digit at all: nothing, never a guess.
+        for cell in (123456789012, 1234567890.5, 'ISENTO', '', None):
+            self.assertIsNone(self.read(cpf=cell)['cpf'])
+        self.assertIsNone(self.read(cep=123456789)['cep'])
+
+    def test_a_number_cell_is_written_out_in_full_never_in_scientific_notation(self):
+        # The sheet's XML may hold a long number as 1.23456789E+9 or 7.00000000000001E+14.
+        self.assertEqual(self.read(cpf=Raw('1.23456789E+9'), sus=Raw('7.00000000000001E+14'), mobile=Raw('7.399999E+10')),
+                         {**PROFILE_SENT, 'cpf': '01234567890', 'sus': '700000000000001', 'mobile': '73999990000'})
+        # The same notation typed as text is no number at all.
+        self.assertIsNone(self.read(cpf='1.23456789E+9')['cpf'])
+
+    def test_phones_only_digits_with_their_ddd(self):
+        self.assertEqual(self.read(mobile='(73) 99999-0000')['mobile'], '73999990000')
+        self.assertEqual(self.read(filiation1Phone=7333330000)['filiation1Phone'], '7333330000')
+        self.assertIsNone(self.read(filiation2Phone='não tem')['filiation2Phone'])
+        self.assertIsNone(self.read(mobile='9' * 21)['mobile'])
+
+    def test_text_trimmed_collapsed_and_empty_as_none(self):
+        profile = self.read(address='  RUA   SINTETICA \t 2 ', addressNumber='S/N', addressComplement='   ', rgIssuer=2403769002)
+        self.assertEqual((profile['address'], profile['addressNumber'], profile['addressComplement'], profile['rgIssuer']),
+                         ('RUA SINTETICA 2', 'S/N', None, '2403769002'))
+        with self.assertRaisesRegex(ValueError, 'Texto acima do limite'):
+            self.read(address='A' * 301)
+
+    def test_guardian_degree_is_one_to_four(self):
+        for cell, sent in ((1, 1), (4, 4), ('2', 2), (0, None), (5, None), (2.5, None), ('TIO', None), (None, None)):
+            self.assertEqual(self.read(guardianDegree=cell)['guardianDegree'], sent)
+
+    def test_yes_and_no_are_booleans(self):
+        for cell, sent in (('SIM', True), ('Sim', True), ('NAO', False), ('Não', False), ('', None), (None, None),
+                           ('TALVEZ', None), (1, None)):
+            self.assertIs(self.read(allergy=cell)['allergy'], sent)
+        flags = [item[2] for item in PROFILE if item[3] == 'flag']
+        self.assertEqual(len(flags), 10)
+        for key in flags:
+            self.assertIs(self.read(**{key: 'SIM'})[key], True)
 
     def test_observation_from_the_form_page_of_this_school(self):
         good = {'url': 'https://www.smecel.com.br/sistema/escola/relatorio_alunos_personalizado.php?ano=2026&situacao=1',
@@ -116,8 +218,18 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(report_hash(moved), PINNED_HASH)
         self.assertNotEqual(report_hash([dict(rows[0], transferredAt=46301), rows[1]]), PINNED_HASH)
 
+    def test_hash_changes_with_any_field_of_the_enrolment_form(self):
+        # A phone or an address changed in the Smecel sends the whole report (issue #91).
+        rows = rows_from_workbook(xlsx([line()]))
+        seen = {report_hash(rows)}
+        for _, _, key, kind in PROFILE:
+            other = {'text': 'OUTRO TEXTO SINTETICO', 'cpf': '98765432100', 'cep': '11111111', 'digits': '11999990000',
+                     'degree': 1, 'flag': not rows[0]['profile'][key]}[kind]
+            seen.add(report_hash([dict(rows[0], profile={**rows[0]['profile'], key: other})]))
+        self.assertEqual(len(seen), len(PROFILE) + 1)
 
-PINNED_HASH = '0prs5ns-7GNFFBx7M8Tvr-DtB2o9mNDnRKGTfWrr6Ag'
+
+PINNED_HASH = 'UJiS35CRBdZZ0j-atvPpsO-81chuk_CexsuqK7DbnUI'
 
 
 class ReportProvider(Provider):
@@ -193,6 +305,26 @@ class ReportRunTests(unittest.TestCase):
         self.assertEqual(len(finished), 3)
         self.assertEqual(finished[1].get('unchanged'), True)  # Newest first: the short one is the middle.
         self.assertEqual((finished[0]['sent'], finished[0]['unresolved'], finished[0]['conflicts']), (1, 1, 2))
+
+    def test_the_enrolment_form_goes_only_to_the_ecossistema(self):
+        # Issue #91: documents, address, phones and health flags never reach the history, the
+        # window's status or a file of this computer; the local copy is the hash alone.
+        self.storage.enable()           # The copies go to disk, protected by Windows.
+        self.runtime.collect_report()   # The whole report.
+        self.runtime.collect_report()   # Unchanged: the short message.
+        sent = self.sent('student-report-collect')[0]['rows'][0]['profile']
+        self.assertEqual(sent, PROFILE_SENT)
+        personal = {str(value) for value in PROFILE_SENT.values() if isinstance(value, str)} | {'ALUNA SINTETICA', 'MAE SINTETICA'}
+        self.assertEqual(self.storage.load_copy('student-report'),
+                         {'contentHash': report_hash(self.rows), 'sentOn': self.storage.load_copy('student-report')['sentOn']})
+        shown = json.dumps([self.runtime.recent_history(50), self.runtime.public_status(),
+                            self.sent('student-report-unchanged')], ensure_ascii=False, default=str)
+        on_disk = b''.join(bytes(b ^ 91 for b in path.read_bytes()) + path.read_bytes()   # SyntheticCrypto is a XOR.
+                           for path in Path(self.directory.name).rglob('*') if path.is_file())
+        self.assertIn(b'contentHash', on_disk)
+        for value in personal:
+            self.assertNotIn(value, shown)
+            self.assertNotIn(value.encode(), on_disk)
 
     def test_whole_report_once_a_day(self):
         self.runtime.collect_report()

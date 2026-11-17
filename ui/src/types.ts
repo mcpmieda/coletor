@@ -1,8 +1,8 @@
 export type AttendanceState = 'present' | 'absent' | 'planned_unknown' | 'unmarked' | 'unknown' | 'excused_absent' | 'non_school_day' | 'outside_enrollment';
-export interface Student { source_student_ref: string; display_name: string; mat: null }
-export interface AttendanceRecord { source_student_ref: string; date: string; lesson: number; state: AttendanceState; source_symbol: string }
+interface Student { source_student_ref: string; display_name: string; mat: null }
+interface AttendanceRecord { source_student_ref: string; date: string; lesson: number; state: AttendanceState; source_symbol: string }
 export interface Issue { code: string; severity: 'error' | 'warning'; message: string; source_student_ref?: string; date?: string; lesson?: number }
-export interface Snapshot {
+interface Snapshot {
   schema_version: string;
   snapshot_id: string;
   class_id: string;

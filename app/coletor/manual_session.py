@@ -64,7 +64,7 @@ def captured_preview(payload, class_id, year, *, allow_partial=False):
         raise SessionError("A página solicita entrada no site. Faça o login na janela separada e confira o diário.", "login-page")
     html = payload.get("html")
     try:
-        result = preview(html, class_id, year, "manual")
+        result = preview(html, class_id, year, "manual", validate=not allow_partial)
     except Exception:
         raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.", "diary-structure") from None
     snapshot = result["snapshot"]
@@ -153,10 +153,7 @@ class ManualSession:
             catalog = driver.discover(year)
             with self._lock:
                 self._check(generation, True, {"discovering"})
-                from .class_catalog import CONTEXT_KEY, LIST_PATH
-                if (catalog.get("scope") != {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
-                                            "year": year, "context_key": CONTEXT_KEY}
-                        or not catalog.get("classes")):
+                if catalog.get("scope") != self._list_scope(year) or not catalog.get("classes"):
                     raise SessionError("A lista não corresponde ao contexto e ano solicitados.")
                 self._catalog = catalog
                 self._state = "list_ready"
@@ -238,6 +235,12 @@ class ManualSession:
             raise SessionError('SOURCE_LOGIN_REQUIRED') from None
         if not accepted: raise SessionError('SOURCE_LOGIN_FAILED')
 
+    @staticmethod
+    def _list_scope(year):
+        """The class list's scope as class_catalog writes it in every catalog."""
+        from .class_catalog import CONTEXT_KEY, LIST_PATH
+        return {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH, "year": year, "context_key": CONTEXT_KEY}
+
     def has_saved_class_selection(self):
         """Local scheduling hint, never proof that a source class is still available.
 
@@ -245,21 +248,15 @@ class ManualSession:
         protected credentials. operational_catalog() still revalidates the live
         list before any capture or upload.
         """
-        from .class_catalog import CONTEXT_KEY, LIST_PATH
-        scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
-                 "year": 2026, "context_key": CONTEXT_KEY}
         if self._all_classes(): return True
-        saved = self._selections.read(scope)["selection"]
+        saved = self._selections.read(self._list_scope(2026))["selection"]
         return bool(saved and saved["selected_class_ids"])
 
     def saved_class_count(self):
         """How many classes are saved for the current context; display only.
         None means every class of the school ('Todas as turmas')."""
         if self._all_classes(): return None
-        from .class_catalog import CONTEXT_KEY, LIST_PATH
-        scope = {"origin": SOURCE_ORIGIN, "list_path": LIST_PATH,
-                 "year": 2026, "context_key": CONTEXT_KEY}
-        saved = self._selections.read(scope)["selection"]
+        saved = self._selections.read(self._list_scope(2026))["selection"]
         return len(saved["selected_class_ids"]) if saved else 0
 
     def operational_catalog(self, storage):
@@ -300,47 +297,33 @@ class ManualSession:
         generation = self.status()['generation']
         return self.capture_selected(generation, class_id, True, _operational=True)['preview']
 
-    def operational_schedule(self):
-        """The school's weekly grid, read in the same verified session as the class list
-        (owner decision 22/10/2026). Validated here; a failure never touches the session state."""
-        from .class_schedule import schedule_from_observation
+    def _operational_read(self, read):
+        """Another page read in the same verified session as the class list, validated here; a
+        failure never touches the session state. read(driver) asks the worker and validates."""
         with self._lock:
             driver, state = self._driver, self._state
         if driver is None or state not in {'list_ready', 'preview_ready'}:
             raise SessionError('SOURCE_LOGIN_REQUIRED')
         try:
-            return schedule_from_observation(driver.schedule())
+            return read(driver)
         except Exception as error:
             # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
             raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
+
+    def operational_schedule(self):
+        """The school's weekly grid (owner decision 22/10/2026)."""
+        from .class_schedule import schedule_from_observation
+        return self._operational_read(lambda driver: schedule_from_observation(driver.schedule()))
 
     def operational_incidents(self, year):
-        """The school year's Smecel incidents, read in the same verified session as the class list
-        (owner decision 29/10/2026). Validated here; a failure never touches the session state."""
+        """The school year's Smecel incidents (owner decision 29/10/2026)."""
         from .class_incidents import incidents_from_observation
-        with self._lock:
-            driver, state = self._driver, self._state
-        if driver is None or state not in {'list_ready', 'preview_ready'}:
-            raise SessionError('SOURCE_LOGIN_REQUIRED')
-        try:
-            return incidents_from_observation(driver.incidents(year), year)
-        except Exception as error:
-            # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
-            raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
+        return self._operational_read(lambda driver: incidents_from_observation(driver.incidents(year), year))
 
     def operational_student_report(self, year):
-        """The Smecel's "Relatório de alunos", read in the same verified session as the class list
-        (owner decision 29/10/2026). Validated here; a failure never touches the session state."""
+        """The Smecel's "Relatório de alunos" (owner decision 29/10/2026)."""
         from .student_report import report_from_observation
-        with self._lock:
-            driver, state = self._driver, self._state
-        if driver is None or state not in {'list_ready', 'preview_ready'}:
-            raise SessionError('SOURCE_LOGIN_REQUIRED')
-        try:
-            return report_from_observation(driver.student_report(year), year)
-        except Exception as error:
-            # A page that does not match what is recognized is 'unrecognized'; the worker says the rest.
-            raise SessionError('SOURCE_READ_FAILED', failure_reason(error, 'unrecognized' if type(error) is ValueError else None)) from None
+        return self._operational_read(lambda driver: report_from_observation(driver.student_report(year), year))
 
     def preserve_and_close(self, storage):
         with self._lock: driver = self._driver

@@ -4,6 +4,8 @@ import type { SharedSchedule } from '../collector';
 export const MAX_PER_DAY = 48;
 /** Ecossistema rule (frequencyScheduleWriteV2): moments of a day 5+ minutes apart. */
 export const MIN_GAP_MINUTES = 5;
+/** Longest interval between two collections (or two readings of the report) the Ecossistema accepts. */
+export const MAX_EVERY_MINUTES = 720;
 export const DAY_LETTERS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 export const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 const SHIFTS = ['matutino', 'vespertino'] as const;
@@ -29,20 +31,20 @@ export const DEFAULT_DRAFT: PeriodDraft = {
   weekdays: [0, 1, 2, 3, 4], finalCheck: '', timezone: 'America/Bahia', custom: false,
 };
 
-const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+export const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+export const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 export const isTime = (t: string) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(t);
 /** Index 0 = Monday in the editor; the server uses 0 = Sunday. */
-const serverDay = (i: number) => (i + 1) % 7;
-const editorDay = (d: number) => (d + 6) % 7;
+export const serverDay = (i: number) => (i + 1) % 7;
+export const editorDay = (d: number) => (d + 6) % 7;
 
 /** Collection times of one day, in order. */
 export function dayTimes(draft: PeriodDraft): string[] {
   if (draft.mode === 'off') return [];
   if (draft.mode === 'times') return [...new Set(draft.times.filter(isTime))].sort();
-  if (!isTime(draft.from) || !isTime(draft.to) || !(draft.every >= 5)) return [];
+  if (!isTime(draft.from) || !isTime(draft.to) || !(draft.every >= MIN_GAP_MINUTES)) return [];
   const times: string[] = [];
-  for (let m = toMinutes(draft.from); m <= toMinutes(draft.to) && times.length <= MAX_PER_DAY; m += draft.every) times.push(toTime(m));
+  for (let m = toMinutes(draft.from); m <= toMinutes(draft.to); m += draft.every) times.push(toTime(m));
   return times;
 }
 
@@ -80,7 +82,7 @@ export function draftProblem(draft: PeriodDraft): string | null {
   if (draft.mode === 'interval') {
     if (!isTime(draft.from) || !isTime(draft.to)) return 'Informe o início e o fim do período.';
     if (toMinutes(draft.to) < toMinutes(draft.from)) return 'O fim do período deve ser depois do início.';
-    if (!(draft.every >= 5 && draft.every <= 720)) return 'O intervalo deve ficar entre 5 e 720 minutos.';
+    if (!(draft.every >= MIN_GAP_MINUTES && draft.every <= MAX_EVERY_MINUTES)) return `O intervalo deve ficar entre ${MIN_GAP_MINUTES} e ${MAX_EVERY_MINUTES} minutos.`;
   }
   const times = dayTimes(draft);
   const finalOnly = !times.length && isTime(draft.finalCheck);
@@ -132,7 +134,7 @@ export function fromShared(schedule: SharedSchedule | null): PeriodDraft {
   const weekdays = custom ? [editorDay(rule.weekday)] : [...new Set(enabled.map(r => editorDay(r.weekday)))].sort();
   const base: PeriodDraft = { ...DEFAULT_DRAFT, times, weekdays, finalCheck: rule.recheck ?? '', timezone: schedule.timezone, custom };
   const steps = times.slice(1).map((t, i) => toMinutes(t) - toMinutes(times[i]));
-  const result: PeriodDraft = times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= 5
+  const result: PeriodDraft = times.length >= 3 && steps.every(s => s === steps[0]) && steps[0] >= MIN_GAP_MINUTES
     ? { ...base, mode: 'interval', every: steps[0], from: times[0], to: times[times.length - 1] }
     : { ...base, mode: 'times' };
   return { ...result, source: cloneSchedule(schedule), initial: draftSignature(result) };
@@ -181,11 +183,17 @@ export function sharedScheduleProblem(schedule: SharedSchedule): string | null {
   return null;
 }
 
-/** Next moment from `now` among per-day minutes (index 0 = Monday), in a time zone. */
+// One formatter per time zone: the countdowns ask for the civil time every second.
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
 /** Civil date and time of an instant in a time zone. */
 function civil(at: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', year: 'numeric', month: '2-digit',
-    day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  let format = zoneFormats.get(timezone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    zoneFormats.set(timezone, format);
+  }
+  const parts = format.formatToParts(at);
   const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? NaN);
   const weekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.find(p => p.type === 'weekday')?.value ?? '');
   return { year: get('year'), month: get('month'), day: get('day'), minute: get('hour') * 60 + get('minute'), weekday };
@@ -204,6 +212,7 @@ function instant(year: number, month: number, day: number, minute: number, timez
   return new Date(guess);
 }
 
+/** Next moment from `now` among per-day minutes (index 0 = Monday), in a time zone. */
 export function nextFrom(dayMinutes: (day: number) => number[], timezone: string, now: Date): Date | null {
   const today = civil(now, timezone);
   for (let offset = 0; offset < 8; offset++) {
@@ -214,14 +223,6 @@ export function nextFrom(dayMinutes: (day: number) => number[], timezone: string
     return instant(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), next, timezone);
   }
   return null;
-}
-
-/** Next collection time from now, in the school's time zone; null when none. */
-export function nextRun(draft: PeriodDraft, now = new Date()): Date | null {
-  if (draft.custom && draft.source) return nextSharedRun(draft.source, now);
-  const times = [...dayTimes(draft), ...(draft.finalCheck ? [draft.finalCheck] : [])].map(toMinutes);
-  if (!times.length || !draft.weekdays.length) return null;
-  return nextFrom(day => (draft.weekdays.includes(day) ? [...times] : []), draft.timezone, now);
 }
 
 /** Next collection of the agenda exactly as saved (any per-day or per-shift

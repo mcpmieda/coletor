@@ -4,12 +4,15 @@ The Smecel's own export link (relatorio_alunos_personalizado_xlsx.php) is fetche
 worker loaded, with the session's own request: no click on the page and no file on this computer.
 The school is the session's current one, as the Smecel's school switch lists it
 (ajax/listar_escolas_usuario.php: escola_atual), never a number in this code; the year is the
-Coletor's own (the class list's). Only the 11 fields the Ecossistema's Conciliação uses are asked
-for (the student's name always comes); never the other ones (CPF, health, address, phones...).
+Coletor's own (the class list's). Only the fields listed here are asked for (the student's name
+always comes): the 11 the Ecossistema's Conciliação uses (FIELDS) and the enrolment form's data for
+the online re-enrolment (PROFILE, issue #91). Never any other one (NEVER_ASKED).
 
-The xlsx is a zip of XML: it is read here, in memory, with the standard library only, cell values
-raw as the ADM's reader takes them (text as text, dates and numbers as Excel numbers), so the
-Ecossistema applies its own rules to them.
+The xlsx is a zip of XML: it is read here, in memory, with the standard library only. The
+Conciliação's cells go raw as the ADM's reader takes them (text as text, dates and numbers as Excel
+numbers), so the Ecossistema applies its own rules to them; the enrolment form's cells are
+normalized here (see PROFILE). The form's data is personal (documents, address, phones, health):
+it only ever goes to the Ecossistema, never to a log, the history, the window or a file.
 """
 import base64
 import io
@@ -19,7 +22,7 @@ import zipfile
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from xml.etree import ElementTree
 
-from .class_catalog import ORGANIZATION, SCHOOL
+from .class_catalog import CONTEXT_JS, ORGANIZATION, SCHOOL
 from .class_selection import ORIGIN
 
 FORM_PATH = "/sistema/escola/relatorio_alunos_personalizado.php"
@@ -36,6 +39,66 @@ HEADERS = {"NOME DO ALUNO": "name", "ESCOLA": "school", "TURMA": "classLabel", "
            "CODIGO INEP": "inep", "NASCIMENTO": "birthDate", "FILIACAO 1": "filiation1"}
 TEXT_FIELDS = ("name", "classLabel", "shift", "stageLabel", "status", "enrollmentHash")
 RAW_FIELDS = ("inep", "birthDate", "enrolledAt", "transferredAt")
+# The enrolment form's data (issue #91), for the Portal's online re-enrolment and the printed form:
+# (Smecel field, column title, key in the row's `profile`, how the cell is normalized).
+#   text    trimmed, inner spaces collapsed; a number cell (an RG, a house number) as its digits
+#   cpf     11 digits; a number cell lost its leading zeros and gets them back
+#   cep     8 digits, likewise
+#   digits  digits only (phones with their DDD, the CNS)
+#   degree  1 = Irmão/Irmã, 2 = Tio/Tia, 3 = Avô/Avó, 4 = Outro, as the Smecel's student form
+#   flag    SIM / NAO as a boolean
+# Anything empty or out of its shape is None, never guessed.
+PROFILE = (
+    # Fixed data: the guardian only checks it.
+    ("aluno_sexo", "SEXO", "sex", "text"),
+    ("aluno_nacionalidade", "NACIONALIDADE", "nationality", "text"),
+    ("aluno_uf_nascimento", "UF NASCIMENTO", "birthState", "text"),
+    ("aluno_municipio_nascimento", "MUNICIPIO NASCIMENTO", "birthCity", "text"),
+    ("aluno_cpf", "CPF", "cpf", "cpf"),
+    ("aluno_filiacao2", "FILIACAO 2", "filiation2", "text"),
+    ("aluno_rg_mae", "RG FILIACAO 1", "filiation1Rg", "text"),
+    ("aluno_rg_pai", "RG FILIACAO 2", "filiation2Rg", "text"),
+    ("aluno_identidade", "RG", "rg", "text"),
+    ("aluno_emissor", "ORGAO EMISSOR", "rgIssuer", "text"),
+    ("aluno_uf_emissor", "UF EMISSOR", "rgIssuerState", "text"),
+    ("aluno_sus", "CNS/SUS", "sus", "digits"),
+    # Volatile data: the guardian may update it.
+    ("aluno_raca", "RACA/COR", "race", "text"),
+    ("aluno_celular", "CELULAR", "mobile", "digits"),
+    ("aluno_cep", "CEP", "cep", "cep"),
+    ("aluno_endereco", "ENDERECO", "address", "text"),
+    ("aluno_numero", "NUMERO", "addressNumber", "text"),
+    ("aluno_complemento", "COMPLEMENTO", "addressComplement", "text"),
+    ("aluno_bairro", "BAIRRO", "district", "text"),
+    ("aluno_municipio", "MUNICIPIO RESIDENCIA", "city", "text"),
+    ("aluno_uf", "UF RESIDENCIA", "state", "text"),
+    ("aluno_tel_mae", "TELEFONE FILIACAO 1", "filiation1Phone", "digits"),
+    ("aluno_tel_pai", "TELEFONE FILIACAO 2", "filiation2Phone", "digits"),
+    ("aluno_nome_responsavel_legal", "RESPONSAVEL LEGAL", "guardianName", "text"),
+    ("aluno_grau_responsavel_legal", "GRAU DO RESPONSAVEL", "guardianDegree", "degree"),
+    ("aluno_cpf_responsavel_legal", "CPF RESPONSAVEL", "guardianCpf", "cpf"),
+    ("transporte", "TRANSPORTE ESCOLAR", "schoolTransport", "flag"),
+    ("aluno_alergia", "ALERGIA", "allergy", "flag"),
+    ("aluno_alergia_qual", "QUAL ALERGIA", "allergyDetail", "text"),
+    ("aluno_recebe_bolsa_familia", "BOLSA FAMILIA", "bolsaFamilia", "flag"),
+    # Only for the printed form (the school's data; never shown in the Portal).
+    ("aluno_aluno_com_deficiencia", "PESSOA COM DEFICIENCIA", "disability", "flag"),
+    ("aluno_def_bvisao", "BAIXA VISAO", "lowVision", "flag"),
+    ("aluno_def_cegueira", "CEGUEIRA", "blindness", "flag"),
+    ("aluno_def_auditiva", "DEFICIENCIA AUDITIVA", "hearingDisability", "flag"),
+    ("aluno_def_fisica", "DEFICIENCIA FISICA", "physicalDisability", "flag"),
+    ("aluno_def_intelectual", "DEFICIENCIA INTELECTUAL", "intellectualDisability", "flag"),
+    ("aluno_def_autista", "TEA/AUTISMO", "autism", "flag"),
+)
+HEADERS.update({title: key for _, title, key, _ in PROFILE})
+# Never asked for (issue #91): the Smecel offers them, the Ecossistema does not use them.
+NEVER_ASKED = frozenset({
+    "resultado_final", "repetente", "dependencia", "boletim", "verificacao", "aluno_nome_social", "idade",
+    "aluno_localizacao", "aluno_nis", "aluno_certidao", "aluno_cpf_mae", "aluno_cpf_pai",
+    "aluno_rg_responsavel_legal", "aluno_telefone", "aluno_email", "aluno_endereco_completo", "aluno_laudo",
+    "aluno_condicao_saude_categoria", "aluno_condicao_saude_descricao", "aluno_condicao_saude_data",
+    "aluno_condicao_saude_status", "aluno_sangue_tipo", "aluno_sangue_rh", "vacina_atualizada"})
+MAX_DIGITS = 20
 MAX_ROWS = 10000
 MAX_XLSX_BYTES = 25 * 1024 * 1024
 MAX_PART_BYTES = 64 * 1024 * 1024
@@ -47,8 +110,7 @@ REPORT_JS = """async ({year, query}) => {
   const norm=s=>(s||'').normalize('NFC').replace(/\\s+/g,' ').trim();
   const text=norm(document.body.innerText);
   const scope={url:location.href,password_form:!!document.querySelector('input[type=password]'),
-    context_organization:text.includes('SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO'),
-    context_school:text.includes('ESCOLA IEDA ALVES DE OLIVEIRA MCPM')};
+    CONTEXT_JS};
   const list=await fetch('ajax/listar_escolas_usuario.php',{credentials:'same-origin',redirect:'manual'});
   if(list.status!==200)return {...scope,error:'schools_unavailable'};
   const schools=await list.json();
@@ -58,10 +120,10 @@ REPORT_JS = """async ({year, query}) => {
   const url='relatorio_alunos_personalizado_xlsx.php?ano='+year+'&escola_id='+school.id+'&'+query;
   const r=await fetch(url,{credentials:'same-origin',redirect:'manual'});
   const buf=new Uint8Array(await r.arrayBuffer());
-  if(buf.length>25*1024*1024)return {...scope,school,error:'report_too_large'};
+  if(buf.length>MAX_XLSX_BYTES)return {...scope,school,error:'report_too_large'};
   let s='';for(let i=0;i<buf.length;i+=0x8000)s+=String.fromCharCode(...buf.subarray(i,i+0x8000));
   return {...scope,school,status:r.status,type:r.headers.get('content-type'),size:buf.length,xlsx:btoa(s)};
-}"""
+}""".replace("MAX_XLSX_BYTES", str(MAX_XLSX_BYTES)).replace("CONTEXT_JS", CONTEXT_JS)
 
 
 def form_url(year):
@@ -81,10 +143,10 @@ def matches_form(url, year):
 
 def export_query():
     """Every student's enrolment of the year (Situação = Todas), curricular classes only (owner's
-    choice), only the 11 fields; ano and escola_id are added by the page from the session."""
+    choice), only FIELDS and PROFILE; ano and escola_id are added by the page from the session."""
     filters = [("turma_id", ""), ("situacao", ""), ("tipo_turma", "C"), ("turno", ""), ("etapa_id", ""),
                ("transporte", ""), ("deficiencia", ""), ("bolsa", ""), ("raca", ""), ("busca", "")]
-    return urlencode(filters + [("campos[]", field) for field in FIELDS])
+    return urlencode(filters + [("campos[]", field) for field in (*FIELDS, *(item[0] for item in PROFILE))])
 
 
 def _plain(value):
@@ -101,8 +163,9 @@ def _xml(archive, name):
     if info.file_size > MAX_PART_BYTES:
         raise ValueError("Relatório fora do limite permitido.")
     raw = archive.read(info)
-    # No document type, so no entity of any kind can expand inside the parser.
-    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw:
+    # No document type, so no entity of any kind can expand inside the parser. The check reads
+    # bytes: a part in UTF-16 or UTF-32 (a zero byte among its first ones) would hide one from it.
+    if b"<!DOCTYPE" in raw or b"<!ENTITY" in raw or b"\0" in raw[:256]:
         raise ValueError("Relatório com conteúdo não reconhecido.")
     return ElementTree.fromstring(raw)
 
@@ -178,8 +241,9 @@ def read_workbook(data):
             # Never a column the Coletor did not ask for (personal data the Ecossistema does not use).
             raise ValueError("Coluna não reconhecida no relatório.")
         columns[column] = field
-    if set(columns.values()) != set(HEADERS.values()):
-        raise ValueError("Colunas ausentes no relatório.")
+    missing = sorted(title for title, field in HEADERS.items() if field not in columns.values())
+    if missing:
+        raise ValueError("Colunas ausentes no relatório: " + ", ".join(missing) + ".")
     return [(number, {columns[c]: v for c, v in cells.items() if c in columns}) for number, cells in sorted(rows.items())]
 
 
@@ -193,8 +257,50 @@ def _text(value):
     return value.strip()
 
 
+def _plain_text(value):
+    """A profile text: trimmed, inner spaces collapsed, empty as None; a number cell as its digits."""
+    if isinstance(value, int):
+        value = str(value)
+    elif isinstance(value, float):
+        value = repr(value)
+    elif value is not None and not isinstance(value, str):
+        raise ValueError("Formato de texto inválido no relatório.")
+    text = " ".join((value or "").split())
+    if len(text) > MAX_TEXT:
+        raise ValueError("Texto acima do limite no relatório.")
+    return text or None
+
+
+def _only_digits(value):
+    """The digits of a cell; an integral number cell written out in full (never 1.2E+10). A fraction
+    or a text with letters ("ISENTO", "1.2E+10", "não tem") is no document or phone number."""
+    text = "" if isinstance(value, float) else _plain_text(value) or ""
+    digits = re.sub(r"\D", "", text)
+    return digits if len(digits) <= MAX_DIGITS and not re.search(r"[^\W\d_]", text) else ""
+
+
+def _padded(value, size):
+    digits = _only_digits(value)
+    return digits.zfill(size) if 0 < len(digits) <= size else None
+
+
+def _flag(value):
+    return {"SIM": True, "S": True, "NAO": False, "N": False}.get(_plain(value)) if isinstance(value, str) else None
+
+
+def _degree(value):
+    if isinstance(value, str) and re.fullmatch(r"\s*[1-4]\s*", value):
+        value = int(value)
+    return value if type(value) is int and 1 <= value <= 4 else None
+
+
+PROFILE_READERS = {"text": _plain_text, "cpf": lambda value: _padded(value, 11), "cep": lambda value: _padded(value, 8),
+                   "digits": lambda value: _only_digits(value) or None, "degree": _degree, "flag": _flag}
+
+
 def rows_from_workbook(data):
-    """The Ecossistema's report rows (reportRowV1), one per enrolment of the school, in sheet order."""
+    """The Ecossistema's report rows, one per enrolment of the school, in sheet order: the
+    Conciliação's fields (reportRowV1) and the enrolment form's data under `profile`."""
     rows = []
     for number, cells in read_workbook(data):
         if not any(v not in (None, "") for v in cells.values()):
@@ -208,6 +314,7 @@ def rows_from_workbook(data):
             if isinstance(value, str) and len(value) > 40:
                 raise ValueError("Data ou código acima do limite no relatório.")
             row[field] = value
+        row["profile"] = {key: PROFILE_READERS[kind](cells.get(key)) for _, _, key, kind in PROFILE}
         rows.append(row)
     if not rows:
         raise ValueError("Relatório sem alunos.")

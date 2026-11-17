@@ -7,16 +7,21 @@ export function paintTheme(mode: ThemeMode) {
   document.documentElement.classList.toggle('dark', dark);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
 }
-export function useTheme() {
-  const [mode, setMode] = useState<ThemeMode>(readTheme);
-  const [notice, setNotice] = useState('');
+/** Paints the mode and keeps "system" following the Windows theme; nothing while it is unknown. */
+export function usePaintedTheme(mode: ThemeMode | undefined) {
   useEffect(() => {
+    if (!mode) return;
     paintTheme(mode);
     const media = matchMedia('(prefers-color-scheme: dark)');
     const listener = () => paintTheme(mode);
     media.addEventListener('change', listener);
     return () => media.removeEventListener('change', listener);
   }, [mode]);
+}
+export function useTheme() {
+  const [mode, setMode] = useState<ThemeMode>(readTheme);
+  const [notice, setNotice] = useState('');
+  usePaintedTheme(mode);
   function change(next: ThemeMode) {
     setMode(next); setNotice('');
     void saveLocalTheme(next).catch(() => setNotice('Tema aplicado só nesta sessão. Não foi possível salvar.'));

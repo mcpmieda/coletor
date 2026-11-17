@@ -9,7 +9,7 @@
 AppId={{D2471FE4-968A-4E83-AC4C-5A85CC8E651B}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Coletor {#AppVersion} (candidato)
+AppVerName=Coletor {#AppVersion}
 AppPublisher=Ecossistema Escolar
 UninstallDisplayName=Coletor
 UninstallDisplayIcon={app}\programa\app\assets\fox-icons\fox-idle.ico
@@ -98,8 +98,9 @@ function CloseHandle(Handle: THandle): BOOL;
 function GetTickCount(): DWORD;
   external 'GetTickCount@kernel32.dll stdcall';
 
-// Coletor processes started from this installation folder only (the launcher,
-// pythonw and its python workers), never another Python on the computer.
+// Coletor processes started from this installation's program folder only (the launcher,
+// pythonw and its python workers), never another Python on the computer: not even one
+// kept elsewhere under a folder the Coletor was installed into (a whole drive, for instance).
 // Terminate stops them (launcher first, so it shows no start-failure message).
 function CollectorProcesses(Folder: String; Terminate: Boolean): Integer;
 var
@@ -109,7 +110,7 @@ var
   Path: String;
 begin
   Result := 0;
-  Folder := Lowercase(AddBackslash(Folder));
+  Folder := Lowercase(AddBackslash(Folder)) + 'programa\';
   SetArrayLength(Names, 2);
   Names[0] := 'Name = ''ColetorFrequencia.exe''';
   Names[1] := 'Name = ''pythonw.exe'' OR Name = ''python.exe''';
