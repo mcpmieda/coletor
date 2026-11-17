@@ -32,21 +32,26 @@ class NativeWindowGeometryTests(unittest.TestCase):
 class WindowProfileTests(unittest.TestCase):
     def test_the_window_profile_is_a_new_folder_of_the_coletor_and_earlier_ones_are_removed(self):
         # pywebview's private mode left a folder in %TEMP% at each closing WebView2 was slow to leave.
-        with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "collector-history.jsonl").write_text("kept", encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as temporary,                 patch("tempfile.gettempdir", return_value=temporary):
+            (Path(directory) / "settings.json").write_text("kept", encoding="utf-8")
             first = Path(window_profile(directory))
             (first / "EBWebView" / "Default").mkdir(parents=True)
             (first / "EBWebView" / "Default" / "Cookies").write_bytes(b"left by the last opening")
             second = Path(window_profile(directory))
-            self.assertEqual((first.parent, second.parent), (Path(directory) / "janela",) * 2)
+            self.assertEqual(first.parent, second.parent)
+            self.assertEqual(first.parent.parent, Path(temporary))
             self.assertNotEqual(first, second)  # Never shared with a browser still leaving.
             self.assertEqual([p.name for p in second.parent.iterdir()], [second.name])
             self.assertEqual(list(second.iterdir()), [])
-            self.assertEqual(sorted(p.name for p in Path(directory).iterdir()), ["collector-history.jsonl", "janela"])
+            # The data folder holds settings only, and another Coletor (another data folder) has its own.
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["settings.json"])
+            with tempfile.TemporaryDirectory() as other:
+                self.assertNotEqual(Path(window_profile(other)).parent, second.parent)
+                self.assertTrue(second.is_dir())
 
     @unittest.skipUnless(__import__("os").name == "nt", "Windows keeps an open file from being deleted")
     def test_a_profile_still_held_stays_until_a_later_opening_and_never_stops_this_one(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as temporary,                 patch("tempfile.gettempdir", return_value=temporary):
             leaving = Path(window_profile(directory))
             with (leaving / "lockfile").open("wb"):
                 opened = Path(window_profile(directory))
