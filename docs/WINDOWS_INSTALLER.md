@@ -127,8 +127,9 @@ Na primeira abertura depois de atualizado, o Coletor apaga da pasta `programa\` 
 anterior deixou e a nova não traz (`app/coletor/leftovers.py`, pelo inventário `MANIFEST.json`).
 Pontos de uso:
 
-- **Instalar num computador novo:** baixe o `Instalar Coletor.exe` de
-  https://github.com/mcpmieda/coletor/releases/latest/download/Instalar-Coletor.exe (~20 KB, código em
+- **Instalar num computador novo:** use o `instalador/Instalar Coletor.exe` do repositório (pasta fácil de
+  achar, pedido do responsável em 17/11/2026) ou baixe o mesmo arquivo de
+  https://github.com/mcpmieda/coletor/releases/latest/download/Instalar-Coletor.exe (~30 KB, código em
   `scripts/bootstrap/`; o CI compila, assina e publica junto com cada Release, nunca um arquivo compilado
   à mão). Ele busca a última Release, só aceita uma criada, com instalador e `atualizacao.json` enviados,
   por `github-actions[bot]`, confere tamanho, SHA-256, cabeçalho PE e a assinatura da escola e abre o
@@ -140,6 +141,9 @@ Pontos de uso:
   GitHub, que aceita apenas a `main`: um workflow de outro ramo consegue criar uma Release como
   `github-actions[bot]`, mas não consegue assinar. Release feita ou alterada por pessoa ou outro app
   também é ignorada.
+- **Cópia em `instalador/`:** é um arquivo que uma Release publicou (o CI recusa ali qualquer arquivo sem a
+  assinatura da escola, que só a `main` consegue aplicar). Como ele só baixa a Release mais nova, não precisa
+  acompanhar cada versão: troque-o pelo da Release seguinte apenas quando `scripts/bootstrap/` mudar.
 - **Trocar o certificado:** rode `installer/new-signing-certificate.ps1` e publique, ainda assinada pelo
   certificado antigo, uma versão que aceite os dois; só depois troque o segredo. Se a chave antiga se
   perder, os computadores precisam ser reinstalados à mão uma vez.
@@ -150,8 +154,9 @@ Pontos de uso:
 - **Verificar atualizações na hora:** Ajustes > Verificar atualizações consulta a Release mais nova. Havendo
   versão nova, ela é baixada, conferida e instalada pelo mesmo caminho da atualização automática, só que
   sem esperar a agenda ficar livre: espera apenas a coleta em andamento terminar.
-- **Atualização:** confere ao abrir (2 min) e a cada 30 min; instala só fora de coleta, relatório e da janela
-  da agenda, com espaço em disco e sem bateria abaixo de 40%. Configurações, fila cifrada e chave ficam em
+- **Atualização:** confere ao abrir (2 min) e a cada 30 min; instala entre uma coleta e outra: nunca com
+  coleta ou relatório rodando, com um horário a menos de 3 min à frente ou há menos de 2 min; e só com
+  espaço em disco e sem bateria abaixo de 40%. Configurações, fila cifrada e chave ficam em
   `%LOCALAPPDATA%\ColetorFrequenciaSmecel`; o instalador não mexe nelas.
 - **Versão com defeito:** publique a correção ou a reversão na `main`; instalar à mão uma versão antiga
   não adianta, porque o Coletor volta para a mais nova.

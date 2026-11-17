@@ -64,6 +64,13 @@ REPORT_KEYS = {'timezone', 'enabled', 'every', 'from', 'to', 'weekdays'}
 # edited agenda or a school pause. The ADM uses the same numbers (attendance/agenda-quiet-v2.ts).
 AGENDA_LEAD_SECONDS = 600
 AGENDA_TAIL_SECONDS = 300
+# An automatic update installs between one collection and the next (owner decision 17/11/2026: with
+# a time every 15 minutes the agenda was never "far", and a fix reached the school only at night).
+# Closing, replacing the files and reopening took 26 s on 17/11/2026; it never starts with a time
+# less than UPDATE_LEAD_SECONDS ahead, nor in the UPDATE_TAIL_SECONDS after one, when its run is
+# about to begin (a run in progress is waited for anyway).
+UPDATE_LEAD_SECONDS = 180
+UPDATE_TAIL_SECONDS = 120
 # Shorter than AGENDA_LEAD_SECONDS (ecossistema#1450, finding 1): a time created or moved in the ADM at
 # least 10 min ahead is always seen before its near window starts.
 QUIET_REFRESH_SECONDS = 540
@@ -167,15 +174,15 @@ def _agenda_times(schedule, report_schedule):
         yield ZoneInfo(agenda['timezone']), days
 
 
-def agenda_near(schedule, report_schedule, now_ts):
-    """True from AGENDA_LEAD_SECONDS before a collection or report time until AGENDA_TAIL_SECONDS after it."""
+def agenda_near(schedule, report_schedule, now_ts, lead=AGENDA_LEAD_SECONDS, tail=AGENDA_TAIL_SECONDS):
+    """True from `lead` seconds before a collection or report time until `tail` seconds after it."""
     for zone, days in _agenda_times(schedule, report_schedule):
         today = datetime.fromtimestamp(now_ts, zone).date()
         for offset in (-1, 0, 1):
             day = today + timedelta(days=offset)
             for wall in days.get((day.weekday() + 1) % 7, ()):
                 at = datetime(day.year, day.month, day.day, int(wall[:2]), int(wall[3:]), tzinfo=zone).timestamp()
-                if -AGENDA_TAIL_SECONDS <= at - now_ts <= AGENDA_LEAD_SECONDS: return True
+                if -tail <= at - now_ts <= lead: return True
     return False
 
 
@@ -1659,7 +1666,8 @@ class FrequencyRuntime:
         return self.public_status()
 
     def update_allowed(self, now=None, *, collecting=False):
-        """An automatic update may start: nothing running, waiting or due on the agenda soon.
+        """An automatic update may start: nothing running or waiting, and no time of the agenda
+        within the next UPDATE_LEAD_SECONDS or the last UPDATE_TAIL_SECONDS.
 
         collecting: this computer's collection is left active. Then the agenda must be known (an
         Ecossistema answer in this opening) before anything is allowed."""
@@ -1671,7 +1679,9 @@ class FrequencyRuntime:
                                           or self._report_pending is not None)
         if busy or self._operation.locked(): return False
         if status is None: return not collecting
-        try: return not agenda_near(status['settings']['schedule'], status['settings'].get('reportSchedule'), now)
+        try:
+            return not agenda_near(status['settings']['schedule'], status['settings'].get('reportSchedule'), now,
+                                   UPDATE_LEAD_SECONDS, UPDATE_TAIL_SECONDS)
         except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError): return False
 
     def idle(self):

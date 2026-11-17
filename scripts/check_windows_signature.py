@@ -44,8 +44,14 @@ def main():
     parser.add_argument('--bootstrap', type=Path, required=True)
     parser.add_argument('--expected', required=True, help='SHA-256 (hex) of the signing certificate')
     parser.add_argument('--school', action='store_true', help='the certificate must be the school\'s')
+    parser.add_argument('--repository-copy', type=Path, required=True, help='instalador/Instalar Coletor.exe')
     args = parser.parse_args()
     if sys.platform != 'win32': raise SystemExit('windows-required')
+    # The copy kept in the repository's instalador/ folder (owner request 17/11/2026: easy to find)
+    # carries the school's signature in every build: only main can sign with it, so the file there
+    # is always one a Release published, never one compiled by hand.
+    if updater.signer(args.repository_copy.resolve()) not in updater.SIGNERS:
+        raise RuntimeError('repository-copy-not-signed-by-the-school')
     print('signature-check-passed:', check(args.setup.resolve(), args.bootstrap.resolve(), args.expected.lower(), args.school))
 
 
