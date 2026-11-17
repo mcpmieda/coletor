@@ -37,7 +37,10 @@ MANIFEST_LIMIT = 4096
 SETUP_MINIMUM = 1_000_000
 SETUP_LIMIT = 300 * 1024 * 1024
 FIRST_CHECK_SECONDS = 120
-CHECK_EVERY_SECONDS = 6 * 3600
+# One request of a few hundred bytes to GitHub, with no account and nothing of the Ecossistema: asked
+# every half hour, a new version is noticed within the hour instead of within six (owner request
+# 17/11/2026). Installing still waits for a moment with no collection running or about to start.
+CHECK_EVERY_SECONDS = 30 * 60
 SAFE_RETRY_SECONDS = 60
 TIMEOUT_SECONDS = 60
 BATTERY_MINIMUM = 40

@@ -130,6 +130,15 @@ CLEAN_JS = """(document, url) => {
 CAPTURE_JS = "() => (" + CLEAN_JS + ")(document, location.href)"
 # How long the Smecel may take to serve a page: a navigation's limit and a diary request's.
 PAGE_TIMEOUT_MS = 30000
+# How long the class list may take to show its rows once its page is loaded.
+LIST_SETTLE_MS = 20000
+# How long the program waits for the worker's answer before taking it for hung and closing the
+# browser: the worker's own limits for that command and a margin. They were 40 s for both, less
+# than the worker's worst case (the list read again, 50 s, and then the diary, 30 s): a slow Smecel
+# then cost the browser and a new login instead of one "o Smecel demorou" (17/11/2026).
+ANSWER_MARGIN_SECONDS = 10
+LIST_ANSWER_SECONDS = (PAGE_TIMEOUT_MS + LIST_SETTLE_MS) // 1000 + ANSWER_MARGIN_SECONDS
+DIARY_ANSWER_SECONDS = LIST_ANSWER_SECONDS + PAGE_TIMEOUT_MS // 1000
 # A class's diary of the list's session, read without opening it: the same request (same origin,
 # same session), its text parsed by the browser into a document that runs no script, loads nothing
 # and is never laid out, then cleaned exactly as the open page is. Opening the page made the
@@ -330,10 +339,12 @@ class BrowserWorker:
         self._storage_state = None
 
     def discover(self, year):
-        return self._rpc({"command": "list", "year": year})
+        return self._rpc({"command": "list", "year": year}, timeout=LIST_ANSWER_SECONDS)
 
     def capture_selected(self, class_id, year, context_key):
-        return self._rpc({"command": "capture", "class_id": class_id, "year": year, "context_key": context_key})
+        # The worker may read the class list again before the diary (its list is five minutes old).
+        return self._rpc({"command": "capture", "class_id": class_id, "year": year, "context_key": context_key},
+                         timeout=DIARY_ANSWER_SECONDS)
 
     def capture(self):
         return self._rpc({"command": "capture"})
@@ -479,7 +490,7 @@ async def browser_session(initial):
                     if not matches_list(before, year):
                         raise ValueError("listing_changed")  # Login redirect: no rows will come.
                     try:
-                        await page.wait_for_function(LIST_SETTLED_JS, timeout=20000)
+                        await page.wait_for_function(LIST_SETTLED_JS, timeout=LIST_SETTLE_MS)
                     except Exception:
                         pass  # Empty list: the observation below rejects it.
                     observation = await page.evaluate(CATALOG_JS)
