@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { LogIn } from 'lucide-react';
-import { nativeApi } from '../api';
+import { bridgeReady, nativeApi } from '../api';
+import { onWindowVisibility, windowVisible } from '../desktop';
 import { initializeLocalSettings } from '../localSettings';
 import { paintTheme, readTheme } from '../theme';
 import DesktopApp from '../desktop/DesktopApp';
 
-export interface LocalRecovery {
+interface LocalRecovery {
   pending: boolean; count: number | null; oldest: number | null;
   newest: number | null; unreadable: boolean;
   /** False while the queue waits for the live access to be opened (not a problem). */
@@ -22,14 +23,7 @@ export interface InstitutionalBridge {
 async function bridge(): Promise<InstitutionalBridge> {
   let native = await nativeApi();
   if (!native?.get_institutional_access_status && window.location.hash === '#coletor-desktop') {
-    await new Promise<void>((resolve, reject) => {
-      const ready = () => { clearTimeout(timer); resolve(); };
-      const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error('O coletor não terminou de abrir.')); }, 4000);
-      window.addEventListener('pywebviewready', ready, { once: true });
-      if (window.pywebview?.api?.get_institutional_access_status) {
-        window.removeEventListener('pywebviewready', ready); ready();
-      }
-    });
+    await bridgeReady(() => !!window.pywebview?.api?.get_institutional_access_status, 4000, 'O coletor não terminou de abrir.');
     native = await nativeApi();
   }
   if (!native?.get_institutional_access_status || !native.open_institutional_login || !native.logout_institutional_access || !native.get_local_recovery_status || !native.discard_local_pending_collection)
@@ -85,16 +79,22 @@ export default function InstitutionalAccess() {
       setPairingCode(typeof result.pairingCode === 'string' && /^[0-9]{6}$/.test(result.pairingCode) ? result.pairingCode : '');
       setCleanupPending(result.code === 'SERVER_REVOCATION_PENDING');
       if (result.authenticated === true && result.authorized === true) {
-        if (!previouslyAuthorized.current) await initializeLocalSettings();
+        if (!previouslyAuthorized.current) {
+          await initializeLocalSettings();
+          // Painted once, before the panel opens. A panel already open (from the local summary)
+          // paints its own preference: a later check must never put an older theme back.
+          if (!optimistic.current) paintTheme(readTheme());
+        }
         const confirmed = await (await bridge()).get_institutional_access_status();
         if (!mounted.current || current !== epoch.current) return;
         if (confirmed.authenticated !== true || confirmed.authorized !== true) {
           previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
         }
-        previouslyAuthorized.current = true; loginFailure.current = null; paintTheme(readTheme()); setAuthorized(true); setVerified(true); setNotice('');
-      } else if (result.code === 'ACCESS_UNAVAILABLE' && previouslyAuthorized.current === false && optimistic.current) {
-        // Offline at opening: keep the panel from the local summary; the
-        // collector itself retries and never works without live access.
+        previouslyAuthorized.current = true; loginFailure.current = null; setAuthorized(true); setVerified(true); setNotice('');
+      } else if (result.code === 'ACCESS_UNAVAILABLE' && (optimistic.current || previouslyAuthorized.current)) {
+        // No connection, at opening or after the access was confirmed: keep the panel (from the
+        // local summary or as it is); the collector itself retries and never works without live
+        // access. Any other answer is a real loss of access and falls to the entry screen below.
         setNotice('');
       } else {
         previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); optimistic.current = false;
@@ -124,10 +124,12 @@ export default function InstitutionalAccess() {
         if (theme === 'light' || theme === 'dark' || theme === 'system') paintTheme(theme);
         optimistic.current = true; setAuthorized(true); setNotice('');
       }).catch(() => undefined).finally(() => { void recheck(); });
-    const focus = () => { if (document.visibilityState !== 'hidden') void recheck(); };
+    // Not while the window is hidden in the tray; checked again as soon as it is shown.
+    const focus = () => { if (windowVisible()) void recheck(); };
     const timer = setInterval(focus, 30_000);
+    const stopVisibility = onWindowVisibility(focus);
     window.addEventListener('focus', focus); window.addEventListener('online', focus); window.addEventListener('coletoraccesschanged', focus);
-    return () => { mounted.current = false; epoch.current++; clearInterval(timer);
+    return () => { mounted.current = false; epoch.current++; clearInterval(timer); stopVisibility();
       window.removeEventListener('focus', focus); window.removeEventListener('online', focus); window.removeEventListener('coletoraccesschanged', focus); };
   }, [recheck]);
   async function login() {

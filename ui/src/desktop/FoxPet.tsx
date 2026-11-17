@@ -3,6 +3,7 @@
 // the window is also said by it (foxSay.ts), so there is no toast in the corner.
 import { useEffect, useRef, useState } from 'react';
 import FoxCompanion from '../components/FoxCompanion';
+import { windowVisible } from '../desktop';
 import { pickPhrase, type FoxMood } from './foxPhrases';
 import { onNotice, type NoticeKind } from './foxSay';
 import type { FoxActivity } from '../mascot/animation';
@@ -46,7 +47,7 @@ export default function FoxPet({ mood }: Readonly<{ mood: FoxMood }>) {
     let timer = 0;
     const schedule = (min: number, max: number) => {
       timer = window.setTimeout(() => {
-        if (!document.hidden) say(pickPhrase(mood === 'paused' ? 'sleep' : 'idle'));
+        if (windowVisible()) say(pickPhrase(mood === 'paused' ? 'sleep' : 'idle'));
         schedule(90_000, 240_000);
       }, min + Math.random() * (max - min));
     };

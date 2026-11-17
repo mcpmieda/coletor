@@ -8,7 +8,7 @@ export interface Preferences {
   classes: { mode: 'all' | 'chosen' };
   notifications: { show: boolean };
 }
-export interface StartupSnapshot {
+interface StartupSnapshot {
   paired: boolean;
   status: Partial<CollectorStatus> | null;
   history: HistoryEntry[];
@@ -38,11 +38,8 @@ interface Native {
   save_classes_mode(mode: 'all' | 'chosen'): Promise<{ settings: Preferences } | Failure>;
   save_notifications(show: boolean): Promise<{ settings: Preferences } | Failure>;
   save_theme(theme: ThemeMode): Promise<{ settings: Preferences } | Failure>;
-  save_fox_preference?(show: boolean): Promise<{ settings: Preferences } | Failure>;
   get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean; autostart?: boolean }>;
-  hide_window(): Promise<{ hidden: true } | Failure>;
   logout_institutional_access(): Promise<{ ok: true } | Failure>;
-  discard_pending_collection(): Promise<Status | Failure>;
 }
 
 export function native(): Native | null {

@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Button, Checkbox, ListBox, Label, Modal, Select, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { notify } from './foxSay';
 import { Save } from 'lucide-react';
 import type { HistoryEntry, SharedSchedule } from '../collector';
 import { frequencyMinutes, reportClash, reportMinutes } from './reportPlan';
 import { call, type Status } from './bridge';
-import { DAY_LETTERS, DAY_NAMES, cloneSchedule, draftProblem, draftSignature, fromShared, sharedScheduleProblem, timezoneProblem, toShared, type PeriodDraft } from './periods';
-import { NumberInput, Section, SwitchRow, TextInput, TimeInput, TimeValidationContext } from './ui';
+import { DAY_LETTERS, DAY_NAMES, MAX_EVERY_MINUTES, MIN_GAP_MINUTES, cloneSchedule, draftProblem, draftSignature, editorDay, fromShared, sharedScheduleProblem, timezoneProblem, toShared, type PeriodDraft } from './periods';
+import { NumberInput, Section, SwitchRow, TextInput, TimeInput, TimeValidationContext, useIncompleteTimes } from './ui';
 import TimeRows from './TimeRows';
 
 const MODES: { id: PeriodDraft['mode']; label: string }[] = [
@@ -16,33 +16,27 @@ const sameSchedule = (a: SharedSchedule | null, b: SharedSchedule) => a !== null
   a.rules.every(rule => { const other = b.rules.find(r => r.weekday === rule.weekday && r.shift === rule.shift);
     return other && other.enabled === rule.enabled && other.recheck === rule.recheck && JSON.stringify(other.times) === JSON.stringify(rule.times); });
 
-export default function ScheduleEditor({ open, status, history = [], onClose, onSaved }: Readonly<{
-  open: boolean; status: Status | null; history?: readonly HistoryEntry[]; onClose: () => void; onSaved: (status: Status) => void;
+/** Mounted while open: it edits the agenda as saved at that moment, whatever a later poll brings. */
+export default function ScheduleEditor({ status, history = [], onClose, onSaved }: Readonly<{
+  status: Status | null; history?: readonly HistoryEntry[]; onClose: () => void; onSaved: (status: Status) => void;
 }>) {
-  const [draft, setDraft] = useState<PeriodDraft>(() => fromShared(status?.settings?.schedule ?? null));
-  const [source, setSource] = useState<SharedSchedule | null>(null);
-  const [rulesDraft, setRulesDraft] = useState<SharedSchedule>(() => toShared(fromShared(null)));
-  const [perRule, setPerRule] = useState(false), [ruleIndex, setRuleIndex] = useState(0), [session, setSession] = useState(0);
+  const [opened] = useState(() => {
+    const original = status?.settings?.schedule ?? null, draft = fromShared(original);
+    return { draft, source: original ? cloneSchedule(original) : null, rules: original ? cloneSchedule(original) : toShared(draft),
+      revision: status?.settings?.revision ?? null };
+  });
+  const { source, revision: baseRevision } = opened;
+  const [draft, setDraft] = useState(opened.draft);
+  const [rulesDraft, setRulesDraft] = useState(opened.rules);
+  const [perRule, setPerRule] = useState(opened.draft.custom), [ruleIndex, setRuleIndex] = useState(0);
   const [zoneConfirmed, setZoneConfirmed] = useState(false);
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
-  const [baseRevision, setBaseRevision] = useState<number | null>(null);
-  const [incomplete, setIncomplete] = useState<Record<string, boolean>>({});
-  const reportTime = useCallback((id: string, invalid: boolean) => setIncomplete(current =>
-    current[id] === invalid ? current : { ...current, [id]: invalid }), []);
-  useEffect(() => {
-    if (!open) return;
-    const original = status?.settings?.schedule ?? null;
-    const next = fromShared(original);
-    setDraft(next); setSource(original ? cloneSchedule(original) : null); setError('');
-    setRulesDraft(original ? cloneSchedule(original) : toShared(next)); setPerRule(next.custom); setRuleIndex(0);
-    setZoneConfirmed(false); setSession(s => s + 1);
-    setBaseRevision(status?.settings?.revision ?? null);
-  }, [open]);
+  const [incomplete, reportTime] = useIncompleteTimes();
   const set = (patch: Partial<PeriodDraft>) => setDraft(d => ({ ...d, ...patch }));
   const candidate = perRule ? { ...rulesDraft, timezone: draft.timezone } : toShared(draft);
   const unchanged = sameSchedule(source, candidate);
   const zoneChanged = !!source && source.timezone !== draft.timezone;
-  const problem = Object.values(incomplete).some(Boolean) ? 'Preencha ou remova o horário incompleto.' :
+  const problem = incomplete ? 'Preencha ou remova o horário incompleto.' :
     unchanged && (perRule || draft.initial === draftSignature(draft)) ? null :
       (perRule ? sharedScheduleProblem(candidate) : draftProblem(draft))
       // Never together with the student report (owner decision 29/10/2026), by the real run lengths.
@@ -67,7 +61,7 @@ export default function ScheduleEditor({ open, status, history = [], onClose, on
       setError(code === 'revision-conflict' ? 'A agenda mudou em outro computador. Feche e abra de novo para ver a versão atual.' : (e instanceof Error ? e.message : 'Não foi possível salvar.'));
     } finally { setSaving(false); }
   }
-  return <TimeValidationContext.Provider value={reportTime}><Modal.Backdrop isOpen={open} onOpenChange={v => !v && !saving && onClose()} variant="blur">
+  return <TimeValidationContext.Provider value={reportTime}><Modal.Backdrop isOpen onOpenChange={v => !v && !saving && onClose()} variant="blur">
     <Modal.Container size="lg" scroll="inside"><Modal.Dialog className="max-h-[88vh]">
       <Modal.Header><Modal.Heading>Agenda de coleta</Modal.Heading>
         <p className="text-sm text-muted">Vale para todos os computadores da escola. Revisão {baseRevision ?? 'indisponível'}.</p></Modal.Header>
@@ -84,13 +78,13 @@ export default function ScheduleEditor({ open, status, history = [], onClose, on
             <Select fullWidth value={String(ruleIndex)} onChange={key => key != null && setRuleIndex(Number(key))}>
               <Label>Dia e turno</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
               <Select.Popover><ListBox>{rulesDraft.rules.map((r, index) => <ListBox.Item key={String(index)} id={String(index)}
-                textValue={`${DAY_NAMES[(r.weekday + 6) % 7]} · ${r.shift === 'matutino' ? 'Matutino' : 'Vespertino'}`}>
-                {DAY_NAMES[(r.weekday + 6) % 7]} · {r.shift === 'matutino' ? 'Matutino' : 'Vespertino'}<ListBox.ItemIndicator />
+                textValue={`${DAY_NAMES[editorDay(r.weekday)]} · ${r.shift === 'matutino' ? 'Matutino' : 'Vespertino'}`}>
+                {DAY_NAMES[editorDay(r.weekday)]} · {r.shift === 'matutino' ? 'Matutino' : 'Vespertino'}<ListBox.ItemIndicator />
               </ListBox.Item>)}</ListBox></Select.Popover>
             </Select>
             <SwitchRow label="Coletas automáticas neste turno" value={rule.enabled} onChange={enabled => setRule({ enabled })} />
-            <TimeRows key={`${session}-${ruleIndex}`} values={rule.times} onChange={times => setRule({ times })} />
-            <TimeInput key={`${session}-${ruleIndex}-recheck`} label="Conferência do turno (opcional)" value={rule.recheck ?? ''} onChange={value => setRule({ recheck: value || null })} />
+            <TimeRows key={ruleIndex} values={rule.times} onChange={times => setRule({ times })} />
+            <TimeInput key={`recheck-${ruleIndex}`} label="Conferência do turno (opcional)" value={rule.recheck ?? ''} onChange={value => setRule({ recheck: value || null })} />
           </Section>
         </> : <>
           <Section title="Repetição">
@@ -100,11 +94,11 @@ export default function ScheduleEditor({ open, status, history = [], onClose, on
                 {mode.label}<ListBox.ItemIndicator /></ListBox.Item>)}</ListBox></Select.Popover>
             </Select>
             {draft.mode === 'interval' && <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <NumberInput label="A cada (min)" value={draft.every} min={5} max={720} step={5} onChange={value => set({ every: value })} />
-              <TimeInput key={`${session}-from`} label="Das" value={draft.from} onChange={value => set({ from: value })} />
-              <TimeInput key={`${session}-to`} label="Até" value={draft.to} onChange={value => set({ to: value })} />
+              <NumberInput label="A cada (min)" value={draft.every} min={MIN_GAP_MINUTES} max={MAX_EVERY_MINUTES} step={5} onChange={value => set({ every: value })} />
+              <TimeInput label="Das" value={draft.from} onChange={value => set({ from: value })} />
+              <TimeInput label="Até" value={draft.to} onChange={value => set({ to: value })} />
             </div>}
-            {draft.mode === 'times' && <TimeRows key={session} values={draft.times} onChange={times => set({ times })} />}
+            {draft.mode === 'times' && <TimeRows values={draft.times} onChange={times => set({ times })} />}
             {draft.mode !== 'off' && <div className="flex flex-col gap-2"><span className="text-sm">Dias</span>
               <ToggleButtonGroup size="sm" selectionMode="multiple" selectedKeys={draft.weekdays.map(String)}
                 className="flex flex-wrap" onSelectionChange={keys => set({ weekdays: [...keys].map(Number).sort() })}>
@@ -113,7 +107,7 @@ export default function ScheduleEditor({ open, status, history = [], onClose, on
           </Section>
           {draft.mode !== 'off' && <Section title="Conferência final do dia">
             <div className="grid grid-cols-[1fr_auto] items-end gap-3">
-              <TimeInput key={`${session}-final`} label="Horário (opcional)" value={draft.finalCheck} onChange={value => set({ finalCheck: value })} />
+              <TimeInput label="Horário (opcional)" value={draft.finalCheck} onChange={value => set({ finalCheck: value })} />
               {draft.finalCheck && <Button variant="ghost" onPress={() => set({ finalCheck: '' })}>Remover</Button>}
             </div>
           </Section>}

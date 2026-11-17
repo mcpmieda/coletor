@@ -4,7 +4,7 @@ export const SCHEDULE_KEY = 'coletor-smecel.schedule-preview.v1';
 export const DAYS = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
 export const SHIFTS = { matutino: 'Manhã', vespertino: 'Tarde' } as const;
 export type Shift = keyof typeof SHIFTS;
-export interface ScheduleRule { weekday: number; shift: Shift; selected: boolean; times: string[]; reconciliation: string }
+interface ScheduleRule { weekday: number; shift: Shift; selected: boolean; times: string[]; reconciliation: string }
 export interface SchoolSchedule {
   schemaVersion: 1;
   scope: 'school';
@@ -14,8 +14,8 @@ export interface SchoolSchedule {
   timezone: string;
   rules: ScheduleRule[];
 }
-export interface ScheduleDraft { timezone: string; rules: (Omit<ScheduleRule, 'times'> & { timesText: string })[] }
-export type StoragePort = Pick<Storage, 'getItem' | 'setItem'>;
+interface ScheduleDraft { timezone: string; rules: (Omit<ScheduleRule, 'times'> & { timesText: string })[] }
+type StoragePort =Pick<Storage, 'getItem' | 'setItem'>;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const fail = (message: string): never => { throw new Error(message); };
 export function defaultSchedule(): SchoolSchedule {

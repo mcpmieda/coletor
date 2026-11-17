@@ -1,51 +1,60 @@
 import { COLLECTOR_CODES, type HistoryEntry } from '../collector';
 
-export interface ClassResult { label: string; sent: number; unresolved: number; conflicts: number; readMs?: number; sendMs?: number }
-/** A step of the run besides the classes (owner request 29/10/2026): the weekly grid, the incidents. */
-export interface StepResult { label: string; detail: string; review: boolean; readMs?: number; sendMs?: number }
+interface ClassResult { label: string; sent: number; unresolved: number; conflicts: number; readMs?: number; sendMs?: number }
+/** A step of the run besides the classes (owner request 29/10/2026): the weekly grid, the incidents.
+ *  failed: the step was not read; the run went on without it. */
+interface StepResult { label: string; detail: string; review: boolean; failed?: boolean; readMs?: number; sendMs?: number }
 export interface Run {
   id: string; started: number; finished: number | null; status: 'ok' | 'review' | 'partial' | 'stopped' | 'error' | 'running';
   total: number; classes: ClassResult[]; steps: StepResult[]; resolved: number; unresolved: number; conflicts: number; problem: string | null;
 }
 
-/** Collections (start → classes → finish/failure) from the local history, newest first. */
-export function groupRuns(entries: readonly HistoryEntry[]): Run[] {
+const INTERRUPTED = 'Interrompida antes de terminar.';
+/** The Coletor's label of a failure it only notes, and the step it belongs to: the frequency
+ *  already sent stands and the run goes on to its own closing fact. */
+const STEP_OF_FAILURE: Record<string, string> = { 'Grade de horários': 'Horário', 'Ocorrências': 'Ocorrências' };
+export const isStepFailure = (e: HistoryEntry) => e.kind === 'failure' && !!e.label && Object.hasOwn(STEP_OF_FAILURE, e.label);
+
+/** Collections (start → classes → finish/failure) from the local history, newest first.
+ *  running: whether the Coletor says a collection is going on now. A run cut by a shutdown has no
+ *  closing fact, and without it would read as still collecting. */
+export function groupRuns(entries: readonly HistoryEntry[], running = true): Run[] {
   const sorted = [...entries].sort((a, b) => a.at - b.at);
   const runs: Run[] = [];
   let current: Run | null = null;
-  const close = (finished: number, status: Run['status'], problem: string | null) => {
+  const close = (finished: number | null, status: Run['status'], problem: string | null) => {
     if (!current) return;
     current.finished = finished; current.problem = problem;
-    // Sent but with students to reconcile is not the same as clean.
-    current.status = (status === 'ok' || status === 'review') && current.classes.length < current.total ? 'partial'
+    // A class or a step that did not go is partial; sent but with students to reconcile is not the same as clean.
+    current.status = (status === 'ok' || status === 'review') && (current.classes.length < current.total || current.steps.some(s => s.failed)) ? 'partial'
       : status === 'ok' && (current.unresolved || current.conflicts) ? 'review' : status;
     runs.push(current); current = null;
   };
   for (const e of sorted) {
     if (e.kind === 'collection-started') {
-      if (current) close(e.at, 'error', 'Interrompida antes de terminar.');
+      if (current) close(e.at, 'error', INTERRUPTED);
       current = { id: String(e.at), started: e.at, finished: null, status: 'running', total: e.sent ?? 0, classes: [], steps: [], resolved: 0, unresolved: 0, conflicts: 0, problem: null };
     } else if (e.kind === 'class-sent' && current) {
-      const item = { label: e.label ?? 'Turma', sent: e.sent ?? 0, unresolved: e.unresolved ?? 0, conflicts: e.conflicts ?? 0,
-        readMs: (e as HistoryEntry & { readMs?: number }).readMs, sendMs: (e as HistoryEntry & { sendMs?: number }).sendMs };
+      const item = { label: e.label ?? 'Turma', sent: e.sent ?? 0, unresolved: e.unresolved ?? 0, conflicts: e.conflicts ?? 0, readMs: e.readMs, sendMs: e.sendMs };
       current.classes.push(item); current.resolved += item.sent; current.unresolved += item.unresolved; current.conflicts += item.conflicts;
     } else if ((e.kind === 'schedule-sent' || e.kind === 'incidents-sent') && current) {
       current.steps.push(stepResult(e));
+    } else if (isStepFailure(e)) {
+      current?.steps.push({ label: STEP_OF_FAILURE[e.label!], detail: failureCause(e) ?? problemText(e.code), review: true, failed: true });
     } else if (e.kind === 'collection-finished') close(e.at, e.code ? 'review' : 'ok', e.code ? problemText(e.code) : null);
     else if (e.kind === 'failure' && current) close(e.at, current.classes.length ? 'partial' : 'error', problemText(e.code));
     // Paused (here or by the school) or taken over by another PC: not a failure.
     else if (e.kind === 'collection-stopped' && current) close(e.at, 'stopped', problemText(e.code));
   }
-  if (current) runs.push(current);
+  if (running) { if (current) runs.push(current); } else close(null, 'error', INTERRUPTED);
   return runs.reverse();
 }
 
 function stepResult(e: HistoryEntry): StepResult {
-  const timing = e as HistoryEntry & { readMs?: number; sendMs?: number };
   if (e.kind === 'schedule-sent')
     return { label: 'Horário', detail: e.sent ? `${e.sent} turma(s) com mudança` : 'sem alteração', review: false };
   return { label: 'Ocorrências', detail: incidentsText(e), review: !!e.unresolved || e.code === 'INCIDENTS_PARTIAL' || !!e.noticeTotal,
-    readMs: timing.readMs, sendMs: timing.sendMs };
+    readMs: e.readMs, sendMs: e.sendMs };
 }
 
 function incidentsText(e: HistoryEntry): string {
@@ -56,7 +65,7 @@ function incidentsText(e: HistoryEntry): string {
 }
 
 /** One line per incident to fix in the Smecel: the student first, the school finds it that way. */
-export function incidentNotices(e: HistoryEntry): string | undefined {
+function incidentNotices(e: HistoryEntry): string | undefined {
   if (!e.notices?.length) return undefined;
   const lines = e.notices.map(n => [n.name || 'Aluno sem nome na lista', n.classLabel, n.incident ? `ocorrência nº ${n.incident}` : '', n.reason]
     .filter(Boolean).join(' · '));
@@ -65,7 +74,7 @@ export function incidentNotices(e: HistoryEntry): string | undefined {
   return lines.join('\n');
 }
 
-export function problemText(code?: string): string {
+function problemText(code?: string): string {
   return (code && COLLECTOR_CODES[code]) || 'Confira a conexão e tente novamente.';
 }
 
@@ -78,7 +87,7 @@ export function runSummary(run: Run): string {
 }
 
 /** One run of the Smecel "Relatório de alunos" (owner decision 29/10/2026), its own history. */
-export interface ReportRun {
+interface ReportRun {
   id: string; started: number; finished: number | null; status: Run['status'];
   rows: number; pending: number; issues: number; unchanged: boolean; detail: string; readMs?: number; sendMs?: number;
 }
@@ -88,19 +97,18 @@ const REPORT_OUTCOME: Record<string, string> = {
   REPORT_AWAITING_RELATION: 'aguardando a Relação',
 };
 
-/** Report runs (started → finished/failed) from the local history, newest first. */
-export function groupReportRuns(entries: readonly HistoryEntry[]): ReportRun[] {
+/** Report runs (started → finished/failed) from the local history, newest first; running as in groupRuns. */
+export function groupReportRuns(entries: readonly HistoryEntry[], running = true): ReportRun[] {
   const runs: ReportRun[] = [];
   let current: ReportRun | null = null;
   for (const e of [...entries].sort((a, b) => a.at - b.at)) {
     if (e.kind === 'report-started') {
-      if (current) runs.push({ ...current, status: 'error', finished: e.at, detail: 'Interrompida antes de terminar.' });
+      if (current) runs.push({ ...current, status: 'error', finished: e.at, detail: INTERRUPTED });
       current = { id: `r${e.at}`, started: e.at, finished: null, status: 'running', rows: 0, pending: 0, issues: 0, unchanged: false, detail: 'Lendo o relatório' };
     } else if (e.kind === 'report-finished' && current) {
-      const timing = e as HistoryEntry & { readMs?: number; sendMs?: number };
       const issues = e.conflicts ?? 0, pending = e.unresolved ?? 0;
       runs.push({ ...current, finished: e.at, rows: e.sent ?? 0, pending, issues, unchanged: !!e.unchanged,
-        status: e.code || issues || pending ? 'review' : 'ok', readMs: timing.readMs, sendMs: timing.sendMs,
+        status: e.code || issues || pending ? 'review' : 'ok', readMs: e.readMs, sendMs: e.sendMs,
         detail: reportDetail(e) });
       current = null;
     } else if (e.kind === 'report-failed' && current) {
@@ -108,7 +116,7 @@ export function groupReportRuns(entries: readonly HistoryEntry[]): ReportRun[] {
       current = null;
     }
   }
-  if (current) runs.push(current);
+  if (current) runs.push(running ? current : { ...current, status: 'error', detail: INTERRUPTED });
   return runs.reverse();
 }
 
@@ -121,7 +129,7 @@ function reportDetail(e: HistoryEntry): string {
 
 export type Level = 'info' | 'warn' | 'error';
 /** wrap: the detail is shown whole, one line per item, instead of cut to one line. */
-export interface LogEvent { id: string; at: number; level: Level; message: string; detail?: string; wrap?: boolean }
+interface LogEvent { id: string; at: number; level: Level; message: string; detail?: string; wrap?: boolean }
 
 const EVENT_TEXT: Record<string, [Level, string]> = {
   activated: ['info', 'Coleta automática ativada neste computador.'],
@@ -162,7 +170,7 @@ const FAILURE_CAUSE: Record<string, string> = {
   PROTECTED_STORAGE_UNAVAILABLE: 'O Windows não conseguiu guardar os dados com segurança.',
 };
 /** What exactly failed, from the collector's reason code (owner request 05/11/2026). */
-export const REASON_TEXT: Record<string, string> = {
+const REASON_TEXT: Record<string, string> = {
   'smecel-timeout': 'O Smecel não abriu a página no tempo limite (30 s). Costuma ser lentidão do Smecel.',
   'worker-timeout': 'O navegador do Coletor não respondeu a tempo e foi reiniciado.',
   network: 'A conexão com o Smecel caiu ou foi recusada. Confira a internet deste computador.',
@@ -179,7 +187,7 @@ export const REASON_TEXT: Record<string, string> = {
 };
 
 /** The specific cause when the collector knows it, else the general one of the code. */
-export function failureCause(e: HistoryEntry): string | undefined {
+function failureCause(e: HistoryEntry): string | undefined {
   const waited = typeof e.readMs === 'number' && e.readMs >= 1000 ? ` Esperou ${Math.round(e.readMs / 1000)} s.` : '';
   const specific = e.reason ? REASON_TEXT[e.reason] : undefined;
   return specific ? specific + waited : e.code ? FAILURE_CAUSE[e.code] : undefined;
@@ -190,8 +198,9 @@ const TEMPORARY = new Set(['ACCESS_UNAVAILABLE']);
 
 /** One readable line per history fact, newest first (Registros). */
 export function logEvents(entries: readonly HistoryEntry[]): LogEvent[] {
-  return [...entries].sort((a, b) => b.at - a.at).map((e, i) => {
-    const id = `${e.at}:${e.kind}:${i}`;
+  return [...entries].sort((a, b) => b.at - a.at).map(e => {
+    // The Coletor never gives two facts the same 'at': the key stays the same as new facts arrive.
+    const id = `${e.at}:${e.kind}`;
     if (e.kind === 'class-sent') {
       const extra = [
         e.unresolved ? `${e.unresolved} não reconhecido(s): nome sem par na Relação` : '',
@@ -246,7 +255,9 @@ export function failures24h(entries: readonly HistoryEntry[], nowMs = Date.now()
   return logEvents(entries).filter(e => e.level === 'error' && nowMs / 1000 - e.at < 86_400).length;
 }
 
-export const fmtDate = (s: number) => new Date(s * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+// One formatter for every date on screen: Registros alone shows up to 2000 of them.
+const DATE_TIME = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+export const fmtDate = (s: number) => (Number.isFinite(s) ? DATE_TIME.format(s * 1000) : '—');
 export function fmtDuration(start: number, end: number | null): string {
   if (end === null) return '—';
   const seconds = Math.max(0, Math.round(end - start));

@@ -1,6 +1,6 @@
 // Small building blocks on HeroUI v3, the same ones the Atualizador de Planilhas uses.
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Button, Chip, Description, Input, Label, NumberField, Switch, TextField, Tooltip } from '@heroui/react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Button, Chip, Input, Label, NumberField, Switch, TextField, Tooltip } from '@heroui/react';
 import { I18nProvider, TimeField } from '@heroui/react';
 import { parseTime } from '@internationalized/date';
 
@@ -42,28 +42,33 @@ export function SwitchRow({ label, hint, value, onChange, isDisabled }: Readonly
   );
 }
 
-export function NumberInput({ label, value, onChange, min = 0, max, step = 1, suffix }: Readonly<{ label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; suffix?: string }>) {
+export function NumberInput({ label, value, onChange, min = 0, max, step = 1 }: Readonly<{ label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number }>) {
   return (
     <NumberField value={value} onChange={v => onChange(Number.isFinite(v) ? v : min)} minValue={min} maxValue={max} step={step} fullWidth>
       <Label>{label}</Label>
       <NumberField.Group><NumberField.DecrementButton /><NumberField.Input /><NumberField.IncrementButton /></NumberField.Group>
-      {suffix && <Description>{suffix}</Description>}
     </NumberField>
   );
 }
 
-export function TextInput({ label, value, onChange, placeholder, type = 'text', hint, autoComplete }: Readonly<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; hint?: string; autoComplete?: string }>) {
+export function TextInput({ label, value, onChange, placeholder, type = 'text', autoComplete }: Readonly<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; autoComplete?: string }>) {
   return (
     <TextField value={value} onChange={onChange} fullWidth>
       <Label>{label}</Label>
       <Input placeholder={placeholder} type={type} autoComplete={autoComplete} />
-      {hint && <Description>{hint}</Description>}
     </TextField>
   );
 }
 
 function safeTime(value: string) { try { return parseTime(value); } catch { return null; } }
 export const TimeValidationContext = createContext<((id: string, incomplete: boolean) => void) | null>(null);
+/** For an editor's Save: whether any TimeInput under the provider that receives `report` is half typed. */
+export function useIncompleteTimes() {
+  const [incomplete, setIncomplete] = useState<Record<string, boolean>>({});
+  const report = useCallback((id: string, invalid: boolean) => setIncomplete(current =>
+    current[id] === invalid ? current : { ...current, [id]: invalid }), []);
+  return [Object.values(incomplete).some(Boolean), report] as const;
+}
 /** "HH:MM" (24 h) with HeroUI's time field. */
 export function TimeInput({ label, value, onChange }: Readonly<{ label: string; value: string; onChange: (v: string) => void }>) {
   const report = useContext(TimeValidationContext);
@@ -102,13 +107,10 @@ export function TimeInput({ label, value, onChange }: Readonly<{ label: string; 
   );
 }
 
-export function Section({ title, children, aside }: Readonly<{ title: string; children: ReactNode; aside?: ReactNode }>) {
+export function Section({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h3>
-        {aside}
-      </div>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h3>
       {children}
     </section>
   );

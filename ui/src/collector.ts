@@ -9,7 +9,7 @@ export interface ReportSchedule {
   timezone: string; enabled: boolean; every: number; from: string; to: string; weekdays: number[];
 }
 /** What the Ecossistema did with the last automatic report (no student names reach a device). */
-export interface StudentReportState {
+interface StudentReportState {
   observedAt: string; receivedAt: string; changedAt: string;
   outcome: 'applied' | 'preparing' | 'awaiting_relation' | 'review'; rows: number;
   notes: { counts: { rows: number; linked: number; pending: number } | null; differences: string[]; invalid: unknown[] };
@@ -41,8 +41,7 @@ export interface HistoryEntry {
   /** What exactly failed (owner request 05/11/2026): a short code, see REASON_TEXT in runs.ts. */
   reason?: string; readMs?: number; sendMs?: number;
 }
-export interface IncidentNotice { name: string; classLabel: string; incident: string; reason: string; sent: boolean }
-export type CollectorResult = CollectorStatus | { error: string; code?: string };
+interface IncidentNotice { name: string; classLabel: string; incident: string; reason: string; sent: boolean }
 export const COLLECTOR_CODES: Record<string, string> = {
   'lease-busy': 'Outro computador está coletando. Este fica de reserva.',
   'lease-fenced': 'A coleta foi interrompida no meio (conexão lenta ou outro computador). A próxima continua sozinha.',

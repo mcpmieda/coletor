@@ -1,9 +1,27 @@
 import { useEffect, useState } from 'react';
-import { isDesktopSettings } from './localSettings';
-export type DesktopActivity = 'idle' | 'reading' | 'error';
+type DesktopActivity = 'idle' | 'reading' | 'error';
 declare global { interface Window { __coletorWindowVisible?: boolean } }
+/** WebView2 keeps document.hidden false when the window goes to the tray: the tray sends its own signal. */
+export const windowVisible = () => !document.hidden && window.__coletorWindowVisible !== false;
+/** Calls the listener whenever the window is shown or hidden; returns how to stop. */
+export function onWindowVisibility(listener: () => void): () => void {
+  document.addEventListener('visibilitychange', listener);
+  window.addEventListener('coletorwindowvisibility', listener);
+  return () => { document.removeEventListener('visibilitychange', listener); window.removeEventListener('coletorwindowvisibility', listener); };
+}
+/** The current time, refreshed every `ms` while the window is shown (and as soon as it is shown again). */
+export function useNow(ms: number): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const tick = () => { if (windowVisible()) setNow(Date.now()); };
+    const timer = setInterval(tick, ms);
+    const stop = onWindowVisibility(tick);
+    return () => { clearInterval(timer); stop(); };
+  }, [ms]);
+  return now;
+}
 export interface TrayBridge {
-  get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean }>;
+  get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean } | { error: string }>;
   hide_window(): Promise<{ hidden: true } | { error: string }>;
   set_tray_context(activity: DesktopActivity, reducedMotion: boolean): Promise<{ ok: true } | { error: string }>;
 }
@@ -17,16 +35,24 @@ export function useDesktopTray(activity: DesktopActivity) {
   const [available, setAvailable] = useState(false);
   const [notice, setNotice] = useState('');
   useEffect(() => {
-    if (!isDesktopSettings()) return;
     const api = window.pywebview?.api;
     if (!api?.get_desktop_status) return;
-    let alive = true;
-    const read = () => { void api.get_desktop_status!().then(s => { if (alive) { setAvailable(s.tray_available); setNotice(s.tray_available ? '' : 'Bandeja indisponível. Você pode fechar a janela normalmente.'); } }).catch(() => { if (alive) setNotice('Não foi possível verificar a bandeja.'); }); };
+    let alive = true, retry = 0;
+    // A protected call: refused while the access is not confirmed (offline at opening), so asked
+    // again later, though never from a window hidden in the tray.
+    const again = () => { retry = window.setTimeout(() => (windowVisible() ? read() : again()), 30_000); };
+    const read = () => {
+      window.clearTimeout(retry);
+      void api.get_desktop_status!().then(s => {
+        if (!alive) return;
+        if ('error' in s) { again(); return; }
+        setAvailable(s.tray_available); setNotice(s.tray_available ? '' : 'Bandeja indisponível. Você pode fechar a janela normalmente.');
+      }).catch(() => { if (alive) setNotice('Não foi possível verificar a bandeja.'); });
+    };
     window.addEventListener('coletortrayready', read); read();
-    return () => { alive = false; window.removeEventListener('coletortrayready', read); };
+    return () => { alive = false; window.clearTimeout(retry); window.removeEventListener('coletortrayready', read); };
   }, []);
   useEffect(() => {
-    if (!isDesktopSettings()) return;
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     // The bridge may arrive after this mounts (busy sign-in): report again when it does.
     const update = () => {

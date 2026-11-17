@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react';
+import { bridgeReady } from './api';
 import { defaultSchedule, readSchedule, saveSchedule, validateSchedule, type SchoolSchedule } from './schedule';
 import { DEFAULT_FOX, type FoxPreferences } from './mascot/preferences';
 import type { ThemeMode } from './theme';
 
-export interface LocalSettings { schemaVersion: 1; schedule: SchoolSchedule | null; theme: ThemeMode; fox: FoxPreferences }
+interface LocalSettings { schemaVersion: 1; schedule: SchoolSchedule | null; theme: ThemeMode; fox: FoxPreferences }
 type Reply = { settings: LocalSettings; notice?: string } | { error: string };
 export interface SettingsBridge {
   get_local_settings(): Promise<Reply>;
@@ -37,12 +38,7 @@ export async function initializeLocalSettings(): Promise<void> {
   nativeMode = window.location.hash === '#coletor-desktop' || !!nativeBridge();
   if (!nativeMode) return;
   try {
-    if (!nativeBridge()) await new Promise<void>((resolve, reject) => {
-      const ready = () => { clearTimeout(timer); resolve(); };
-      const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error()); }, 8000);
-      window.addEventListener('pywebviewready', ready, { once: true });
-      if (nativeBridge()) { window.removeEventListener('pywebviewready', ready); ready(); }
-    });
+    if (!nativeBridge()) await bridgeReady(() => !!nativeBridge(), 8000);
     bridge = nativeBridge();
     if (!bridge) throw new Error();
     const result = await bridge.get_local_settings();

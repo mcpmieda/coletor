@@ -17,16 +17,19 @@ async function request(path: string, init?: RequestInit): Promise<Preview> {
   if (!response.ok || !body?.snapshot) throw new Error(body?.error ?? 'Não foi possível ler este diário.');
   return body as Preview;
 }
+/** Resolves once the native bridge is there (pywebview injects it after the page loads); rejects after `ms`. */
+export function bridgeReady(present: () => boolean, ms: number, message?: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const ready = () => { clearTimeout(timer); window.removeEventListener('pywebviewready', ready); resolve(); };
+    const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error(message)); }, ms);
+    window.addEventListener('pywebviewready', ready);
+    if (present()) ready();
+  });
+}
 export async function nativeApi(): Promise<NativeApi | undefined> {
   if (window.pywebview?.api) return window.pywebview.api;
   // A native window may load its static UI before injecting its read-only bridge.
-  if (window.location.protocol === 'file:') {
-    await new Promise<void>((resolve, reject) => {
-      const ready = () => { clearTimeout(timer); resolve(); };
-      const timer = setTimeout(() => { window.removeEventListener('pywebviewready', ready); reject(new Error('O programa não terminou de abrir. Feche e abra de novo.')); }, 4000);
-      window.addEventListener('pywebviewready', ready, { once: true });
-    });
-  }
+  if (window.location.protocol === 'file:') await bridgeReady(() => !!window.pywebview?.api, 4000, 'O programa não terminou de abrir. Feche e abra de novo.');
   return window.pywebview?.api;
 }
 export async function loadDemo(signal?: AbortSignal): Promise<Preview> {

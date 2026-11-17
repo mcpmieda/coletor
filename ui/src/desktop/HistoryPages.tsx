@@ -2,16 +2,19 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Modal, Table, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { AlertTriangle, Info, RefreshCw, XCircle } from 'lucide-react';
 import type { HistoryEntry } from '../collector';
-import { fmtDate, fmtDuration, groupReportRuns, groupRuns, logEvents, runSummary, type Level, type Run } from './runs';
+import { fmtDate, fmtDuration, groupReportRuns, groupRuns, logEvents, runSummary, type Level } from './runs';
 import { StatusChip } from './ui';
+import type { ColetorState } from './useColetor';
 
 const seconds = (ms?: number) => (ms === undefined ? '—' : `${(ms / 1000).toFixed(1).replace('.', ',')} s`);
 
 // ------------------------------------------------------------------ Histórico
-export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) {
-  const runs = useMemo(() => groupRuns(history), [history]);
-  const reports = useMemo(() => groupReportRuns(history), [history]);
-  const [open, setOpen] = useState<Run | null>(null);
+export function HistoryPage({ history, inProgress }: Readonly<Pick<ColetorState, 'history' | 'inProgress'>>) {
+  const runs = useMemo(() => groupRuns(history, inProgress.run), [history, inProgress.run]);
+  const reports = useMemo(() => groupReportRuns(history, inProgress.report), [history, inProgress.report]);
+  // The id, not the run: the details of a run still going follow it as its classes arrive.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = runs.find(r => r.id === openId) ?? null;
   if (!runs.length && !reports.length) return <p className="py-16 text-center text-muted">Nenhuma coleta ainda.</p>;
   const last = runs.find(r => r.status !== 'running');
   return (
@@ -27,7 +30,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
       )}
       <Table>
         <Table.ScrollContainer>
-          <Table.Content aria-label="Coletas" onRowAction={k => setOpen(runs.find(r => r.id === String(k)) ?? null)}>
+          <Table.Content aria-label="Coletas" onRowAction={k => setOpenId(String(k))}>
             <Table.Header>
               <Table.Column isRowHeader>Início</Table.Column>
               <Table.Column>Duração</Table.Column>
@@ -72,7 +75,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
           </Table.ScrollContainer>
         </Table>
       </>}
-      <Modal.Backdrop isOpen={!!open} onOpenChange={v => !v && setOpen(null)} variant="blur">
+      <Modal.Backdrop isOpen={!!open} onOpenChange={v => !v && setOpenId(null)} variant="blur">
         <Modal.Container size="lg" scroll="inside">
           <Modal.Dialog className="max-h-[85vh]">
             <Modal.Header>
@@ -94,7 +97,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
               ))}
               {(open?.steps ?? []).map((s, i) => (
                 <div key={`${s.label}-${i}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-default">
-                  <StatusChip status={s.review ? 'review' : 'ok'} />
+                  <StatusChip status={s.failed ? 'error' : s.review ? 'review' : 'ok'} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{s.label}</div>
                     <div className="text-xs text-muted">{s.detail}</div>
@@ -105,7 +108,7 @@ export function HistoryPage({ history }: Readonly<{ history: HistoryEntry[] }>) 
               {open?.problem && <p className="px-2 pt-2 text-sm text-danger">{open.problem}</p>}
               {!open?.classes.length && !open?.problem && <p className="py-6 text-center text-muted">Nenhuma turma enviada nesta coleta.</p>}
             </Modal.Body>
-            <Modal.Footer><Button variant="tertiary" onPress={() => setOpen(null)}>Fechar</Button></Modal.Footer>
+            <Modal.Footer><Button variant="tertiary" onPress={() => setOpenId(null)}>Fechar</Button></Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

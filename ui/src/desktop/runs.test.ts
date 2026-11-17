@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { failures24h, fmtCountdown, fmtDuration, groupRuns, logEvents, runSummary } from './runs';
+import { failures24h, fmtCountdown, fmtDate, fmtDuration, groupRuns, logEvents, runSummary } from './runs';
 import type { HistoryEntry } from '../collector';
 
 const history: HistoryEntry[] = [
@@ -154,4 +154,46 @@ test('each failure says what exactly happened (owner request 05/11/2026)', () =>
   expect(at(702).detail).toBe('Ocorrências · O Smecel pediu para entrar de novo (a sessão expirou).');
   // Older entries without a reason keep the general cause.
   expect(at(703).detail).toBe('O Smecel demorou ou falhou ao abrir um diário.');
+});
+
+test('a grid or incidents failure is a failed step, and the run goes on to its own end', () => {
+  // The Coletor only notes these (the frequency already sent stands) and records the closing fact later.
+  const entries: HistoryEntry[] = [
+    { at: 1000, kind: 'collection-started', sent: 2 },
+    { at: 1060, kind: 'class-sent', label: '6A', sent: 30, unresolved: 0, conflicts: 0 },
+    { at: 1120, kind: 'class-sent', label: '6B', sent: 28, unresolved: 0, conflicts: 0 },
+    { at: 1130, kind: 'failure', code: 'SOURCE_READ_FAILED', label: 'Grade de horários', reason: 'smecel-timeout' },
+    { at: 1500, kind: 'incidents-sent', sent: 370, unchanged: true },
+    { at: 1501, kind: 'collection-finished', sent: 2 },
+  ];
+  const [run] = groupRuns(entries);
+  expect(run).toMatchObject({ status: 'partial', finished: 1501, problem: null, resolved: 58 });
+  expect(run.steps.map(s => [s.label, !!s.failed])).toEqual([['Horário', true], ['Ocorrências', false]]);
+  expect(run.steps[0].detail).toContain('tempo limite');
+  expect(runSummary(run)).toBe('2 de 2 turma(s) · 58 aluno(s)');
+  // A failure that stops the run still closes it there.
+  const [stopped] = groupRuns([...entries.slice(0, 2), { at: 1070, kind: 'failure', code: 'SOURCE_READ_FAILED', label: '6B', reason: 'two-in-a-row' }]);
+  expect(stopped).toMatchObject({ status: 'partial', finished: 1070 });
+});
+
+test('a run with no closing fact is still going only while the Coletor says so', () => {
+  const entries: HistoryEntry[] = [
+    { at: 100, kind: 'collection-started', sent: 15 },
+    { at: 160, kind: 'class-sent', label: '6A', sent: 30, unresolved: 0, conflicts: 0 },
+  ];
+  expect(groupRuns(entries, true)[0].status).toBe('running');
+  // Cut by a shutdown: nothing is collecting any more.
+  const [cut] = groupRuns(entries, false);
+  expect(cut).toMatchObject({ status: 'error', finished: null, problem: 'Interrompida antes de terminar.' });
+  expect(runSummary(cut)).toBe('1 de 15 turma(s) · 30 aluno(s) · Interrompida antes de terminar.');
+  expect(groupRuns([], false)).toEqual([]);
+});
+
+test('a log line keeps its key when newer facts arrive, and dates never break the page', () => {
+  const older: HistoryEntry[] = [{ at: 100.001, kind: 'class-sent', label: '6A', sent: 30 }, { at: 100.002, kind: 'class-sent', label: '6B', sent: 28 }];
+  const ids = logEvents(older).map(e => e.id);
+  expect(new Set(ids).size).toBe(2);
+  expect(logEvents([{ at: 101, kind: 'collection-finished' }, ...older]).map(e => e.id).slice(1)).toEqual(ids);
+  expect(fmtDate(1_700_000_000)).toMatch(/^\d{2}\/\d{2}\/\d{4},? \d{2}:\d{2}$/);
+  expect(fmtDate(NaN)).toBe('—');
 });
