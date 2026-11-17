@@ -445,10 +445,11 @@ class Updater:
     def _loop(self):
         try: remove_other_setups(self._folder, up_to=parse_version(self._current))  # Even offline.
         except OSError: pass
-        # What the version before this one left in the program folder, once no installer writes there.
+        if self._stop.wait(FIRST_CHECK_SECONDS): return
+        # What the version before this one left in the program folder. Not at once: the installer that
+        # has just reopened this program is still finishing, and nothing is deleted while one runs.
         folder = installed_folder(self._root)
         if folder is not None and not installer_running(): remove_leftovers(folder, self._current)
-        if self._stop.wait(FIRST_CHECK_SECONDS): return
         while True:
             # After a started installer the app normally quits; still running later means it failed.
             try: result = 'started' if self.check_once() else 'current'
