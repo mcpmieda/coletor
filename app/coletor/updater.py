@@ -517,8 +517,17 @@ class Updater:
         if self._signer(setup) not in SIGNERS:
             setup.unlink(missing_ok=True)
             raise UpdateError('untrusted-signature')
+        waited = False
         while not ((self._idle_now() if self._asked else self._safe_now()) and self._power()):
             if self._pause(SAFE_RETRY_SECONDS): return False
+            waited = True
+        if waited:
+            # Another version may have come out while this one waited for its moment: that one is
+            # installed instead, not this one now and the other two minutes after reopening (owner
+            # decision 17/11/2026). With no answer from GitHub, the one already checked goes.
+            try: newest = read_manifest(self._fetch(MANIFEST_URL))['versao']
+            except UpdateError: newest = version
+            if parse_version(newest) > parse_version(version): return self.check_once()
         self._asked = False
         self._attempts.record(version)
         self._launch(setup)
