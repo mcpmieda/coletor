@@ -24,6 +24,28 @@ class HistoryAppendTests(unittest.TestCase):
             self.assertLessEqual(lines, module.MAX_ENTRIES + 1)  # Compacted once.
             self.assertEqual(log.recent(1)[0]['kind'], 'collection-finished')
 
+    def test_an_oversized_file_is_read_from_its_end(self):
+        # Long incident notices can pass the read limit before the line count asks for a rewrite:
+        # the newest events are the ones read (the start used to be), and a rewrite keeps them.
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1_800_000_000.0]
+            log = CollectorHistory(directory, clock=lambda: now[0])
+            notices = [{'name': 'ALUNA SINTETICA ' + 'X' * 100, 'classLabel': '6A', 'incident': '1',
+                        'reason': 'motivo sintetico ' + 'y' * 140, 'sent': False}] * module.MAX_NOTICES
+            lines = 0
+            while not lines or log.path.stat().st_size <= module.MAX_READ_BYTES:
+                now[0] += 1; lines += 1
+                log.record('incidents-sent', sent=lines, notices=notices)
+            self.assertLess(lines, module.MAX_ENTRIES)
+            now[0] += 1; log.record('collection-finished')
+            newest = log.recent(3)
+            self.assertEqual([e['kind'] for e in newest], ['collection-finished', 'incidents-sent', 'incidents-sent'])
+            self.assertEqual(newest[1]['sent'], lines)
+            # A new opening counts the lines it can read and goes on appending after the newest.
+            again = CollectorHistory(directory, clock=lambda: now[0])
+            now[0] += 1; again.record('activated')
+            self.assertEqual([e['kind'] for e in again.recent(2)], ['activated', 'collection-finished'])
+
     def test_survives_a_reopen(self):
         with tempfile.TemporaryDirectory() as directory:
             CollectorHistory(directory).record('started')

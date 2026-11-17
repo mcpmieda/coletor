@@ -1,15 +1,19 @@
 """Observed class-list adapter. It reads class metadata, never student links."""
 import hashlib
+import json
 import re
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
-from .class_selection import ORIGIN, MAX_CLASSES
+from .class_selection import LIST_PATH, ORIGIN, MAX_CLASSES
 
-LIST_PATH = "/sistema/escola/turmaListar.php"
 CLASS_LINK_PATH = "/sistema/escola/vinculoAlunoExibirTurma.php"
 ORGANIZATION = "SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO"
 SCHOOL = "ESCOLA IEDA ALVES DE OLIVEIRA MCPM"
 CONTEXT_KEY = "school-display:" + hashlib.sha256((ORGANIZATION + "\n" + SCHOOL).encode()).hexdigest()
+# What every page script answers about where it is (`text` is the page's own text): the two names
+# above, written once here and never again inside a script.
+CONTEXT_JS = (f"context_organization:text.includes({json.dumps(ORGANIZATION, ensure_ascii=False)}),"
+              f"context_school:text.includes({json.dumps(SCHOOL, ensure_ascii=False)})")
 
 CATALOG_JS = """() => {
   const norm=s=>(s||'').normalize('NFC').replace(/\\s+/g,' ').trim();
@@ -31,13 +35,12 @@ CATALOG_JS = """() => {
   }
   const columns_recognized=!duplicate&&Object.keys(patterns).every(k=>k in columns);
   const rows=[...document.querySelectorAll('#tbodyTurmas tr')].filter(r=>!r.querySelector('th'));
-  if(rows.length>500)return {error:'catalog_too_large'};
+  if(rows.length>MAX_CLASSES)return {error:'catalog_too_large'};
   const cell=(row,key)=>columns_recognized?row.cells[columns[key]]:undefined;
   return {url:location.href,password_form:!!document.querySelector('input[type=password]'),
     recognized_table:document.querySelectorAll('#tabelaTurmas').length===1,
     columns_recognized,
-    context_organization:text.includes('SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO'),
-    context_school:text.includes('ESCOLA IEDA ALVES DE OLIVEIRA MCPM'),
+    CONTEXT_JS,
     title_years:[...(norm(document.title)+' '+text).matchAll(/Listar Turmas - Ano Letivo (\\d{4})/g)].map(m=>Number(m[1])),
     year_controls:years, search_present:!!search, filtered:!!search?.value.trim(),
     rows:rows.map(row=>({visible:!!row.getClientRects().length,
@@ -45,7 +48,7 @@ CATALOG_JS = """() => {
       stage:norm(cell(row,'stage')?.innerText),matrix:norm(cell(row,'matrix')?.innerText),
       shift:norm(cell(row,'shift')?.innerText),
       links:[...cell(row,'code')?.querySelectorAll('a[href]')||[]].map(a=>a.getAttribute('href'))}))};
-}"""
+}""".replace("MAX_CLASSES", str(MAX_CLASSES)).replace("CONTEXT_JS", CONTEXT_JS)
 
 
 def list_url(year):

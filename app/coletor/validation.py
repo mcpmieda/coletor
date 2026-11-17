@@ -7,17 +7,16 @@ must keep transmission disabled until a real authenticated API adapter exists.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict
 from datetime import date
 import hashlib
 import json
 
-from .models import AnnualSnapshot, Issue, MappingValidation, ValidationResult
+from .models import AnnualSnapshot, Issue, MappingValidation, ValidationResult, plain
 
 
 def canonical_snapshot_id(snapshot: AnnualSnapshot) -> str:
     """Hash normalized contents, including issues, but excluding the hash itself."""
-    body = asdict(snapshot)
+    body = plain(snapshot)
     body.pop("snapshot_id", None)
     payload = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()

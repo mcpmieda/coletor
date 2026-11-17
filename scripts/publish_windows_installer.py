@@ -21,7 +21,6 @@ import struct
 SOURCE = re.compile(r"ColetorFrequencia-(\d+\.\d+\.\d+)-windows-x64-setup-candidato\.exe\Z")
 FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
 MANIFEST = 'atualizacao.json'
-KEEP = 5  # Releases kept: the newest and four to go back to by hand.
 
 
 # What goes into the installed program (scripts/build_windows_portable.py, installer/Coletor.iss).

@@ -28,6 +28,9 @@ PURPOSES = ('session', 'queue', 'consent', 'credential')
 # (owner decision 22/10/2026). Only a comparison aid: lost or unreadable means "send in full".
 COPY_PURPOSE = re.compile(r'copy:(?:frequency-[1-9][0-9]{0,9}|schedule|student-report)')
 MAX_COPY_BYTES = 32 * 1024 * 1024
+# The only source a saved session may hold: no other cookie or origin can bring a second identity.
+SESSION_DOMAINS = frozenset({'www.smecel.com.br', '.smecel.com.br', 'smecel.com.br'})
+SESSION_ORIGIN = 'https://www.smecel.com.br'
 
 
 class StorageError(ValueError):
@@ -195,29 +198,25 @@ class ProtectedStorage:
             self._memory.pop(purpose, None)
         finally: Path(name).unlink(missing_ok=True)
 
+    @staticmethod
+    def _check_session(state):
+        if (not isinstance(state, dict) or set(state) != {'cookies', 'origins'}
+                or not isinstance(state['cookies'], list) or not isinstance(state['origins'], list)
+                or any(not isinstance(c, dict) or c.get('domain') not in SESSION_DOMAINS for c in state['cookies'])
+                or any(not isinstance(o, dict) or o.get('origin') != SESSION_ORIGIN for o in state['origins'])):
+            raise StorageError()
+
     def load_session(self):
         with self._lock:
             state = self._read('session')
-            if state is not None:
-                if not isinstance(state, dict) or set(state) != {'cookies', 'origins'}:
-                    raise StorageError()
-                if not isinstance(state['cookies'], list) or not isinstance(state['origins'], list): raise StorageError()
-                # Restore only the explicitly allowed source; other cookies or
-                # origin data cannot introduce a second identity provider.
-                if any(c.get('domain') not in {'www.smecel.com.br', '.smecel.com.br', 'smecel.com.br'} for c in state['cookies']):
-                    raise StorageError()
-                if any(o.get('origin') != 'https://www.smecel.com.br' for o in state['origins']): raise StorageError()
+            if state is not None: self._check_session(state)
             return state
 
     def save_session(self, state):
         with self._lock:
-            if (not isinstance(state, dict) or set(state) != {'cookies', 'origins'}
-                    or not isinstance(state['cookies'], list) or not isinstance(state['origins'], list)
-                    or any(not isinstance(c, dict) or c.get('domain') not in {'www.smecel.com.br', '.smecel.com.br', 'smecel.com.br'} for c in state['cookies'])
-                    or any(not isinstance(o, dict) or o.get('origin') != 'https://www.smecel.com.br' for o in state['origins'])):
-                raise StorageError()
+            self._check_session(state)
             self._write('session', state)
-            self.load_session()  # Validate even memory-only state.
+            self.load_session()  # What was written reads back: the disk copy too.
 
     def queue(self):
         with self._lock:

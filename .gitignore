@@ -32,3 +32,6 @@ instalador/*.part
 
 # Deterministic generated fixture; source is app/coletor/demo.py.
 fixtures/annual-synthetic.html
+
+# Notas e configurações locais do Claude Code
+.claude/

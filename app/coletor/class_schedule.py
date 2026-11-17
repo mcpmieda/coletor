@@ -8,7 +8,7 @@ stores it ("LINGUA PORTUGUESA", no accent added); the teacher is never read; a f
 import re
 from urllib.parse import parse_qsl, urlsplit
 
-from .class_catalog import ORGANIZATION, SCHOOL
+from .class_catalog import CONTEXT_JS, ORGANIZATION, SCHOOL
 from .class_selection import ORIGIN
 
 GRADE_PATH = "/sistema/escola/grade.php"
@@ -39,10 +39,9 @@ SCHEDULE_JS = """() => {
   const norm=s=>(s||'').normalize('NFC').replace(/\\s+/g,' ').trim();
   const text=norm(document.body.innerText);
   const blocks=[...document.querySelectorAll('div.grade-turma')];
-  if(blocks.length>64)return {error:'schedule_too_large'};
+  if(blocks.length>MAX_BLOCKS)return {error:'schedule_too_large'};
   return {url:location.href,password_form:!!document.querySelector('input[type=password]'),
-    context_organization:text.includes('SECRETARIA DE EDUCAÇÃO DE MEDEIROS NETO'),
-    context_school:text.includes('ESCOLA IEDA ALVES DE OLIVEIRA MCPM'),
+    CONTEXT_JS,
     years:[...text.matchAll(/\\d+ turmas Ano letivo (\\d{4})/g)].map(m=>Number(m[1])),
     blocks:blocks.map(block=>{
       const tables=block.querySelectorAll('table');
@@ -54,7 +53,7 @@ SCHEDULE_JS = """() => {
           free:!!td.querySelector('.ls-color-warning')&&norm(td.innerText)==='VAGA',
           names:[...td.querySelectorAll('span.ls-display-none-xs')].map(s=>norm(s.textContent))})):[]};
     })};
-}"""
+}""".replace("MAX_BLOCKS", str(MAX_BLOCKS)).replace("CONTEXT_JS", CONTEXT_JS)
 
 
 def grade_url():

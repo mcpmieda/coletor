@@ -44,6 +44,16 @@ class Authorization:
     expires_at: float
 
 
+def unique(pairs):
+    """object_pairs_hook: a JSON object naming a key twice is refused, never read as its last value."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError()
+        result[key] = value
+    return result
+
+
 def _timestamp(value):
     if not isinstance(value, str) or len(value) > 40:
         raise AccessDenied("INVALID_ACCESS_RESPONSE")
@@ -63,13 +73,6 @@ def validate_authorization(response, now):
             or len(response.body) > MAX_RESPONSE_BYTES):
         raise AccessDenied()
     try:
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError()
-                result[key] = value
-            return result
         body = json.loads(response.body, object_pairs_hook=unique)
     except (ValueError, UnicodeError, RecursionError):
         raise AccessDenied("INVALID_ACCESS_RESPONSE") from None

@@ -37,6 +37,8 @@ ALERT_CODES = {'SOURCE_LOGIN_REQUIRED', 'SOURCE_LOGIN_FAILED', 'CLASS_RECONCILIA
                'revision-conflict', 'not-authorized', 'PROTECTED_STORAGE_UNAVAILABLE', 'PROTECTED_STORAGE_LIMIT',
                'PENDING_BATCHES', 'CLOCK_OUT_OF_SYNC'}
 LEASE_SECONDS = 300
+# The school's zone while no agenda names one (SCHOOL_TIME_ZONE_V1 in the Ecossistema).
+DEFAULT_ZONE = 'America/Bahia'
 # Same limit as the Ecossistema's frequencyScheduleV2 (recheck included).
 MAX_DAILY_TIMES = 48
 # Routine waits are not failures: a reserve computer or a school pause.
@@ -64,6 +66,12 @@ AGENDA_TAIL_SECONDS = 300
 # Shorter than AGENDA_LEAD_SECONDS (ecossistema#1450, finding 1): a time created or moved in the ADM at
 # least 10 min ahead is always seen before its near window starts.
 QUIET_REFRESH_SECONDS = 540
+
+
+def school_zone(settings, report=False):
+    """The zone of the agenda in force: the report's own when asked for, else the frequency's."""
+    agenda = (report and settings.get('reportSchedule')) or settings['schedule'] or {'timezone': DEFAULT_ZONE}
+    return agenda['timezone']
 
 
 def discard_confirmation():
@@ -260,7 +268,7 @@ def lessons_per_day(records):
     return {date: (n if n is not None or evidence[date] else typical) for date, n in counts.items()}
 
 
-def collection_payload(preview, source_class, server_class, fencing, request_id, timezone_name='America/Bahia'):
+def collection_payload(preview, source_class, server_class, fencing, request_id, timezone_name=DEFAULT_ZONE):
     """Input is a Python worker result, never a bridged/user imported preview."""
     snapshot, capture = preview['snapshot'], preview['capture']
     if (preview.get('mode') != 'manual' or snapshot.get('source_format') != 'smecel-annual-v1'
@@ -529,13 +537,18 @@ class FrequencyRuntime:
         if code in {'paused', 'CANCELLED'}: return 'paused'
         return 'error'
 
-    def _error(self, error, label=None):
+    @staticmethod
+    def _code_of(error):
+        """The sanitized code of a failure, one of SAFE_CODES."""
         code = getattr(error, 'code', 'unavailable')
         if isinstance(error, SessionError):
             # A diary that failed after the list was validated is a read
             # problem, retried at the next time; anything else asks for login.
             code = str(error) if str(error) in {'SOURCE_LOGIN_FAILED', 'SOURCE_READ_FAILED'} else 'SOURCE_LOGIN_REQUIRED'
-        if code not in SAFE_CODES: code = 'unavailable'
+        return code if code in SAFE_CODES else 'unavailable'
+
+    def _error(self, error, label=None):
+        code = self._code_of(error)
         # With a saved Smecel login an expired session is retried at the next
         # scheduled time. A refused password or no saved login waits for a person.
         blocks_source = code == 'SOURCE_LOGIN_FAILED' or (
@@ -915,7 +928,7 @@ class FrequencyRuntime:
             # Every computer of the school starts the report at the same times; the concession says
             # which one reads it. Taken before the Smecel (10/11/2026: the other computer read the
             # whole report and threw it away, and its history showed a run "interrupted").
-            self._report_lease(epoch)
+            self._hold_lease(epoch)
             self._history.record('report-started')
             read_started = time.monotonic()
             catalog = self._access.run(lambda: self._source.operational_catalog(self._storage))
@@ -942,10 +955,7 @@ class FrequencyRuntime:
             except Exception: pass
         except Exception as error:
             failed = True
-            code = getattr(error, 'code', 'unavailable')
-            if isinstance(error, SessionError):
-                code = str(error) if str(error) in {'SOURCE_LOGIN_FAILED', 'SOURCE_READ_FAILED'} else 'SOURCE_LOGIN_REQUIRED'
-            if code not in SAFE_CODES: code = 'unavailable'
+            code = self._code_of(error)
             with self._lock: self._report['code'] = code
             # A refused Smecel password blocks the frequency too: one place shows it.
             if code == 'SOURCE_LOGIN_FAILED': self._error(SessionError('SOURCE_LOGIN_FAILED'))
@@ -962,14 +972,15 @@ class FrequencyRuntime:
             self._on_finished(failed)
         return self.public_status()
 
-    def _report_lease(self, epoch):
+    def _hold_lease(self, epoch):
+        """Before a send that is not a class's diary (the grid, the incidents, the report): the
+        school not paused and this computer's concession still live, taken again when it lapsed."""
         def lease():
             fresh = self._fresh()
             if fresh['settings']['paused']: raise FrequencyError('paused')
             if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
             self._check(epoch)
-            return fresh
-        return self._verified(lease)
+        self._verified(lease)
 
     def _report_request(self, payload, epoch):
         """One report request, retried like a diary: the receipt first, never a blind repeat."""
@@ -991,11 +1002,10 @@ class FrequencyRuntime:
         observed = datetime.fromtimestamp(self._clock(), timezone.utc).isoformat()
         version = 'sha256:' + hashlib.sha256(canonical_frequency({'academicYear': year, 'observedAt': observed,
                                                                   'contentHash': digest})).hexdigest()
-        zone = (status['settings'].get('reportSchedule') or status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
-        today = datetime.fromtimestamp(self._clock(), ZoneInfo(zone)).date().isoformat()
+        today = datetime.fromtimestamp(self._clock(), ZoneInfo(school_zone(status['settings'], report=True))).date().isoformat()
         local = self._load_copy('student-report')
         if isinstance(local, dict) and local.get('contentHash') == digest and local.get('sentOn') == today:
-            self._report_lease(epoch)
+            self._hold_lease(epoch)
             short = {'operation': 'student-report-unchanged', 'academicYear': year, 'requestId': str(uuid.uuid4()),
                      'fencingToken': self._lease['fencingToken'], 'sourceVersion': version, 'observedAt': observed,
                      'rows': len(rows), 'contentHash': digest}
@@ -1004,7 +1014,7 @@ class FrequencyRuntime:
                 if error.code != 'payload-required': raise
         reply = None
         for _ in range(REPORT_SENDS):
-            self._report_lease(epoch)
+            self._hold_lease(epoch)
             payload = {'operation': 'student-report-collect', 'academicYear': year, 'requestId': str(uuid.uuid4()),
                        'fencingToken': self._lease['fencingToken'], 'sourceVersion': version, 'observedAt': observed,
                        'rows': rows}
@@ -1203,11 +1213,11 @@ class FrequencyRuntime:
                     continue
                 last_failed = False
                 send_started = time.monotonic()
-                school_zone = (after_capture['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone']
-                payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), school_zone)
+                zone = school_zone(after_capture['settings'])
+                payload = collection_payload(preview, source, current, self._lease['fencingToken'], str(uuid.uuid4()), zone)
                 self._note_unknown_marks(preview, source['name'])
                 del preview
-                unchanged = self._deliver(payload, epoch, school_zone)
+                unchanged = self._deliver(payload, epoch, zone)
                 self._supersede(source['class_id'])
                 with self._lock:
                     self._progress['completed'] += 1
@@ -1218,7 +1228,7 @@ class FrequencyRuntime:
                                      send_ms=round((time.monotonic() - send_started) * 1000), unchanged=unchanged)
             self._check(epoch)
             if schedule_due:
-                self._collect_schedule(epoch, catalog, status, (status['settings']['schedule'] or {'timezone': 'America/Bahia'})['timezone'])
+                self._collect_schedule(epoch, catalog, status, school_zone(status['settings']))
             self._collect_incidents(epoch, catalog, status)
             self._access.run(lambda: self._source.preserve_and_close(self._storage))
             with self._lock:
@@ -1390,12 +1400,7 @@ class FrequencyRuntime:
             observed = datetime.fromtimestamp(now, timezone.utc).isoformat()
             version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'observedAt': observed,
                                                           'grids': hashes})).hexdigest()
-            def lease():
-                fresh = self._fresh()
-                if fresh['settings']['paused']: raise FrequencyError('paused')
-                if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
-                self._check(epoch)
-            self._verified(lease)
+            self._hold_lease(epoch)
             payload = {'operation': 'schedule-collect', 'academicYear': 2026, 'requestId': str(uuid.uuid4()),
                        'fencingToken': self._lease['fencingToken'], 'sourceVersion': 'sha256:' + version,
                        'observedAt': observed, 'classes': items}
@@ -1447,12 +1452,7 @@ class FrequencyRuntime:
             observed = datetime.fromtimestamp(self._clock(), timezone.utc).isoformat()
             version = hashlib.sha256(canonical_frequency({'academicYear': year, 'observedAt': observed,
                                                           'students': students})).hexdigest()
-            def lease():
-                fresh = self._fresh()
-                if fresh['settings']['paused']: raise FrequencyError('paused')
-                if self._lease is None or self._lease['deadline'] <= self._clock(): self._acquire(fresh, force=True)
-                self._check(epoch)
-            self._verified(lease)
+            self._hold_lease(epoch)
             payload = {'operation': 'incident-collect', 'academicYear': year, 'requestId': str(uuid.uuid4()),
                        'fencingToken': self._lease['fencingToken'], 'sourceVersion': 'sha256:' + version,
                        'observedAt': observed, 'complete': reading['complete'], 'students': students}

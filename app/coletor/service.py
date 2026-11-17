@@ -1,7 +1,7 @@
 """The same in-memory preview service is used by native and browser adapters."""
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from .models import plain
 from .parser import parse_annual_html
 from .validation import validate_for_transmission
 from .demo import build_fixture
@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[2]
 from .limits import MAX_HTML_BYTES
 
 
-def preview(html: str, class_id: str, year: int, mode: str = "local") -> dict:
+def preview(html: str, class_id: str, year: int, mode: str = "local", validate: bool = True) -> dict:
+    """validate=False (the automatic collection): no "validation" in the result. That report only
+    says why this prototype's own transmission stays disabled; the collection never reads it."""
     if not isinstance(html, str) or len(html.encode("utf-8")) > MAX_HTML_BYTES:
         raise ValueError("Diário inválido ou acima de 24 MiB.")
     if not isinstance(class_id, str) or not class_id.strip() or len(class_id) > 80:
@@ -18,8 +20,10 @@ def preview(html: str, class_id: str, year: int, mode: str = "local") -> dict:
     if type(year) is not int or not 2000 <= year <= 2100:
         raise ValueError("Informe um ano entre 2000 e 2100.")
     snapshot = parse_annual_html(html, class_id.strip(), year)
-    return {"snapshot": asdict(snapshot), "validation": asdict(validate_for_transmission(snapshot)),
-            "mode": mode, "processed_at": datetime.now(timezone.utc).isoformat()}
+    result = {"snapshot": plain(snapshot), "mode": mode, "processed_at": datetime.now(timezone.utc).isoformat()}
+    if validate:
+        result["validation"] = plain(validate_for_transmission(snapshot))
+    return result
 
 
 class PreviewApi:
