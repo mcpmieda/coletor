@@ -264,6 +264,11 @@ class ManualSession:
         credential = storage.load_credential() if hasattr(storage, 'load_credential') else None
         with self._lock:
             driver, state, scope = self._driver, self._state, self._scope
+        if driver is not None and state == 'closed':
+            # The last run's browser could not be closed (its temporary files were still held):
+            # that cleanup is finished now, and raises again while it still cannot.
+            self.close()
+            driver = None
         if driver is None:
             saved = storage.load_session()
             if saved is None and credential is None: raise SessionError('SOURCE_LOGIN_REQUIRED')

@@ -940,7 +940,7 @@ class FrequencyRuntime:
             rows = self._verified(read)['rows']
             send_started = time.monotonic()
             reply = self._send_report(rows, year, epoch, status)
-            self._access.run(lambda: self._source.preserve_and_close(self._storage))
+            self._close_source()
             outcome = reply.get('outcome')
             code = {'review': 'REPORT_REVIEW', 'preparing': 'REPORT_PREPARING',
                     'awaiting_relation': 'REPORT_AWAITING_RELATION'}.get(outcome)
@@ -971,6 +971,17 @@ class FrequencyRuntime:
             if not _claimed: self._operation.release()
             self._on_finished(failed)
         return self.public_status()
+
+    def _close_source(self):
+        """The Smecel session saved and its browser closed, after a run whose data already went.
+
+        A browser that could not be closed yet (Windows still holds its temporary files) is no
+        failed run. It used to be read as an expired Smecel session: the history showed a failure
+        after everything was sent and the whole collection ran again at the next check (seven
+        times on 16/11/2026). The session keeps that browser and the next run finishes its cleanup
+        before opening another (ManualSession.operational_catalog)."""
+        try: self._access.run(lambda: self._source.preserve_and_close(self._storage))
+        except SessionError: pass
 
     def _hold_lease(self, epoch):
         """Before a send that is not a class's diary (the grid, the incidents, the report): the
@@ -1230,7 +1241,7 @@ class FrequencyRuntime:
             if schedule_due:
                 self._collect_schedule(epoch, catalog, status, school_zone(status['settings']))
             self._collect_incidents(epoch, catalog, status)
-            self._access.run(lambda: self._source.preserve_and_close(self._storage))
+            self._close_source()
             with self._lock:
                 self._state, self._class = 'ready', None
                 self._progress['classLabel'] = None

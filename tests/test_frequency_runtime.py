@@ -126,6 +126,21 @@ class RuntimeTests(unittest.TestCase):
         self.runtime._active = True
         self.addCleanup(self.runtime.shutdown)
 
+    def test_a_browser_that_could_not_be_closed_after_everything_went_is_no_failed_run(self):
+        # 16/11/2026: Windows still held the browser's temporary files; the run was recorded as a
+        # failure (an expired Smecel session) and read every class again at the next check.
+        def held(storage): raise SessionError('A sessão foi interrompida, mas a limpeza não terminou.')
+        self.source.preserve_and_close = held
+        status = self.runtime.collect()
+        self.assertEqual((status['state'], status['code']), ('ready', None))
+        kinds = [e['kind'] for e in self.runtime.recent_history(20)]
+        self.assertEqual(kinds[0], 'collection-finished')
+        self.assertNotIn('failure', kinds)
+        self.assertIsNone(self.runtime._login_retry)
+        self.assertEqual(self.source.reads, 1)
+        self.runtime.tick()  # Nothing waits to run again.
+        self.assertEqual(self.source.reads, 1)
+
     def test_real_flow_selected_worker_sparse_sixth_slot_receipt_and_no_uid(self):
         outside, request = [], self.provider.frequency_request
         def bracketed(payload):

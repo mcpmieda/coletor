@@ -326,6 +326,13 @@ class ReportRunTests(unittest.TestCase):
             self.assertNotIn(value, shown)
             self.assertNotIn(value.encode(), on_disk)
 
+    def test_a_browser_that_could_not_be_closed_after_the_report_went_is_no_failed_report(self):
+        def held(storage): raise SessionError('A sessão foi interrompida, mas a limpeza não terminou.')
+        self.source.preserve_and_close = held
+        status = self.runtime.collect_report()
+        self.assertIsNone(status['report']['code'])
+        self.assertEqual([e['kind'] for e in self.runtime.recent_history(20)][:2], ['report-finished', 'report-started'])
+
     def test_whole_report_once_a_day(self):
         self.runtime.collect_report()
         self.provider.now += 86400
