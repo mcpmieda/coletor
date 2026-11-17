@@ -61,10 +61,11 @@ jobs:
         working-directory: ui
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Audit UI production and development dependency sets
-        working-directory: ui
         run: |
-          npm audit --omit=dev --audit-level=moderate
-          npm audit --audit-level=moderate
+          # What goes inside the program: no exception. The development tools: only the advisories
+          # the owner accepted in ui/audit-exceptions.json, while their packages have no fix.
+          (cd ui && npm audit --omit=dev --audit-level=moderate)
+          python scripts/check_ui_audit.py
       - name: Typecheck and production build
         working-directory: ui
         run: |
