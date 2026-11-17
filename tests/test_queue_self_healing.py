@@ -38,6 +38,21 @@ class QueueSelfHealingTests(unittest.TestCase):
         self.assertEqual(self.storage.queue(), [])
         self.assertFalse(self.storage.quarantine_unreadable_queue())
 
+    def test_an_ordinary_send_keeps_the_set_aside_queue(self):
+        # Its receipt emptied the live queue through the explicit discard, which also deleted every
+        # set-aside file: the seven days they are kept for were over at the next class sent.
+        self.storage.bind('device', 1); self.storage._enabled = True
+        self.storage.enqueue({'requestId': 'OLD_GENERATION'})
+        self.storage._binding = None
+        self.storage.bind('device', 2)
+        self.storage.quarantine_unreadable_queue(); self.now += 601
+        self.assertTrue(self.storage.quarantine_unreadable_queue())
+        self.storage.enqueue({'requestId': 'NEW'})
+        self.storage.acknowledge('NEW')
+        self.assertEqual(self.storage.queue(), [])
+        self.assertFalse((self.storage.directory / 'queue.dpapi').exists())
+        self.assertEqual(len(list(self.storage.directory.glob('queue-unreadable-*.dpapi'))), 1)
+
     def test_a_momentary_failure_never_sets_the_queue_aside(self):
         self.storage.bind('device', 1); self.storage._enabled = True
         self.storage.enqueue({'requestId': 'CURRENT'})

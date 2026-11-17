@@ -74,7 +74,7 @@ class SerializedReaderTests(unittest.TestCase):
     def test_entities_attributes_void_and_unbalanced_tags(self):
         for html in ('<html><body><div class="a b" colspan="2">D&apos;AVILA &amp; C&#233;u&nbsp;x &lt;b&gt;</div></body></html>',
                      '<HTML><BODY><DIV CLASS="x">a<BR>b<hr></DIV></BODY></HTML>',
-                     '<html><body><p title="a &amp; &quot;b&quot;">x</p> \n </body></html>\n',
+                     '<html><body><p title="a b">x</p> \n </body></html>\n',
                      '<html><body><div><span>sem fechar</div></body></html>',
                      '<html><body></p><div></div></span></body></html>',
                      '<html><body><div class="">&notanentity; &amp</div></body>',
@@ -83,7 +83,9 @@ class SerializedReaderTests(unittest.TestCase):
             self.same(html)
 
     def test_anything_else_is_left_to_html_parser(self):
-        for html in ('<!doctype html><html><body></body></html>', '<html><body><!-- a -- b --></body></html>',
+        # An entity in an attribute: html.parser keeps "&ltx" as written there (the text rule gives "<x").
+        for html in ('<html><body><p title="a &amp; &quot;b&quot;">x</p></body></html>', '<html><body><b title="&ltx">x</b></body></html>',
+                     '<!doctype html><html><body></body></html>', '<html><body><!-- a -- b --></body></html>',
                      '<html><body><!--> x --></body></html>', '<html><body><!---> x --></body></html>',
                      '<html><body><!-- sem fim </body></html>', '<html><body><!-- a --!></body></html>',
                      '<html><body><script>if (a < b) {}</script></body></html>', '<html><body><style>p{}</style></body></html>',

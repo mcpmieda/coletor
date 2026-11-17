@@ -88,6 +88,16 @@ def thumbprint(public):
     return base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).decode('ascii').rstrip('=')
 
 
+_TLS = None
+
+
+def tls_context():
+    """One verified TLS context for the program: building it reads the Windows certificate stores."""
+    global _TLS
+    if _TLS is None: _TLS = ssl.create_default_context()
+    return _TLS
+
+
 class OfficialTransport:
     def __init__(self, *, connection=None):
         self._connection = connection
@@ -101,7 +111,7 @@ class OfficialTransport:
         if payload is not None and len(payload) > (FREQUENCY_BYTES if frequency else 2048):
             raise AccessDenied('INVALID_ACCESS_REQUEST')
         connection = (self._connection or (lambda: http.client.HTTPSConnection(
-            'admin.escolaieda.com', 443, timeout=10, context=ssl.create_default_context())))()
+            'admin.escolaieda.com', 443, timeout=10, context=tls_context())))()
         try:
             connection.request(method, path, body=payload,
                                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
@@ -136,7 +146,7 @@ class OfficialTransport:
                         except (ValueError, TypeError, UnicodeError, RecursionError):
                             pass
                 # http.client never follows redirects; no other origin contacted.
-                raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status == 503 else
+                raise AccessDenied('ACCESS_UNAVAILABLE' if reply.status >= 500 or reply.status in {408, 429} else
                                    'ACCESS_NOT_CONFIGURED' if path == PREFIX+'config' and reply.status == 404 else 'ACCESS_REQUIRED')
             raw = reply.read(limit + 1)
             if len(raw) > limit:

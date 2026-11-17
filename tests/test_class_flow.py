@@ -68,8 +68,10 @@ class ClassFlowTests(unittest.TestCase):
         self.driver.close = close
         with self.assertRaises(SessionError): self.session.preserve_and_close(storage)
         self.assertTrue(self.session.status()['cleanup_pending'])
-        # Still held at the next run: that run does not open a second browser.
-        with self.assertRaises(SessionError): self.session.operational_catalog(storage)
+        # Still held at the next run: that run does not open a second browser, and fails as a read
+        # (tried again), not as an expired login (which waits for a person when none is saved).
+        with self.assertRaises(SessionError) as held_again: self.session.operational_catalog(storage)
+        self.assertEqual((str(held_again.exception), held_again.exception.reason), ('SOURCE_READ_FAILED', 'browser-closing'))
         self.assertEqual(len(self.driver.opened), 1)
         # Released: the next run finishes the cleanup and reads the list as usual.
         held[0] = False

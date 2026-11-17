@@ -17,8 +17,9 @@ from .device_provider import canonical_frequency
 import hashlib
 import ctypes
 import os
-from .history import CollectorHistory
+from .history import CollectorHistory, MAX_ENTRIES
 from .institutional_access import AccessDenied
+from .limits import MAX_STUDENTS
 from .local_copy import content_hash, is_current, payload_hash, schedule_hash, unchanged_payload
 from .manual_session import SessionError, failure_reason
 from .protected_storage import ProtectedStorage, StorageError
@@ -216,8 +217,8 @@ def report_hash(rows):
 # capture), an absence (red X) or a justified absence (yellow icon or blue X). The calendar icon,
 # "fora do período de matrícula" and blank positions never count as a lesson.
 LESSON_STATES = frozenset({'planned_unknown', 'absent', 'excused_absent'})
-# The whole local history (it keeps at most 2000 entries) when checking a mark was already logged.
-MAX_HISTORY_SCAN = 2000
+# The whole local history when checking a mark was already logged.
+MAX_HISTORY_SCAN = MAX_ENTRIES
 
 
 # How far around a day the class's marks still tell how many lessons that weekday has.
@@ -277,7 +278,7 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
     expected = class_key(source_class['name'])
     if not expected or class_key(server_class['sourceClassLabel']) != expected: raise FrequencyError('source-invalid')
     students = snapshot['students']
-    if not 1 <= len(students) <= 64: raise FrequencyError('source-invalid')
+    if not 1 <= len(students) <= MAX_STUDENTS: raise FrequencyError('source-invalid')
     if any(class_key(s.get('original_class')) != expected for s in students): raise FrequencyError('source-invalid')
     if len({s['source_student_ref'] for s in students}) != len(students): raise FrequencyError('source-invalid')
     keys, duplicates = {}, {}
@@ -466,6 +467,8 @@ class FrequencyRuntime:
             self._status = value
             self._status_at = received_at
             self._school_paused = value['settings']['paused']
+            if self._state == 'paused' and self._active and not self._paused and not self._school_paused:
+                self._state, self._code = 'reserve', None
             # A run's own status checks keep the report's agenda current for a time that comes meanwhile.
             self._last_report_schedule = value['settings'].get('reportSchedule')
             # The Ecossistema answered: a "no connection" notice left by an earlier attempt (the
@@ -495,7 +498,8 @@ class FrequencyRuntime:
         status = self._fresh()
         self._storage.bind(*self._provider.storage_binding())
         remembered = self._storage.enable()
-        with self._lock:
+        ready = getattr(self._source, 'ready', None)
+        if ready is None or ready():
             self._access.run(lambda: self._source.remember_if_ready(self._storage))
         with self._lock:
             if self._closed: raise FrequencyError('CANCELLED')
@@ -713,7 +717,7 @@ class FrequencyRuntime:
             reply = self._committed(self._request(request), request)
         if reply.get('fencingToken') != fencing or reply.get('expiresAt') is None: raise FrequencyError('lease-fenced')
         remaining = stamp(reply['expiresAt']) - stamp(status['serverTime'])
-        if not 0 < remaining <= 305: raise FrequencyError('lease-fenced')
+        if not 0 < remaining <= LEASE_SECONDS + 5: raise FrequencyError('lease-fenced')
         # Heartbeats report status; the server explicitly does not renew the
         # grant. A delayed heartbeat must never extend our original deadline.
         deadline = status['_request_started_at'] + remaining - 2
@@ -735,7 +739,10 @@ class FrequencyRuntime:
         if status['settings']['paused']:
             self.cancel(purge=False, school_pause=True)
             return
-        if self._report_tick(status): return
+        self._last_schedule = status['settings']['schedule']
+        if self._report_tick(status):
+            self._note_busy_slot()  # A frequency time of this same minute: right after the report.
+            return
         if self._code == 'CENTER_CLASSES_REQUIRED' and status['classes']:
             with self._lock: self._code, self._state = None, 'reserve'
         schedule = status['settings']['schedule']
@@ -857,6 +864,7 @@ class FrequencyRuntime:
         done = {c['classId'] for c in status.get('collections') or []
                 if isinstance(c, dict) and stamp(c.get('receivedAt')) >= standby['since']}
         if all(c['classId'] in done for c in status['classes'] if c['shift'] in standby['shifts']):
+            with self._lock: self._standby = None
             return False
         if not self._operation.acquire(blocking=False): return False
         with self._lock: self._standby = None
@@ -1093,7 +1101,7 @@ class FrequencyRuntime:
             with self._lock:
                 epoch = self._epoch
                 if not self._active or self._paused: raise FrequencyError('CANCELLED')
-            status = self._fresh()
+            status = self._patiently(self._fresh, epoch)
             self._reconcile_receipts(epoch)
             # Ineligible devices do not take the school-wide lease from a
             # healthy standby collector just to discover a known blocker.
@@ -1118,7 +1126,7 @@ class FrequencyRuntime:
                     error.label = ', '.join(unmatched)
                     raise error
                 raise FrequencyError('NO_CLASSES_IN_SHIFT')
-            self._acquire(status)
+            self._patiently(lambda: self._acquire(status), epoch)
             self._check(epoch)
             self._drain(epoch)
             # The grid (when due) and the incidents are steps of the run like the classes (owner request
@@ -1197,6 +1205,7 @@ class FrequencyRuntime:
                     current, preview, after_capture = self._verified(read_class)
                 except SessionError as error:
                     if str(error) != 'SOURCE_READ_FAILED': raise
+                    self._check(epoch, lease=False)  # A pause or a stop closed the browser: no failed diary.
                     reason = failure_reason(error)
                     read_ms = round((time.monotonic() - read_started) * 1000)
                     second = source['class_id'] in retried
@@ -1383,9 +1392,7 @@ class FrequencyRuntime:
             self._storage.enqueue(payload)
         self._send(payload, epoch)
         self._save_copy(key, {'classId': payload['classId'], 'sourceClassId': payload['sourceClassId'],
-                              'contentHash': digest, 'fullOn': today,
-                              'content': {field: payload[field] for field in
-                                          ('sourceClassLabel', 'rosterComplete', 'records', 'coverage', 'marks')}})
+                              'contentHash': digest, 'fullOn': today})
         return False
 
     def _collect_schedule(self, epoch, catalog, status, zone):
@@ -1425,9 +1432,10 @@ class FrequencyRuntime:
                        'observedAt': observed, 'classes': items}
             reply = self._committed(self._request(payload), payload)
             changed = [c for c in reply.get('classes') or [] if isinstance(c, dict) and c.get('changed') is True]
-            self._save_copy('schedule', {'hashes': hashes, 'sentOn': today, 'classes': items})
+            self._save_copy('schedule', {'hashes': hashes, 'sentOn': today})
             self._history.record('schedule-sent', sent=len(changed))
         except Exception as error:
+            self._check(epoch, lease=False)
             # A stop, a pause or a lost authority (the institutional access itself, or the Ecossistema's
             # answer) stops the run as anywhere else; any other problem with the grid is only noted,
             # and the frequency already sent stands. FrequencyError is an AccessDenied too.
@@ -1483,6 +1491,7 @@ class FrequencyRuntime:
                                  read_ms=round((send_started - read_started) * 1000),
                                  send_ms=round((time.monotonic() - send_started) * 1000))
         except Exception as error:
+            self._check(epoch, lease=False)
             # As for the grid: a stop or a lost authority stops the run; anything else is only noted.
             code = getattr(error, 'code', None)
             if type(error) is AccessDenied or code in {'CANCELLED', 'paused', 'lease-fenced', 'not-authorized'}: raise

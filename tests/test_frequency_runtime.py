@@ -238,6 +238,7 @@ class RuntimeTests(unittest.TestCase):
         done = {**status, 'collections': [{'classId': 10, 'receivedAt': stamp(self.provider.now)}]}
         self.assertFalse(self.runtime._take_over(done, now))
         # It stopped before the class: this computer runs the slot once, at once.
+        self.provider.fail_lease = True; self.runtime.collect({'matutino'}); self.provider.fail_lease = False
         self.assertTrue(self.runtime._take_over(status, now))
         self.runtime._operation.acquire(); self.runtime._operation.release()
         self.assertEqual([p['classId'] for p in self.provider.requests if p['operation'] == 'collect'], [10])

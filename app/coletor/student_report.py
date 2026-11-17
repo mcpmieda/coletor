@@ -99,6 +99,7 @@ NEVER_ASKED = frozenset({
     "aluno_condicao_saude_categoria", "aluno_condicao_saude_descricao", "aluno_condicao_saude_data",
     "aluno_condicao_saude_status", "aluno_sangue_tipo", "aluno_sangue_rh", "vacina_atualizada"})
 MAX_DIGITS = 20
+FIRST_CEP = 1_000_000  # 01000-000: a shorter number is no CEP, however many zeros are put before it.
 MAX_ROWS = 10000
 MAX_XLSX_BYTES = 25 * 1024 * 1024
 MAX_PART_BYTES = 64 * 1024 * 1024
@@ -258,30 +259,50 @@ def _text(value):
 
 
 def _plain_text(value):
-    """A profile text: trimmed, inner spaces collapsed, empty as None; a number cell as its digits."""
+    """A profile text: trimmed, inner spaces collapsed, empty as None; a number cell as its digits.
+    One out of its shape (longer than the Ecossistema takes, not a text) is None, like every field
+    of the form: a long note in one cell must not hold back the whole school's report."""
     if isinstance(value, int):
         value = str(value)
     elif isinstance(value, float):
         value = repr(value)
-    elif value is not None and not isinstance(value, str):
-        raise ValueError("Formato de texto inválido no relatório.")
-    text = " ".join((value or "").split())
-    if len(text) > MAX_TEXT:
-        raise ValueError("Texto acima do limite no relatório.")
-    return text or None
+    elif not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    return text if 0 < len(text) <= MAX_TEXT else None
 
 
 def _only_digits(value):
     """The digits of a cell; an integral number cell written out in full (never 1.2E+10). A fraction
-    or a text with letters ("ISENTO", "1.2E+10", "não tem") is no document or phone number."""
+    or a text with letters or digits of another script ("ISENTO", "1.2E+10", "não tem", "１２３") is
+    no document or phone number: the Ecossistema takes 0-9 only."""
     text = "" if isinstance(value, float) else _plain_text(value) or ""
-    digits = re.sub(r"\D", "", text)
-    return digits if len(digits) <= MAX_DIGITS and not re.search(r"[^\W\d_]", text) else ""
+    digits = re.sub(r"[^0-9]", "", text)
+    return digits if len(digits) <= MAX_DIGITS and not re.search(r"[^\W_]", re.sub(r"[0-9]", "", text)) else ""
 
 
 def _padded(value, size):
     digits = _only_digits(value)
     return digits.zfill(size) if 0 < len(digits) <= size else None
+
+
+def _cpf(value):
+    """A CPF with its leading zeros back (a number cell loses them) and both check digits right. A
+    date or a phone typed in that field, padded, would be a document nobody has."""
+    digits = _padded(value, 11)
+    if digits is None or digits == digits[0] * 11:
+        return None
+    numbers = [int(digit) for digit in digits]
+    for size in (9, 10):
+        rest = sum(number * (size + 1 - index) for index, number in enumerate(numbers[:size])) % 11
+        if numbers[size] != (0 if rest < 2 else 11 - rest):
+            return None
+    return digits
+
+
+def _cep(value):
+    digits = _padded(value, 8)
+    return digits if digits and int(digits) >= FIRST_CEP else None
 
 
 def _flag(value):
@@ -294,7 +315,7 @@ def _degree(value):
     return value if type(value) is int and 1 <= value <= 4 else None
 
 
-PROFILE_READERS = {"text": _plain_text, "cpf": lambda value: _padded(value, 11), "cep": lambda value: _padded(value, 8),
+PROFILE_READERS = {"text": _plain_text, "cpf": _cpf, "cep": _cep,
                    "digits": lambda value: _only_digits(value) or None, "degree": _degree, "flag": _flag}
 
 

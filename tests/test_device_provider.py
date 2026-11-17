@@ -267,7 +267,10 @@ class DeviceProviderTests(unittest.TestCase):
                 connection = Mock()
                 connection.getresponse.return_value = reply
                 self.provider._transport = OfficialTransport(connection=lambda: connection)
-                with self.assertRaises(AccessDenied): self.provider.open_official_login()
+                with self.assertRaises(AccessDenied) as refused: self.provider.open_official_login()
+                # A gateway or server error is "no answer", retried; only a refusal asks for access again
+                # (17/11/2026: one 502 in the middle of a run was read as a revoked access and stopped it).
+                self.assertEqual(refused.exception.code, 'ACCESS_REQUIRED' if status == 403 else 'ACCESS_UNAVAILABLE')
                 self.assertEqual(self.provider._pending, old)
                 self.assertEqual(self.browser.call_count, 1)
                 connection.request.assert_called_once()
