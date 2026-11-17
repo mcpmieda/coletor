@@ -251,6 +251,33 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(waits, [updater.SAFE_RETRY_SECONDS, updater.SAFE_RETRY_SECONDS])
         self.assertEqual(len(self.launched), 1)
 
+    def test_a_version_that_came_out_while_another_waited_is_the_one_installed(self):
+        # Two fixes one after the other: it used to install the first and, two minutes after
+        # reopening, the second.
+        published = ['0.4.330']
+        answers = iter([False, True, True])  # Not yet; now, for the first; now, for the second.
+        item = self.make(safe=lambda: next(answers))
+        item._fetch = lambda url, limit=None: json.dumps(
+            release_for(manifest_for(published[0], self.raw)) if 'api.github.com' in url
+            else manifest_for(published[0], self.raw)).encode()
+        item._pause = lambda seconds: published.__setitem__(0, '0.4.331') or False  # Published meanwhile.
+        self.assertTrue(item.check_once())
+        self.assertEqual([p.name for p in self.launched], ['COLETOR-v0.4.331.exe'])
+        self.assertEqual([p.name for p in (self.settings / 'atualizacao').glob('*.exe')], ['COLETOR-v0.4.331.exe'])
+
+    def test_a_version_that_waited_is_installed_when_github_does_not_answer_the_second_look(self):
+        answers, looks = iter([False, True]), []
+        item = self.make(safe=lambda: next(answers))
+        fetch = item._fetch
+        def offline_later(url, limit=None):
+            looks.append(url)
+            if len(looks) > 2: raise updater.UpdateError('network')  # The manifest and the Release answered.
+            return fetch(url, limit)
+        item._fetch = offline_later
+        item._pause = lambda seconds: False
+        self.assertTrue(item.check_once())
+        self.assertEqual([p.name for p in self.launched], ['COLETOR-v0.4.330.exe'])
+
     def test_a_check_asked_for_in_ajustes_says_what_the_latest_version_is(self):
         self.assertEqual(self.make().check_now(), {'state': 'unavailable'})  # The updater never started here.
         current = self.make(latest='0.4.329')

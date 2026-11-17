@@ -4,6 +4,7 @@ No scheduled task, persistent browser profile or login is created here. An insta
 checks the repository's Releases and updates itself (updater.py).
 The trusted local UI is the only page ever loaded into the privileged webview.
 """
+import os
 import sys
 import threading
 from . import __version__
@@ -83,17 +84,31 @@ def quit_for_update(window, api, wait=EXIT_COLLECTION_WAIT, ready=None):
 
 
 def window_profile(directory):
-    """The folder of the window's browser profile: this Coletor's own, emptied at every opening.
+    """The folder of the window's browser profile: a new one at each opening, inside a temporary
+    folder that is this Coletor's alone, where what its earlier openings left is removed first.
 
-    Left to pywebview, private mode makes a new folder in %TEMP% each time and deletes it when the
-    window closes; when WebView2 was slow to leave, the folder stayed (63 of them, 73 MB, on one
-    computer since October 2026). pywebview still deletes this one at closing. None while what the
-    last opening left cannot be removed yet: pywebview then uses a temporary folder, as before."""
+    Left to pywebview, private mode makes the new folder loose in %TEMP% and deletes it when the
+    window closes; when WebView2 was slow to leave, the folder stayed there for good (62 of them on
+    one computer since October 2026). The parent is named after `directory` (one Coletor runs per
+    data folder, so nobody else's profile is ever there), never inside it: the data folder holds
+    settings only. Never the same folder twice: an opening right after a closing (an update) would
+    share it with the browser still leaving. None when the folder cannot be made: pywebview then
+    uses a temporary one of its own, as before."""
+    import hashlib
     import shutil
+    import tempfile
+    import uuid
     from pathlib import Path
-    folder = Path(directory) / "janela"
-    shutil.rmtree(folder, ignore_errors=True)
-    return None if folder.exists() else str(folder)
+    owner = hashlib.sha256(str(Path(directory).resolve()).lower().encode("utf-8")).hexdigest()[:16]
+    parent = Path(tempfile.gettempdir()) / f"coletor-janela-{owner}"
+    try:
+        if parent.is_symlink() or parent.is_junction(): return None
+        shutil.rmtree(parent, ignore_errors=True)  # All but what a browser still leaving holds.
+        profile = parent / uuid.uuid4().hex
+        profile.mkdir(parents=True)
+    except OSError:
+        return None
+    return str(profile)
 
 
 def run_desktop(callback=None, settings_directory=None, *, access=None, background=False):
@@ -159,9 +174,14 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
         if callback: callback(window)
 
     try:
+        profile = window_profile(directory)
         webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True,
-                      storage_path=window_profile(directory))
+                      storage_path=profile)
     finally:
+        # pywebview deleted the profile when the window closed: its parent goes too, once empty.
+        try:
+            if profile: os.rmdir(os.path.dirname(profile))
+        except OSError: pass
         updater.stop()
         try:
             api._collector.shutdown()

@@ -30,26 +30,33 @@ class NativeWindowGeometryTests(unittest.TestCase):
 
 
 class WindowProfileTests(unittest.TestCase):
-    def test_the_window_profile_is_one_folder_of_the_coletor_emptied_at_every_opening(self):
+    def test_the_window_profile_is_a_new_folder_of_the_coletor_and_earlier_ones_are_removed(self):
         # pywebview's private mode left a folder in %TEMP% at each closing WebView2 was slow to leave.
-        with tempfile.TemporaryDirectory() as directory:
-            left = Path(directory) / "janela" / "EBWebView" / "Default"
-            left.mkdir(parents=True)
-            (left / "Cookies").write_bytes(b"left by the last opening")
-            (Path(directory) / "collector-history.jsonl").write_text("kept", encoding="utf-8")
-            profile = window_profile(directory)
-            self.assertEqual(Path(profile), Path(directory) / "janela")
-            self.assertFalse(Path(profile).exists())  # pywebview creates it, empty.
-            self.assertEqual([p.name for p in Path(directory).iterdir()], ["collector-history.jsonl"])
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as temporary,                 patch("tempfile.gettempdir", return_value=temporary):
+            (Path(directory) / "settings.json").write_text("kept", encoding="utf-8")
+            first = Path(window_profile(directory))
+            (first / "EBWebView" / "Default").mkdir(parents=True)
+            (first / "EBWebView" / "Default" / "Cookies").write_bytes(b"left by the last opening")
+            second = Path(window_profile(directory))
+            self.assertEqual(first.parent, second.parent)
+            self.assertEqual(first.parent.parent, Path(temporary))
+            self.assertNotEqual(first, second)  # Never shared with a browser still leaving.
+            self.assertEqual([p.name for p in second.parent.iterdir()], [second.name])
+            self.assertEqual(list(second.iterdir()), [])
+            # The data folder holds settings only, and another Coletor (another data folder) has its own.
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["settings.json"])
+            with tempfile.TemporaryDirectory() as other:
+                self.assertNotEqual(Path(window_profile(other)).parent, second.parent)
+                self.assertTrue(second.is_dir())
 
     @unittest.skipUnless(__import__("os").name == "nt", "Windows keeps an open file from being deleted")
-    def test_a_profile_still_held_is_left_alone_and_a_temporary_one_is_used(self):
-        with tempfile.TemporaryDirectory() as directory:
-            held = Path(directory) / "janela" / "EBWebView" / "lockfile"
-            held.parent.mkdir(parents=True)
-            with held.open("wb"):
-                self.assertIsNone(window_profile(directory))
-            self.assertIsNotNone(window_profile(directory))
+    def test_a_profile_still_held_stays_until_a_later_opening_and_never_stops_this_one(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as temporary,                 patch("tempfile.gettempdir", return_value=temporary):
+            leaving = Path(window_profile(directory))
+            with (leaving / "lockfile").open("wb"):
+                opened = Path(window_profile(directory))
+                self.assertTrue(leaving.exists() and opened.is_dir() and opened != leaving)
+            self.assertEqual([p.name for p in Path(window_profile(directory)).parent.iterdir() if p.name == leaving.name], [])
 
 
 class DesktopStateTests(unittest.TestCase):
