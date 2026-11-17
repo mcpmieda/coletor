@@ -59,6 +59,8 @@ function loginFailureMessage(code?: string): string {
 /** Answers that revoke nothing (no connection, a wrong Windows clock): the Coletor tries again by
  *  itself, so an open panel stays. Signing in again would pair this computer a second time. */
 export const accessRetried = (code?: string) => code === 'ACCESS_UNAVAILABLE' || code === 'CLOCK_OUT_OF_SYNC';
+/** How often a pending authorization request is asked about (a request lasts ten minutes). */
+export const PAIRING_POLL_MS = 3000;
 export default function InstitutionalAccess() {
   const [authorized, setAuthorized] = useState(false), [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
@@ -111,7 +113,7 @@ export default function InstitutionalAccess() {
           : result.code === 'ACCESS_CLEANUP_PENDING' ? 'A limpeza anterior ainda não terminou. Use Entrar no Ecossistema para repetir a verificação segura.'
           : result.code === 'SERVER_REVOCATION_PENDING' ? 'A revogação do dispositivo anterior ainda precisa ser confirmada no Ecossistema.'
           : result.code === 'CLOCK_OUT_OF_SYNC' ? COLLECTOR_CODES.CLOCK_OUT_OF_SYNC
-          : result.pairingCode ? 'Pedido iniciado. Confira o código e continue no navegador.'
+          : result.pairingCode ? 'Pedido iniciado. No navegador, confira o código e clique em Autorizar este computador.'
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
     } catch (error) {
@@ -141,6 +143,13 @@ export default function InstitutionalAccess() {
     return () => { mounted.current = false; epoch.current++; clearInterval(timer); stopVisibility();
       window.removeEventListener('focus', focus); window.removeEventListener('online', focus); window.removeEventListener('coletoraccesschanged', focus); };
   }, [recheck]);
+  // A request waiting for the click in the browser is asked about often, shown or not: the panel
+  // opens by itself a moment after "Autorizar este computador", with nothing to press here.
+  useEffect(() => {
+    if (!pairingCode) return;
+    const timer = setInterval(() => { void recheck(); }, PAIRING_POLL_MS);
+    return () => clearInterval(timer);
+  }, [pairingCode, recheck]);
   async function login() {
     if (operation.current) return;
     operation.current = true; epoch.current++; loginFailure.current = null;
@@ -151,7 +160,7 @@ export default function InstitutionalAccess() {
         loginFailure.current = loginFailureMessage(result.code);
         setNotice(loginFailure.current);
       } else {
-        setNotice('Pedido preparado. Confira o navegador e o código mostrado abaixo.');
+        setNotice('Pedido preparado. No navegador, confira o código e clique em Autorizar este computador.');
       }
     } catch {
       // Never copy potentially sensitive native exceptions into the DOM.
@@ -226,6 +235,6 @@ export default function InstitutionalAccess() {
     {recoveryPanel()}
     {recoveryNotice && <p role="alert">{recoveryNotice}</p>}
     {notice && <p role="status">{notice}</p>}<p className="muted">O login é feito no navegador. Não informe sua senha neste programa.</p>
-    {pairingCode && <p role="status">Digite este código no navegador: <strong>{pairingCode}</strong></p>}
+    {pairingCode && <p role="status">O navegador deve mostrar este mesmo código: <strong>{pairingCode}</strong></p>}
   </section></main>;
 }
