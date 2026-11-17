@@ -1,7 +1,6 @@
 // Small building blocks on HeroUI v3, the same ones the Atualizador de Planilhas uses.
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Button, Chip, Input, Label, NumberField, Switch, TextField, Tooltip } from '@heroui/react';
-import { I18nProvider, TimeField } from '@heroui/react';
+import { Button, Chip, Input, Label, NumberField, Switch, TextField, TimeField, Tooltip } from '@heroui/react';
 import { parseTime } from '@internationalized/date';
 
 type Tone = 'default' | 'success' | 'warning' | 'danger' | 'accent';
@@ -92,8 +91,7 @@ export function TimeInput({ label, value, onChange }: Readonly<{ label: string; 
   useEffect(inspect, [value, report, id, reset]);
   useEffect(() => () => report?.(id, false), [report, id]);
   return (
-    <I18nProvider locale="pt-BR">
-      <div ref={field} className="w-full" onInputCapture={afterEdit} onKeyUpCapture={afterEdit} onBlurCapture={afterEdit}>
+    <div ref={field} className="w-full" onInputCapture={afterEdit} onKeyUpCapture={afterEdit} onBlurCapture={afterEdit}>
       <TimeField key={reset} defaultValue={value ? safeTime(value) : null} hourCycle={24} className="w-full"
         onChange={t => {
           const next = t ? `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}` : '';
@@ -102,8 +100,7 @@ export function TimeInput({ label, value, onChange }: Readonly<{ label: string; 
         <Label>{label}</Label>
         <TimeField.Group fullWidth><TimeField.Input>{segment => <TimeField.Segment segment={segment} />}</TimeField.Input></TimeField.Group>
       </TimeField>
-      </div>
-    </I18nProvider>
+    </div>
   );
 }
 

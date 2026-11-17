@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react';
 import { LogIn } from 'lucide-react';
 import { bridgeReady, nativeApi } from '../api';
+import { COLLECTOR_CODES } from '../collector';
 import { onWindowVisibility, windowVisible } from '../desktop';
 import { initializeLocalSettings } from '../localSettings';
 import { paintTheme, readTheme } from '../theme';
@@ -48,12 +49,16 @@ function loginFailureMessage(code?: string): string {
     CANCELLED: 'Outra operação está em andamento. Aguarde antes de iniciar a autorização.',
     ACCESS_REQUIRED: 'O Coletor não conseguiu iniciar a autorização. Verifique o acesso do dispositivo.',
     INVALID_ACCESS_RESPONSE: 'O servidor retornou uma resposta inválida de autorização.',
+    CLOCK_OUT_OF_SYNC: COLLECTOR_CODES.CLOCK_OUT_OF_SYNC,
   };
   const key = typeof code === 'string' && Object.hasOwn(messages, code) ? code : undefined;
   return key
     ? messages[key] + ' Código: ' + key + '.'
     : 'Não foi possível iniciar a autorização. Se persistir, solicite suporte.';
 }
+/** Answers that revoke nothing (no connection, a wrong Windows clock): the Coletor tries again by
+ *  itself, so an open panel stays. Signing in again would pair this computer a second time. */
+export const accessRetried = (code?: string) => code === 'ACCESS_UNAVAILABLE' || code === 'CLOCK_OUT_OF_SYNC';
 export default function InstitutionalAccess() {
   const [authorized, setAuthorized] = useState(false), [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('Verificando o acesso deste computador.');
@@ -63,6 +68,8 @@ export default function InstitutionalAccess() {
   // Live-confirmed access (the panel may already show from the local summary).
   const [verified, setVerified] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState('');
+  // The access check itself refused this computer's clock: said over the panel until it is right again.
+  const [clockWrong, setClockWrong] = useState(false);
   const mounted = useRef(false), epoch = useRef(0), checking = useRef<number | null>(null), operation = useRef(false);
   const previouslyAuthorized = useRef(false);
   // Polling must not erase the result of a direct user-initiated login action.
@@ -78,6 +85,7 @@ export default function InstitutionalAccess() {
       setRecovery(local);
       setPairingCode(typeof result.pairingCode === 'string' && /^[0-9]{6}$/.test(result.pairingCode) ? result.pairingCode : '');
       setCleanupPending(result.code === 'SERVER_REVOCATION_PENDING');
+      setClockWrong(result.code === 'CLOCK_OUT_OF_SYNC');
       if (result.authenticated === true && result.authorized === true) {
         if (!previouslyAuthorized.current) {
           await initializeLocalSettings();
@@ -91,10 +99,10 @@ export default function InstitutionalAccess() {
           previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); setNotice('O acesso foi encerrado. Entre novamente no Ecossistema.'); return;
         }
         previouslyAuthorized.current = true; loginFailure.current = null; setAuthorized(true); setVerified(true); setNotice('');
-      } else if (result.code === 'ACCESS_UNAVAILABLE' && (optimistic.current || previouslyAuthorized.current)) {
-        // No connection, at opening or after the access was confirmed: keep the panel (from the
-        // local summary or as it is); the collector itself retries and never works without live
-        // access. Any other answer is a real loss of access and falls to the entry screen below.
+      } else if (accessRetried(result.code) && (optimistic.current || previouslyAuthorized.current)) {
+        // No connection or a wrong clock, at opening or after the access was confirmed: keep the
+        // panel (from the local summary or as it is); the collector itself retries and never works
+        // without live access. Any other answer is a real loss of access and falls to the entry screen below.
         setNotice('');
       } else {
         previouslyAuthorized.current = false; setAuthorized(false); setVerified(false); optimistic.current = false;
@@ -102,6 +110,7 @@ export default function InstitutionalAccess() {
           ? 'A configuração do acesso ainda não foi concluída.'
           : result.code === 'ACCESS_CLEANUP_PENDING' ? 'A limpeza anterior ainda não terminou. Use Entrar no Ecossistema para repetir a verificação segura.'
           : result.code === 'SERVER_REVOCATION_PENDING' ? 'A revogação do dispositivo anterior ainda precisa ser confirmada no Ecossistema.'
+          : result.code === 'CLOCK_OUT_OF_SYNC' ? COLLECTOR_CODES.CLOCK_OUT_OF_SYNC
           : result.pairingCode ? 'Pedido iniciado. Confira o código e continue no navegador.'
           : 'Entre no Ecossistema para usar o coletor neste computador.');
       }
@@ -207,7 +216,7 @@ export default function InstitutionalAccess() {
   // Authorized: the collector reconciles, supersedes or sets aside the local
   // queue by itself. Only a queue still unreadable after it was opened with
   // the live access (bound) asks a person.
-  if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && recovery.bound !== false && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}<DesktopApp /></>;
+  if (authorized) return <>{verified && recovery?.pending && recovery.unreadable && recovery.bound !== false && <div className="p-4">{recoveryPanel()}</div>}{recoveryNotice && <p role="alert" className="p-4">{recoveryNotice}</p>}{clockWrong && <p role="alert" className="p-4">{COLLECTOR_CODES.CLOCK_OUT_OF_SYNC}</p>}<DesktopApp /></>;
   return <main className="institutional-entry"><section className="panel" aria-labelledby="institutional-title">
     <img src="./mascot/head.png" width="52" height="52" alt="" />
     <h1 id="institutional-title">Entrar no Ecossistema</h1><p>Autorize este computador para usar o Coletor.</p>

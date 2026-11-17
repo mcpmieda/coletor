@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { failures24h, fmtCountdown, fmtDate, fmtDuration, groupRuns, logEvents, runSummary } from './runs';
 import type { HistoryEntry } from '../collector';
+import manualSession from '../../../app/coletor/manual_session.py?raw';
 
 const history: HistoryEntry[] = [
   { at: 100, kind: 'collection-started', sent: 3 },
@@ -38,6 +39,10 @@ test('durations and countdowns', () => {
   expect(fmtCountdown(new Date(90_000), 0)).toBe('1:30');
   expect(fmtCountdown(new Date(3_900_000), 0)).toBe('1 h 05 min');
   expect(fmtCountdown(null)).toBe('—');
+  // A day or more away: the weekday and the time, in the computer's own zone.
+  const monday = new Date(3 * 86_400_000 + 7 * 3_600_000);
+  expect(fmtCountdown(monday, 0)).toBe(monday.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
+  expect(fmtCountdown(monday, 0)).toMatch(/^\D+\d{2}:\d{2}$/);
 });
 
 test('a paused run is closed as stopped and is not a failure', () => {
@@ -154,6 +159,16 @@ test('each failure says what exactly happened (owner request 05/11/2026)', () =>
   expect(at(702).detail).toBe('Ocorrências · O Smecel pediu para entrar de novo (a sessão expirou).');
   // Older entries without a reason keep the general cause.
   expect(at(703).detail).toBe('O Smecel demorou ou falhou ao abrir um diário.');
+});
+
+test('every reason the Coletor can give has its own words, the browser still closing included', () => {
+  const detail = (reason: string) => logEvents([{ at: 1, kind: 'class-failed', code: 'SOURCE_READ_FAILED', label: '6A', reason }])[0].detail;
+  expect(detail('browser-closing')).toBe('O navegador da coleta anterior ainda estava fechando; a leitura é tentada de novo no próximo horário.');
+  // The list is the backend's own (REASONS in manual_session.py): a new one never falls to the general cause unnoticed.
+  const reasons = [.../REASONS = \{([^}]+)\}/.exec(manualSession)![1].matchAll(/"([a-z-]+)"/g)].map(match => match[1]);
+  expect(reasons).toContain('browser-closing');
+  expect(reasons.length).toBeGreaterThan(10);
+  for (const reason of reasons) expect(detail(reason), reason).not.toBe('O Smecel demorou ou falhou ao abrir um diário.');
 });
 
 test('a grid or incidents failure is a failed step, and the run goes on to its own end', () => {

@@ -5,6 +5,7 @@ import { useDesktopTray, useNow } from '../desktop';
 import { usePaintedTheme } from '../theme';
 import FoxPet from './FoxPet';
 import type { FoxMood } from './foxPhrases';
+import { notify } from './foxSay';
 import { HistoryPage, LogsPage } from './HistoryPages';
 import { failures24h, groupRuns, type Run } from './runs';
 import SettingsPage from './SettingsPage';
@@ -94,13 +95,14 @@ export default function DesktopApp() {
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between px-8 pb-4 pt-6">
           <h1 className="text-2xl font-semibold">{title}</h1>
-          {tray.available && <Button size="sm" variant="secondary" onPress={() => { void tray.hide(); }}><Minimize2 size={14} /> Ocultar na bandeja</Button>}
+          {/* A refusal is told by the fox: the window stayed open and nothing else would say why. */}
+          {tray.available && <Button size="sm" variant="secondary" onPress={() => { void tray.hide().then(problem => { if (problem) notify.danger(problem); }); }}><Minimize2 size={14} /> Ocultar na bandeja</Button>}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
           {page === 'tasks' && <TasksPage state={state} errors24h={errors24h} onOpenSettings={() => setPage('settings')} />}
           {page === 'history' && <HistoryPage history={state.history} inProgress={state.inProgress} />}
-          {page === 'logs' && <LogsPage history={state.history} error={state.error} onRetry={() => { void state.refresh(); }} />}
-          {page === 'settings' && <SettingsPage state={state} />}
+          {page === 'logs' && <LogsPage history={state.history} error={state.error} onRetry={state.refresh} />}
+          {page === 'settings' && <SettingsPage state={state} tray={tray} />}
         </div>
       </main>
     </div>

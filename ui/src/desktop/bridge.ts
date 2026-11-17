@@ -38,7 +38,6 @@ interface Native {
   save_classes_mode(mode: 'all' | 'chosen'): Promise<{ settings: Preferences } | Failure>;
   save_notifications(show: boolean): Promise<{ settings: Preferences } | Failure>;
   save_theme(theme: ThemeMode): Promise<{ settings: Preferences } | Failure>;
-  get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean; autostart?: boolean }>;
   logout_institutional_access(): Promise<{ ok: true } | Failure>;
 }
 

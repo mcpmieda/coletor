@@ -21,7 +21,7 @@ export function useNow(ms: number): number {
   return now;
 }
 export interface TrayBridge {
-  get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean } | { error: string }>;
+  get_desktop_status(): Promise<{ tray_available: boolean; automatic_collection: boolean; autostart?: boolean } | { error: string }>;
   hide_window(): Promise<{ hidden: true } | { error: string }>;
   set_tray_context(activity: DesktopActivity, reducedMotion: boolean): Promise<{ ok: true } | { error: string }>;
 }
@@ -31,8 +31,15 @@ export function syncTrayContext(api: TrayBridge, activity: DesktopActivity, redu
   contextQueue = pending.then(() => {}, () => {});
   return pending;
 }
+/** Asks the tray to hide the window; resolves to what went wrong, when it did not. */
+export async function hideInTray(api: Pick<TrayBridge, 'hide_window'>): Promise<string | undefined> {
+  try { const result = await api.hide_window(); return 'error' in result ? result.error : undefined; }
+  catch { return 'Não foi possível ocultar a janela.'; }
+}
 export function useDesktopTray(activity: DesktopActivity) {
   const [available, setAvailable] = useState(false);
+  // Whether the Coletor opens with Windows (the installer's logon task): the same answer brings it.
+  const [autostart, setAutostart] = useState(false);
   const [notice, setNotice] = useState('');
   useEffect(() => {
     const api = window.pywebview?.api;
@@ -46,7 +53,7 @@ export function useDesktopTray(activity: DesktopActivity) {
       void api.get_desktop_status!().then(s => {
         if (!alive) return;
         if ('error' in s) { again(); return; }
-        setAvailable(s.tray_available); setNotice(s.tray_available ? '' : 'Bandeja indisponível. Você pode fechar a janela normalmente.');
+        setAvailable(s.tray_available); setAutostart(s.autostart === true); setNotice(s.tray_available ? '' : 'Bandeja indisponível. Você pode fechar a janela normalmente.');
       }).catch(() => { if (alive) setNotice('Não foi possível verificar a bandeja.'); });
     };
     window.addEventListener('coletortrayready', read); read();
@@ -71,9 +78,10 @@ export function useDesktopTray(activity: DesktopActivity) {
   }, [activity]);
   async function hide() {
     const api = window.pywebview?.api;
-    if (!available || !api?.hide_window) return;
-    try { const result = await api.hide_window(); if ('error' in result) setNotice(result.error); }
-    catch { setNotice('Não foi possível ocultar a janela.'); }
+    if (!available || !api?.hide_window) return undefined;
+    const problem = await hideInTray(api as TrayBridge);
+    if (problem) setNotice(problem);
+    return problem;
   }
-  return { available, notice, hide };
+  return { available, autostart, notice, hide };
 }

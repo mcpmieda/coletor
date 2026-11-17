@@ -4,7 +4,7 @@ import { notify } from './foxSay';
 import { CheckCircle2, KeyRound, ListChecks, LogOut, Monitor, Moon, Sun, Trash2, XCircle } from 'lucide-react';
 import ManualSource from '../components/ManualSource';
 import { paintTheme, type ThemeMode } from '../theme';
-import { call, native, type Preferences, type Status } from './bridge';
+import { call, type Preferences, type Status } from './bridge';
 import { closeProblem, type ManualCloseResult } from './manualClose';
 import { SwitchRow, TextInput } from './ui';
 import type { ColetorState } from './useColetor';
@@ -19,20 +19,14 @@ function Check({ ok, label, detail }: Readonly<{ ok: boolean; label: string; det
   );
 }
 
-export default function SettingsPage({ state }: Readonly<{ state: ColetorState }>) {
+/** tray: what the window already read for its "Ocultar na bandeja" button. Asking again here cost,
+ *  every 10 s while Ajustes was open, two access checks in the Ecossistema and a schtasks process. */
+export default function SettingsPage({ state, tray }: Readonly<{ state: ColetorState; tray: { available: boolean; autostart: boolean } }>) {
   const { status, prefs, setStatus, setPrefs, refresh } = state;
-  const [desktop, setDesktop] = useState<{ tray_available: boolean; autostart?: boolean } | null>(null);
   const [email, setEmail] = useState(''), [password, setPassword] = useState('');
   const [changing, setChanging] = useState(false), [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState(false), [leaving, setLeaving] = useState(false), [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState(''), closingRef = useRef(false);
-  useEffect(() => {
-    // Protected call: retried until the live access check has finished.
-    const read = () => { void native()?.get_desktop_status().then(r => { if (r && !('error' in r)) setDesktop(r); }).catch(() => undefined); };
-    read();
-    const timer = setInterval(read, 10_000);
-    return () => clearInterval(timer);
-  }, []);
   // The tray menu changes preferences too: read again when Ajustes opens, unless one was saved here meanwhile.
   const prefSaved = useRef(false);
   useEffect(() => {
@@ -41,11 +35,12 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
   const saved = status?.credential?.saved === true;
   const mode = prefs?.classes.mode ?? status?.classesMode ?? 'all';
 
+  /** Resolves to whether the work was done (false: another one was going on, or it failed and the fox said so). */
   async function run<T>(work: Parameters<typeof call<T>>[0], done?: (value: T) => void, message?: string) {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true);
-    try { const value = await call(work); done?.(value); if (message) notify.success(message); }
-    catch (e) { notify.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); }
+    try { const value = await call(work); done?.(value); if (message) notify.success(message); return true; }
+    catch (e) { notify.danger(e instanceof Error ? e.message : 'Não foi possível concluir.'); return false; }
     finally { setBusy(false); }
   }
   // Closing the choice ends the Smecel session it opened (and resumes collection).
@@ -120,8 +115,8 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
         </Card.Header>
         <Card.Content className="flex flex-col">
           <Check ok={!!status?.active} label={status?.active ? 'Coleta automática ativa' : 'Coleta automática desligada'} />
-          <Check ok={!!desktop?.autostart} label="Inicia sozinho ao entrar no Windows" />
-          <Check ok={!!desktop?.tray_available} label="Ícone perto do relógio" />
+          <Check ok={tray.autostart} label="Inicia sozinho ao entrar no Windows" />
+          <Check ok={tray.available} label="Ícone perto do relógio" />
           <div className="mt-2 flex flex-col divide-y divide-separator border-t border-separator pt-1">
             <SwitchRow label="Mostrar o navegador durante a coleta" hint="Desligado, o Smecel é lido sem abrir janelas. Sem acesso salvo, a janela aparece para você entrar."
               value={prefs?.browser.visible ?? false} isDisabled={!prefs} onChange={v => { void pref(api => api.save_browser_preference(v)); }} />
@@ -139,8 +134,10 @@ export default function SettingsPage({ state }: Readonly<{ state: ColetorState }
           <Card.Description>Automático acompanha o tema do Windows.</Card.Description>
         </Card.Header>
         <Card.Footer>
+          {/* Shown at once (saving asks the Ecossistema first) and put back when it was not saved. */}
           <ToggleButtonGroup size="sm" selectionMode="single" disallowEmptySelection selectedKeys={[prefs?.theme ?? 'system']}
-            onSelectionChange={k => { const m = String([...k][0]) as ThemeMode; if (m === (prefs?.theme ?? 'system')) return; paintTheme(m); void pref(api => api.save_theme(m)); }}>
+            onSelectionChange={k => { const m = String([...k][0]) as ThemeMode, kept = prefs?.theme ?? 'system'; if (m === kept) return;
+              paintTheme(m); void pref(api => api.save_theme(m)).then(done => { if (!done) paintTheme(kept); }); }}>
             <ToggleButton id="system"><Monitor size={14} /> Automático</ToggleButton>
             <ToggleButton id="light"><Sun size={14} /> Claro</ToggleButton>
             <ToggleButton id="dark"><Moon size={14} /> Escuro</ToggleButton>

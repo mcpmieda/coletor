@@ -184,6 +184,7 @@ const REASON_TEXT: Record<string, string> = {
   'session-reset': 'A lista de turmas da sessão foi perdida depois de uma falha anterior.',
   'list-reload-failed': 'Depois da falha, a lista de turmas do Smecel também não abriu: o Smecel parece fora do ar.',
   'two-in-a-row': 'Dois diários seguidos não abriram: o Smecel parece fora do ar.',
+  'browser-closing': 'O navegador da coleta anterior ainda estava fechando; a leitura é tentada de novo no próximo horário.',
 };
 
 /** The specific cause when the collector knows it, else the general one of the code. */
@@ -263,10 +264,12 @@ export function fmtDuration(start: number, end: number | null): string {
   const seconds = Math.max(0, Math.round(end - start));
   return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
 }
+// Built once: over a weekend both countdowns of Tarefas show a day and ask for it every second.
+const WEEKDAY_TIME = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 export function fmtCountdown(target: Date | null, nowMs = Date.now()): string {
   if (!target) return '—';
   const s = Math.max(0, Math.round((target.getTime() - nowMs) / 1000));
-  if (s >= 3600 * 24) return target.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  if (s >= 3600 * 24) return WEEKDAY_TIME.format(target);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m}:${String(sec).padStart(2, '0')}`;
 }

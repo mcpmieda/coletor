@@ -28,3 +28,14 @@ test('no toast is left in the window: every page speaks through the fox', () => 
   expect(foxPet).toContain('onNotice(');
   expect(foxPet).toContain('role="status"');
 });
+
+test('a refused "Ocultar na bandeja" is told by the fox, never silent', () => {
+  expect(desktopApp).toContain('tray.hide().then(problem => { if (problem) notify.danger(problem); })');
+});
+
+test('Ajustes asks the Coletor nothing on a timer and puts back a theme that was not saved', () => {
+  // The tray answer comes from the window; each question costs access checks and a schtasks process.
+  expect(settingsPage).not.toMatch(/setInterval|get_desktop_status/);
+  expect(desktopApp).toContain('<SettingsPage state={state} tray={tray} />');
+  expect(settingsPage).toContain('paintTheme(m); void pref(api => api.save_theme(m)).then(done => { if (!done) paintTheme(kept); })');
+});

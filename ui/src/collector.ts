@@ -42,6 +42,8 @@ export interface HistoryEntry {
   reason?: string; readMs?: number; sendMs?: number;
 }
 interface IncidentNotice { name: string; classLabel: string; incident: string; reason: string; sent: boolean }
+/** How many events the Coletor keeps in its local history (MAX_ENTRIES in app/coletor/history.py). */
+export const HISTORY_LIMIT = 2000;
 export const COLLECTOR_CODES: Record<string, string> = {
   'lease-busy': 'Outro computador está coletando. Este fica de reserva.',
   'lease-fenced': 'A coleta foi interrompida no meio (conexão lenta ou outro computador). A próxima continua sozinha.',

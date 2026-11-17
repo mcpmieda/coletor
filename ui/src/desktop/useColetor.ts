@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HistoryEntry } from '../collector';
+import { HISTORY_LIMIT, type HistoryEntry } from '../collector';
 import { onWindowVisibility, windowVisible } from '../desktop';
 import { call, native, type Preferences, type Status } from './bridge';
 
@@ -19,6 +19,10 @@ export interface ColetorState {
   setStatus: (status: Status) => void;
   setPrefs: (prefs: Preferences) => void;
 }
+
+/** Whether a collection and a report reading are going on, by a status: the live one or the opening summary. */
+export const inProgressOf = (status: Partial<Status> | null) =>
+  ({ run: status?.state === 'collecting' || status?.preparing === true, report: status?.report?.running === true });
 
 /** Opens from the local snapshot at once, then keeps the live status fresh. */
 export function useColetor(): ColetorState {
@@ -51,13 +55,13 @@ export function useColetor(): ColetorState {
       if (stamp.current === started) setLiveStatus(live);
       setCached(false); setError('');
       if (recent) {
-        const run = live.state === 'collecting' || live.preparing === true, report = live.report?.running === true;
+        const { run, report } = inProgressOf(live);
         setInProgress(current => (current.run === run && current.report === report ? current : { run, report }));
         // Only what is new since the last poll; the same array when nothing is.
         const fresh = after === null ? recent.entries : recent.entries.filter(e => e.at > after);
         if (fresh.length || after === null) {
           newest.current = Math.max(after ?? 0, ...fresh.map(e => e.at));
-          setHistory(current => (after === null ? fresh : [...fresh, ...current].slice(0, 2000)));
+          setHistory(current => (after === null ? fresh : [...fresh, ...current].slice(0, HISTORY_LIMIT)));
         }
       }
     } catch (e) {
@@ -76,6 +80,9 @@ export function useColetor(): ColetorState {
       void api.get_startup_snapshot().then(snapshot => {
         if (!mounted.current) return;
         if (snapshot.status) setLiveStatus(current => current ?? (snapshot.status as Status));
+        // A history that comes with the summary is read by the summary's own status, until a poll
+        // brings both: a run going on at opening is not shown as cut before its end.
+        if (newest.current === null) setInProgress(inProgressOf(snapshot.status));
         setHistory(current => (current.length ? current : snapshot.history));
         setPrefs(current => current ?? snapshot.settings);
         setVersion(snapshot.version);

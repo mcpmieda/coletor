@@ -74,7 +74,7 @@ export default function App() {
   function clear() { operation.current++; setPreview(null); setError(''); if (fileRef.current) fileRef.current.value = ''; }
   function importFile(file?: File) {
     if (!file || running.current) return;
-    if (file.size > limits.htmlBytes) { clear(); setError(`Arquivo com ${(file.size / 1048576).toFixed(1)} MiB; escolha um arquivo de até 24 MiB.`); return; }
+    if (file.size > limits.htmlBytes) { clear(); setError(`Arquivo com ${(file.size / 1048576).toFixed(1)} MiB; escolha um arquivo de até ${limits.htmlBytes / 1048576} MiB.`); return; }
     if (!classId.trim() || !/^\d{4}$/.test(year)) { setError('Preencha o código da turma e o ano com quatro números.'); return; }
     void run(async signal => previewHtml(await file.text(), classId, Number(year), signal));
   }
