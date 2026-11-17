@@ -48,6 +48,11 @@ class StorageError(ValueError):
         super().__init__(code)
 
 
+class Unopenable(StorageError):
+    """The file is there and whole, and Windows does not open it for the live binding: saved by
+    another authorization (device or generation), or damaged."""
+
+
 def windows_question(message, title):
     """A Yes/No question from Windows itself, "No" by default, in front of every window: with no
     owner window it used to open behind the others, and the Coletor sat waiting for an answer
@@ -194,10 +199,17 @@ class ProtectedStorage:
         try:
             value = json.loads(self._crypto.unprotect(raw[5:], self._entropy(purpose, scope)))
             if not isinstance(value, dict) or value.get('version') != 2 or value.get('binding') != scope:
-                raise StorageError()
+                raise Unopenable()
             return value['value']
-        except StorageError: raise
-        except Exception: raise StorageError() from None
+        except Exception: raise Unopenable() from None
+
+    def _protects_now(self, purpose):
+        """Windows protection answers for this purpose right now (it can fail for a moment at
+        logon): a round trip of nothing secret. Without a live binding nothing can be judged."""
+        try:
+            entropy = self._entropy(purpose, self._scope(purpose))
+            return self._crypto.unprotect(self._crypto.protect(b'probe', entropy), entropy) == b'probe'
+        except Exception: return False
 
     @staticmethod
     def _limit(purpose):
@@ -242,8 +254,16 @@ class ProtectedStorage:
             raise StorageError()
 
     def load_session(self):
+        """The saved Smecel session, or None when there is none. One an earlier authorization
+        saved (another device or generation) does not open and is no session either: the Coletor
+        signs in with the saved login and saves a new one over it, or asks a person to sign in.
+        Left as an error, it stopped every run until someone signed in by hand (17/11/2026). While
+        Windows protection itself does not answer, the error stands and the next time tries again."""
         with self._lock:
-            state = self._read('session')
+            try: state = self._read('session')
+            except Unopenable:
+                if not self._protects_now('session'): raise
+                return None
             if state is not None: self._check_session(state)
             return state
 
@@ -251,7 +271,7 @@ class ProtectedStorage:
         with self._lock:
             self._check_session(state)
             self._write('session', state)
-            self.load_session()  # What was written reads back: the disk copy too.
+            self._check_session(self._read('session'))  # What was written reads back: the disk copy too.
 
     def queue(self):
         with self._lock:

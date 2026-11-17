@@ -46,4 +46,6 @@ Desde 17/11/2026 (decisão do responsável), o acesso Smecel salvo e a resposta
 dispositivo e a geração na entropia: continuam abrindo depois de uma autorização
 nova. Cancelar o acesso de um computador pelo servidor não apaga mais o login do
 Smecel guardado nele; isso só acontece em Sair da conta ou na remoção segura.
-Sessão do Smecel, fila e cópias continuam presas ao dispositivo e à geração.
+Sessão do Smecel, fila e cópias continuam presas ao dispositivo e à geração. Uma sessão
+salva por uma autorização anterior não abre e vale como ausente: o Coletor entra
+com o login salvo e grava outra por cima; a fila mantém a regra de quarentena.

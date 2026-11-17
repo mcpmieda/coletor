@@ -239,7 +239,7 @@ class ProtectedLoginTests(unittest.TestCase):
         self.storage.save_session({'cookies': [], 'origins': []})
         self.storage.save_copy('schedule', {'synthetic': True})
         other = self.reopened(NEW_DEVICE, 1)
-        with self.assertRaises(StorageError): other.load_session()
+        self.assertIsNone(other.load_session())  # Not this device's: no session, never another's.
         self.assertIsNone(other.load_copy('schedule'))
         self.storage.bind(NEW_DEVICE, 1)
         self.assertFalse((self.storage.directory / 'session.dpapi').exists())
@@ -250,6 +250,60 @@ class ProtectedLoginTests(unittest.TestCase):
         for email, password in (('sem-arroba', 'x'), ('a@b.c', ''), ('a @b.c', 'x'), ('a@b.c', 'x' * 257)):
             with self.subTest(email=email), self.assertRaises(StorageError):
                 self.storage.save_credential(email, password)
+
+    def test_session_of_an_earlier_authorization_is_no_session_and_is_saved_over(self):
+        # 17/11/2026: the old session.dpapi stayed on disk after a new authorization with the
+        # program reopened, did not open, and every run stopped with a storage error.
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        path = self.storage.directory / 'session.dpapi'
+        stale = path.read_bytes()
+        reopened = self.reopened(NEW_DEVICE, 1)
+        reopened.enable()
+        driver = Catalog(SYNTHETIC_LOGIN['password'])
+        driver.export_state = lambda: {'cookies': [{'domain': 'www.smecel.com.br'}], 'origins': []}
+        source_directory = tempfile.TemporaryDirectory(); self.addCleanup(source_directory.cleanup)
+        source = ManualSession(lambda: driver, source_directory.name)
+        reply = source.operational_catalog(reopened)  # Signs in with the saved login.
+        self.assertEqual(driver.logins, 1)
+        self.assertEqual(reply['catalog']['classes'][0]['class_id'], '13331')
+        self.assertEqual(path.read_bytes(), stale)  # Reading never deletes.
+        source.preserve_and_close(reopened)
+        self.assertNotEqual(path.read_bytes(), stale)
+        self.assertEqual(self.reopened(NEW_DEVICE, 1).load_session(),
+                         {'cookies': [{'domain': 'www.smecel.com.br'}], 'origins': []})
+
+    def test_session_of_an_earlier_authorization_without_a_saved_login_asks_a_person(self):
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        driver = Catalog(SYNTHETIC_LOGIN['password'])
+        source_directory = tempfile.TemporaryDirectory(); self.addCleanup(source_directory.cleanup)
+        with self.assertRaisesRegex(SessionError, 'SOURCE_LOGIN_REQUIRED'):
+            ManualSession(lambda: driver, source_directory.name).operational_catalog(self.reopened(NEW_DEVICE, 1))
+        self.assertIsNone(driver.opened)
+
+    def test_session_errors_that_are_not_an_earlier_authorization_still_show(self):
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        path = self.storage.directory / 'session.dpapi'
+        saved = path.read_bytes()
+        # Windows protection not answering (a moment at logon): the error stands, to try again.
+        failing = self.reopened(NEW_DEVICE, 1)
+        failing._crypto = Mock(protect=Mock(side_effect=StorageError()), unprotect=Mock(side_effect=StorageError()))
+        with self.assertRaises(StorageError): failing.load_session()
+        # Not one of the Coletor's files, and a storage with no live binding.
+        path.write_bytes(b'not-a-protected-file')
+        with self.assertRaises(StorageError): self.storage.load_session()
+        path.write_bytes(saved)
+        unbound = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=self.consent)
+        with self.assertRaises(StorageError): unbound.load_session()
+        # A saved session with a cookie of another site is refused, never used.
+        other_site = json.dumps({'version': 2, 'binding': base.DEVICE + ':1',
+                                 'value': {'cookies': [{'domain': 'evil.invalid'}], 'origins': []}}).encode('utf-8')
+        entropy = ('Ecossistema.Coletor.Protected.v2\0session\0' + base.DEVICE + ':1').encode('utf-8')
+        path.write_bytes(b'CFV2\0' + base.SyntheticCrypto().protect(other_site, entropy))
+        with self.assertRaises(StorageError): self.storage.load_session()
 
     def test_consent_is_asked_once_per_windows_user_and_again_after_logout(self):
         self.assertTrue(self.storage.enable())
