@@ -1,5 +1,6 @@
 """What an earlier version left in the installed program folder (synthetic files only)."""
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -54,6 +55,7 @@ class LeftoversTests(unittest.TestCase):
         self.assertEqual(remove_leftovers(self.folder, '0.4.400', self.own), 0)
         self.assertEqual(self.present(), everything)
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows paths ignore case')
     def test_the_installed_coletor_is_cleaned_by_its_own_inventory(self):
         # The real folder's shape: Windows paths in any case, the inventory in the package's.
         self.inventory('0.4.400', [p.upper() if p.endswith('.html') else p for p in SHIPPED])
