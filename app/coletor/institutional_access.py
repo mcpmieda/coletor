@@ -104,8 +104,12 @@ def validate_authorization(response, now, started=None):
 
 
 # Reads (status/UI polling) may reuse a grant confirmed online this recently.
-# Commands never do: run() always waits for a request sent after it started.
 STATUS_REUSE_SECONDS = 5.0
+# A command opens on a confirmation of at most this age: in practice the closing check of the step
+# just before it. A class is four checks, two of them back to back (the read ends, the send
+# begins): about 60 requests of a collection confirmed what had just been confirmed (owner decision
+# 17/11/2026). The closing check never reuses: run() ends on a request sent after the work.
+COMMAND_REUSE_SECONDS = 2.0
 # A status read the server authorizes by itself (signed device request): the online check is
 # reused for this long (issue #1426, 6). A refusal runs the full check at once.
 LIGHT_REUSE_SECONDS = 300.0
@@ -256,7 +260,11 @@ class InstitutionalAccess:
     def run(self, work: Callable[[], T]) -> T:
         with self._lock:
             generation = self._generation
-        before = self._verify(generation)
+        # Only a check already answered: one still on its way was sent before this command, and
+        # the command then waits for one of its own, as before.
+        before = None if self._cleanup_pending else self._reusable(generation, COMMAND_REUSE_SECONDS)
+        if before is None:
+            before = self._verify(generation)
         try:
             result = work()
         except Exception:
@@ -265,6 +273,21 @@ class InstitutionalAccess:
         after = self._verify(generation)
         if before.identity_key != after.identity_key:
             self._invalidate()
+            raise AccessDenied()
+        return result
+
+    def run_read(self, work: Callable[[], T]) -> T:
+        """A read of what this computer already holds, for its own window (the history, the saved
+        preferences, the collector's state): it opens on a confirmation as recent as the window's
+        own status check accepts, and has no closing check, since nothing was sent or changed. An
+        access lost meanwhile still discards the answer."""
+        with self._lock:
+            generation = self._generation
+        self._verify(generation, reuse=True)
+        result = work()
+        with self._lock:
+            current = generation == self._generation
+        if not current:
             raise AccessDenied()
         return result
 

@@ -19,6 +19,7 @@ DURANTE O USO
   Para encerrar, use "Encerrar coletor" no menu do ícone.
 - O Coletor instalado se atualiza sozinho: confere as versões publicadas e
   instala a nova quando não há coleta em andamento nem perto de começar.
+  Para não esperar, use Ajustes > Verificar atualizações.
 - O e-mail e a senha do Smecel podem ser salvos em Acesso ao Smecel,
   protegidos pelo Windows deste usuário. Sair da conta apaga o acesso salvo.
 - Conexão e autorização do computador são operações explícitas.

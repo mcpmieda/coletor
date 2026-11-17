@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from coletor.desktop_api import DesktopApi
 from coletor.desktop_state import DesktopState
-from coletor.desktop import centered_window_geometry
+from coletor.desktop import centered_window_geometry, window_profile
 from coletor.local_settings import LocalSettings, default_settings
 
 
@@ -27,6 +27,29 @@ class NativeWindowGeometryTests(unittest.TestCase):
     def test_invalid_display_size_fails_before_native_window(self):
         with self.assertRaises(ValueError):
             centered_window_geometry((5, 0, 5, 100))
+
+
+class WindowProfileTests(unittest.TestCase):
+    def test_the_window_profile_is_one_folder_of_the_coletor_emptied_at_every_opening(self):
+        # pywebview's private mode left a folder in %TEMP% at each closing WebView2 was slow to leave.
+        with tempfile.TemporaryDirectory() as directory:
+            left = Path(directory) / "janela" / "EBWebView" / "Default"
+            left.mkdir(parents=True)
+            (left / "Cookies").write_bytes(b"left by the last opening")
+            (Path(directory) / "collector-history.jsonl").write_text("kept", encoding="utf-8")
+            profile = window_profile(directory)
+            self.assertEqual(Path(profile), Path(directory) / "janela")
+            self.assertFalse(Path(profile).exists())  # pywebview creates it, empty.
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["collector-history.jsonl"])
+
+    @unittest.skipUnless(__import__("os").name == "nt", "Windows keeps an open file from being deleted")
+    def test_a_profile_still_held_is_left_alone_and_a_temporary_one_is_used(self):
+        with tempfile.TemporaryDirectory() as directory:
+            held = Path(directory) / "janela" / "EBWebView" / "lockfile"
+            held.parent.mkdir(parents=True)
+            with held.open("wb"):
+                self.assertIsNone(window_profile(directory))
+            self.assertIsNotNone(window_profile(directory))
 
 
 class DesktopStateTests(unittest.TestCase):

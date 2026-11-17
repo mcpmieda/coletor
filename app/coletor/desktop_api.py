@@ -94,6 +94,7 @@ class DesktopApi(PreviewApi):
         self._provider = getattr(access, '_provider', None) if access else DeviceProvider(settings_directory)
         self._access = access or InstitutionalAccess(self._provider, on_locked=self._access_locked)
         self._pending_alert = None
+        self._updater = None  # Set by desktop.py once the window exists.
         self._confirm_local_discard = native_local_recovery_confirmation
         self._resume = ResumeStore(settings_directory)
         self._collector = FrequencyRuntime(self._access, self._provider, self._manual_session, settings_directory,
@@ -508,6 +509,21 @@ class DesktopApi(PreviewApi):
     def preview_html(self, html, class_id, year):
         return self._reading(lambda: super(DesktopApi, self).preview_html(html, class_id, year))
 
+    def check_for_update(self):
+        """Ajustes > Verificar atualizações (owner request 17/11/2026)."""
+        from .updater import UpdateError
+        if self._updater is None: return {'state': 'unavailable'}
+        try:
+            result = self._updater.check_now()
+        except UpdateError as error:
+            if str(error) in {'network', 'unavailable', 'not-found'}:
+                return {'error': 'Não foi possível consultar as versões publicadas. Confira a internet e tente de novo.'}
+            return {'error': 'A versão publicada não pôde ser conferida. Nada foi instalado.'}
+        except Exception:
+            return {'error': 'Não foi possível verificar as atualizações. Tente de novo.'}
+        if result['state'] == 'found': result['collecting'] = not self._collector.idle()
+        return result
+
     def get_desktop_status(self):
         return {"tray_available": self._tray is not None and self._tray.available(),
                 "automatic_collection": self._collector.public_status()['active'],
@@ -580,14 +596,21 @@ class DesktopApi(PreviewApi):
 
 
 
-def _protected(method):
+def _protected(method, read=False):
     @wraps(method)
     def guarded(self, *args, **kwargs):
+        # A read of this computer's own data costs no online check of its own while one is recent
+        # (the window asked for the state and the history every 5 s: ten requests each time).
+        bracket = getattr(self._access, 'run_read', None) if read else None
         try:
-            return self._access.run(lambda: method(self, *args, **kwargs))
+            return (bracket or self._access.run)(lambda: method(self, *args, **kwargs))
         except AccessDenied as error:
             return {"error": str(error), "code": error.code}
     return guarded
+
+
+READS = frozenset({'get_collector_status', 'get_collector_history', 'get_local_settings', 'get_desktop_status',
+                   'get_manual_session_status'})
 
 
 # Authentication is enforced by Python for every protected command, independently
@@ -596,11 +619,12 @@ for _name in ("prepare_manual_login", "get_manual_class_selection_preferences", 
               "save_manual_class_selection", "clear_manual_class_selection", "capture_selected_class",
               "open_manual_session", "get_manual_session_status", "load_demo", "preview_html",
               "get_desktop_status", "hide_window", "set_tray_context", "get_local_settings",
-              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications"):
-    setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
+              "save_schedule", "save_theme", "get_collector_history", "save_browser_preference", "save_classes_mode", "save_notifications",
+              "check_for_update"):
+    setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name), _name in READS))
 
 for _name in ('get_collector_status', 'activate_collector', 'collect_now', 'collect_report_now', 'save_report_schedule', 'pause_collector', 'pause_report',
               'save_shared_schedule', 'pause_school_collection', 'discard_pending_collection',
               'save_source_credential', 'forget_source_credential'):
-    setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name)))
+    setattr(DesktopApi, _name, _protected(getattr(DesktopApi, _name), _name in READS))
 

@@ -174,13 +174,13 @@ class UpdaterTests(unittest.TestCase):
         self.launched = []
 
     def make(self, current='0.4.329', latest='0.4.330', *, safe=lambda: True, power=lambda: True,
-             space=lambda folder, size: True, clock=lambda: 1_000_000, signer=lambda path: SCHOOL):
+             space=lambda folder, size: True, clock=lambda: 1_000_000, signer=lambda path: SCHOOL, idle=None):
         def download(manifest, folder):
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / manifest['arquivo']
             path.write_bytes(self.raw)
             return path
-        return updater.Updater(current, self.install / 'programa', self.settings, safe_now=safe,
+        return updater.Updater(current, self.install / 'programa', self.settings, safe_now=safe, idle_now=idle,
                                launch=self.launched.append, download=download, power=power, space=space,
                                clock=clock, clear_resume=lambda: None, signer=signer,
                                fetch=lambda url, limit=None: json.dumps(
@@ -242,10 +242,49 @@ class UpdaterTests(unittest.TestCase):
         power = iter([False, True])
         item = self.make(safe=lambda: next(answers), power=lambda: next(power))
         waits = []
-        item._stop.wait = lambda seconds: waits.append(seconds) or False
+        item._pause = lambda seconds: waits.append(seconds) or False
         self.assertTrue(item.check_once())
         self.assertEqual(waits, [updater.SAFE_RETRY_SECONDS, updater.SAFE_RETRY_SECONDS])
         self.assertEqual(len(self.launched), 1)
+
+    def test_a_check_asked_for_in_ajustes_says_what_the_latest_version_is(self):
+        self.assertEqual(self.make().check_now(), {'state': 'unavailable'})  # The updater never started here.
+        current = self.make(latest='0.4.329')
+        current._thread = object()
+        self.assertEqual(current.check_now(), {'state': 'current', 'version': '0.4.329'})
+        self.assertFalse(current._asked)
+        item = self.make()
+        item._thread = object()
+        self.assertEqual(item.check_now(), {'state': 'found', 'version': '0.4.330'})
+        self.assertTrue(item._wake.is_set())  # The updater's own thread does the rest, now.
+        self.assertEqual(self.launched, [])
+
+    def test_an_update_asked_for_waits_only_for_the_collection_in_progress(self):
+        # The agenda is never quiet (a time every 15 minutes, 07:00 to 17:40): nobody asked, it waits.
+        running = iter([False, True])  # A collection in progress, then over.
+        item = self.make(safe=lambda: False, idle=lambda: next(running))
+        item._thread = object()
+        item.check_now()
+        waits = []
+        item._pause = lambda seconds: waits.append(seconds) or False
+        self.assertTrue(item.check_once())
+        self.assertEqual((waits, len(self.launched), item._asked), ([updater.SAFE_RETRY_SECONDS], 1, False))
+        # The next one, that nobody asked for, waits for the agenda again.
+        waits.clear()
+        item._pause = lambda seconds: waits.append(seconds) or True
+        item._attempts.clear()
+        self.assertFalse(item.check_once())
+        self.assertEqual((waits, len(self.launched)), ([updater.SAFE_RETRY_SECONDS], 1))
+
+    def test_an_update_asked_for_tries_again_a_version_that_failed_today(self):
+        item = self.make()
+        self.assertTrue(item.check_once())
+        with self.assertRaisesRegex(updater.UpdateError, 'waiting-after-failed-install'):
+            item.check_once()
+        item._thread = object()
+        item.check_now()
+        self.assertTrue(item.check_once())
+        self.assertEqual(len(self.launched), 2)
 
     def test_stop_while_waiting_never_launches(self):
         item = self.make(safe=lambda: False)
@@ -348,7 +387,7 @@ class LoopTests(unittest.TestCase):
         item = updater.Updater('0.4.329', folder, folder, safe_now=lambda: True)
         item.check_once = lambda: calls.append(1) or (_ for _ in ()).throw(updater.UpdateError('network'))
         waits = iter([False, False, True])
-        item._stop.wait = lambda seconds: next(waits)
+        item._pause = lambda seconds: next(waits)
         thread = threading.Thread(target=item._loop)
         thread.start()
         thread.join(5)

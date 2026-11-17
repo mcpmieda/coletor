@@ -1,5 +1,6 @@
 import type { CollectorStatus, HistoryEntry, ReportSchedule, SharedSchedule } from '../collector';
 import type { ThemeMode } from '../theme';
+import type { UpdateCheck } from './update';
 
 export interface Preferences {
   theme: ThemeMode;
@@ -39,6 +40,8 @@ interface Native {
   save_notifications(show: boolean): Promise<{ settings: Preferences } | Failure>;
   save_theme(theme: ThemeMode): Promise<{ settings: Preferences } | Failure>;
   logout_institutional_access(): Promise<{ ok: true } | Failure>;
+  /** Asks GitHub for the latest Release now; a newer one installs itself (owner request 17/11/2026). */
+  check_for_update(): Promise<UpdateCheck | Failure>;
 }
 
 export function native(): Native | null {

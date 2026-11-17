@@ -82,6 +82,20 @@ def quit_for_update(window, api, wait=EXIT_COLLECTION_WAIT, ready=None):
     window.destroy()
 
 
+def window_profile(directory):
+    """The folder of the window's browser profile: this Coletor's own, emptied at every opening.
+
+    Left to pywebview, private mode makes a new folder in %TEMP% each time and deletes it when the
+    window closes; when WebView2 was slow to leave, the folder stayed (63 of them, 73 MB, on one
+    computer since October 2026). pywebview still deletes this one at closing. None while what the
+    last opening left cannot be removed yet: pywebview then uses a temporary folder, as before."""
+    import shutil
+    from pathlib import Path
+    folder = Path(directory) / "janela"
+    shutil.rmtree(folder, ignore_errors=True)
+    return None if folder.exists() else str(folder)
+
+
 def run_desktop(callback=None, settings_directory=None, *, access=None, background=False):
     if sys.platform != "win32":
         raise SystemExit("A janela desktop requer Windows. Use --preview-server para testar a prévia neste sistema.")
@@ -108,8 +122,11 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
                           **geometry, background_color="#faf7f8", text_select=True)
     from .local_settings import user_settings_directory
     from .updater import Updater
-    updater = Updater(__version__, ROOT, settings_directory or user_settings_directory(),
-                      safe_now=lambda: api._collector.update_allowed(collecting=api._resume.active()))
+    directory = settings_directory or user_settings_directory()
+    updater = Updater(__version__, ROOT, directory,
+                      safe_now=lambda: api._collector.update_allowed(collecting=api._resume.active()),
+                      idle_now=api._collector.idle)
+    api._updater = updater  # Ajustes > Verificar atualizações.
     quit_requests = QuitRequests()
     ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).
     quit_requests.listen(lambda: quit_for_update(window, api, ready=ready))
@@ -142,7 +159,8 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
         if callback: callback(window)
 
     try:
-        webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True)
+        webview.start(func=opened, args=window, gui="edgechromium", debug=False, private_mode=True, http_server=True,
+                      storage_path=window_profile(directory))
     finally:
         updater.stop()
         try:

@@ -1674,6 +1674,12 @@ class FrequencyRuntime:
         try: return not agenda_near(status['settings']['schedule'], status['settings'].get('reportSchedule'), now)
         except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError): return False
 
+    def idle(self):
+        """No collection or report in progress or starting: an update a person asked for may go."""
+        with self._lock:
+            busy = self._exiting or self._preparing or self._report['running'] or self._report['preparing']
+        return not busy and not self._operation.locked()
+
     def finish_for_exit(self, timeout):
         """Update request: start no new collection and wait for the one in flight.
 
