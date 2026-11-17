@@ -150,7 +150,7 @@ Pontos de uso:
 - **Verificar atualizações na hora:** Ajustes > Verificar atualizações consulta a Release mais nova. Havendo
   versão nova, ela é baixada, conferida e instalada pelo mesmo caminho da atualização automática, só que
   sem esperar a agenda ficar livre: espera apenas a coleta em andamento terminar.
-- **Atualização:** confere ao abrir (2 min) e a cada 6 h; instala só fora de coleta, relatório e da janela
+- **Atualização:** confere ao abrir (2 min) e a cada 30 min; instala só fora de coleta, relatório e da janela
   da agenda, com espaço em disco e sem bateria abaixo de 40%. Configurações, fila cifrada e chave ficam em
   `%LOCALAPPDATA%\ColetorFrequenciaSmecel`; o instalador não mexe nelas.
 - **Versão com defeito:** publique a correção ou a reversão na `main`; instalar à mão uma versão antiga

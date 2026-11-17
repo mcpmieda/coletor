@@ -290,6 +290,21 @@ if __name__ == "__main__":
 class FailureReasonTests(unittest.TestCase):
     """Owner request 05/11/2026: every failure says what it was, never with page data."""
 
+    def test_the_worker_has_longer_than_its_own_limits_before_being_taken_for_hung(self):
+        # 40 s for both was less than the worker's worst case: a slow Smecel then cost the browser
+        # and a new login ("worker-timeout") instead of one diary that "o Smecel demorou".
+        import coletor.manual_worker as worker
+        asked = {}
+        driver = BrowserWorker()
+        driver._rpc = lambda command, timeout=40: asked.update({command["command"]: timeout}) or {}
+        driver.discover(2026)
+        driver.capture_selected("13331", 2026, "context")
+        list_limit = worker.PAGE_TIMEOUT_MS + worker.LIST_SETTLE_MS
+        self.assertGreater(asked["list"] * 1000, list_limit)
+        self.assertGreater(asked["capture"] * 1000, list_limit + worker.PAGE_TIMEOUT_MS)  # The list again, then the diary.
+        # The diary request gives up by itself at the page limit, so the worker answers within it.
+        self.assertIn(f"control.abort(), {worker.PAGE_TIMEOUT_MS})", worker.DIARY_JS)
+
     def test_the_worker_names_each_failure_by_a_short_code(self):
         from coletor.manual_worker import failure_kind
         class TimeoutError(Exception): pass  # The name Playwright gives its own.
