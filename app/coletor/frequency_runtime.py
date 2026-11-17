@@ -353,6 +353,8 @@ class FrequencyRuntime:
         self._lock = threading.RLock()
         self._bracket = threading.local()
         self._operation = threading.Lock()
+        # One concession request or heartbeat at a time (see _heartbeat).
+        self._lease_gate = threading.Lock()
         self._epoch = 0
         self._active, self._paused, self._closed = False, False, False
         self._exiting = False  # An update asked the app to quit: start nothing new.
@@ -648,8 +650,9 @@ class FrequencyRuntime:
         # The server's maximum: a slow network (several seconds per request) must
         # not let one class outlive its concession and fence the whole run.
         request = {'operation': 'lease', 'academicYear': 2026, 'requestId': str(uuid.uuid4()), 'durationSeconds': LEASE_SECONDS}
-        requested_at = self._clock()
-        reply = self._committed(self._request(request), request)
+        with self._lease_gate:
+            requested_at = self._clock()
+            reply = self._committed(self._request(request), request)
         if type(reply.get('fencingToken')) is not int or reply['fencingToken'] < 1: raise FrequencyError('unavailable')
         # The database issues exactly the requested lease *after*
         # this request begins. A deadline based on the request start is a safe
@@ -695,14 +698,19 @@ class FrequencyRuntime:
         self._check(epoch)
         status = self._fresh()
         if status['settings']['paused']: raise FrequencyError('paused')
-        with self._lock:
-            fencing = self._lease['fencingToken']
-            state = 'collecting' if self._state == 'collecting' else 'login-required' if self._source_blocked else 'error' if self._state == 'error' else 'ready'
-            class_id = self._class
-            code = self._code.replace('-', '_').upper() if self._code and state in {'error', 'login-required'} else None
-        request = {'operation': 'heartbeat', 'academicYear': 2026, 'requestId': str(uuid.uuid4()),
-                   'fencingToken': fencing, 'status': state, 'classId': class_id, 'code': code}
-        reply = self._committed(self._request(request), request)
+        # The concession is read and reported with no new one asked for in between. Each class takes
+        # a new one: a heartbeat that reached the Ecossistema just after it carried the replaced
+        # concession, and every such one became a 'lease-fenced' line in the school's failure list
+        # (15 to 35 a school day until 16/11/2026).
+        with self._lease_gate:
+            with self._lock:
+                fencing = self._lease['fencingToken']
+                state = 'collecting' if self._state == 'collecting' else 'login-required' if self._source_blocked else 'error' if self._state == 'error' else 'ready'
+                class_id = self._class
+                code = self._code.replace('-', '_').upper() if self._code and state in {'error', 'login-required'} else None
+            request = {'operation': 'heartbeat', 'academicYear': 2026, 'requestId': str(uuid.uuid4()),
+                       'fencingToken': fencing, 'status': state, 'classId': class_id, 'code': code}
+            reply = self._committed(self._request(request), request)
         if reply.get('fencingToken') != fencing or reply.get('expiresAt') is None: raise FrequencyError('lease-fenced')
         remaining = stamp(reply['expiresAt']) - stamp(status['serverTime'])
         if not 0 < remaining <= 305: raise FrequencyError('lease-fenced')
@@ -1612,9 +1620,15 @@ class FrequencyRuntime:
         # Cooperative EOF / Job Object interrupts an in-flight source capture.
         self._source.close()
         if purge: self._storage.clear()
-        if pause and lease:
-            try: self._mutation('release', fencingToken=lease['fencingToken'], code='LOCAL_PAUSE')
-            except Exception: pass
+        if pause: self._release(lease, 'LOCAL_PAUSE')
+
+    def _release(self, lease, code):
+        """Give back a concession this computer still holds. One that already lapsed is the
+        Ecossistema's to forget: releasing it was refused and listed as a failure (16/11/2026, each
+        time the installer closed the Coletor more than five minutes after a run)."""
+        if lease is None or lease['deadline'] <= self._clock(): return
+        try: self._mutation('release', fencingToken=lease['fencingToken'], code=code)
+        except Exception: pass
 
     def discard_queue(self):
         # Explicit recapture after fencing/CAS; no automatic adoption.
@@ -1673,7 +1687,5 @@ class FrequencyRuntime:
             else: self._source.preserve_and_close(self._storage)
         except Exception:
             self._source.close()
-        if lease:
-            try: self._mutation('release', fencingToken=lease['fencingToken'], code='CLOSED')
-            except Exception: pass
+        self._release(lease, 'CLOSED')
         if self._thread: self._thread.join(timeout=1)
