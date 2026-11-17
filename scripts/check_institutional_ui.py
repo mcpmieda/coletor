@@ -69,12 +69,15 @@ try:
         page.get_by_role('button', name='Abrir navegador novamente').click()
         expect(page.get_by_text('654321', exact=True)).to_be_visible()
         assert page.evaluate("window.__fixture.loginCalls") == 5
-        expect(page.get_by_text('Pedido iniciado. Confira o código', exact=False)).to_be_visible()
+        expect(page.get_by_text('Pedido iniciado. No navegador, confira o código', exact=False)).to_be_visible()
         page.screenshot(path=str(out / "blocked.png"), full_page=True)
         page.evaluate("window.__fixture.pairingCode='123456';window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_text('123456', exact=True)).to_be_visible()
         expect(page.get_by_role('button', name='Cancelar autorização')).to_be_visible()
         page.screenshot(path=str(out / 'pairing.png'), full_page=True)
+        # A pending request is asked about by itself: after the click in the browser there is nothing to press here.
+        waiting = page.evaluate("window.__fixture.statusCalls")
+        page.wait_for_function("before => window.__fixture.statusCalls >= before + 2", arg=waiting, timeout=15000)
         page.evaluate("window.__fixture.pairingCode='';window.__fixture.code='SERVER_REVOCATION_PENDING';window.dispatchEvent(new Event('coletoraccesschanged'))")
         expect(page.get_by_role('button', name='Concluir saída')).to_be_visible()
         page.screenshot(path=str(out / 'revocation-pending.png'), full_page=True)
@@ -102,7 +105,7 @@ try:
         assert not errors, errors
         (out / "results.json").write_text(json.dumps({"passed": True, "synthetic_bridge_only": True,
             "native_authorization_proven": False, "checks": ["denied-before-settings", "login-without-password-field",
-            "login-errors-survive-status-poll", "native-browser-retry-ui", "pairing-code-and-cancellation", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
+            "login-errors-survive-status-poll", "native-browser-retry-ui", "pairing-code-and-cancellation", "pending-request-polls-by-itself", "offline-revocation-completion", "authorized-ui", "permission-poll-preserves-preferences", "logout-discards-late-authorization"], "page_errors": 0}, indent=2), encoding="utf-8")
         browser.close()
 finally:
     server.shutdown()
