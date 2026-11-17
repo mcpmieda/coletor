@@ -1,0 +1,8 @@
+[
+  {
+    "advisory": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "accepted": "2026-11-17",
+    "reason": "ReDoS in glob matching, in every published version (<=4.0.7, the latest). It reaches the interface only through development tools (vite, vitest, typescript-eslint), which match the project's own files; nothing of it goes inside the program (the production audit has no exception). Accepted by the owner so that Releases are not stopped until picomatch publishes a fix."
+  }
+]
