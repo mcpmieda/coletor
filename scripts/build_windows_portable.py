@@ -319,7 +319,8 @@ def validate_manual_evidence(report, browser=False):
     required = ({"external_edge", "no_privileged_bridge", "exact_scope", "password_form_rejected",
                  "credentials_removed", "outside_origin_blocked", "popup_closed", "manual_preview_blocked",
                  "ephemeral_context_closed", "owned_processes_stopped", "get_redirect_destination_uncontacted",
-                 "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored'} if browser else
+                 "post307_destination_uncontacted", "post308_destination_uncontacted", "authorized_redirect_preserved", "http2_disabled", "proxy_self_test", "webrtc_disabled", 'dpapi_source_session_restored',
+                 'diary_read_without_opening'} if browser else
                 {"bundled_application", "native_window_visible", "prepared_without_browser", "opening_requires_consent",
                  "separate_edge_started", "post_open_synthetic_login_navigation", "classes_discovered_without_ct", "selection_persisted_and_revalidated", "no_student_link_opened", "closing_choice_ends_session", "session_scope_cleared", "browser_processes_stopped", "owned_temporaries_removed", "window_closed"})
     if (report.get("status") != "passed" or report.get("cleanup", {}).get("verified") is not True

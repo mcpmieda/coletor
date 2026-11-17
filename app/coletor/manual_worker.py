@@ -101,15 +101,18 @@ def reading_page_asset(request):
         return False
     return parts.scheme == "https" and parts.hostname == "www.smecel.com.br" and parts.path in READ_PATHS
 
-# Clone only the documented report container; never serialize login inputs.
-CAPTURE_JS = """() => {
+# Clone only the documented report container; never serialize login inputs. `document` is the open
+# page or one the browser parsed from the diary's own text (DIARY_JS); `url` is where it came from.
+CLEAN_JS = """(document, url) => {
   const password_form = !!document.querySelector('input[type="password"]');
   const containers = document.querySelectorAll('div.container-fluid');
-  if (password_form || containers.length !== 1 || document.querySelectorAll('*').length > NODE_LIMIT) return {url: location.href, password_form, html: ''};
+  if (password_form || containers.length !== 1 || document.querySelectorAll('*').length > NODE_LIMIT) return {url, password_form, html: ''};
   const clone = containers[0].cloneNode(true);
+  // Birth date, filiation and enrolment date are never captured. A student with one more field
+  // after the five known ones (a transfer, two to four per class) kept all three until 17/11/2026.
   for (const small of clone.querySelectorAll('.ls-box1 small')) {
     const fields = small.querySelectorAll('strong');
-    if (fields.length === 5) for (const index of [1, 2, 4]) fields[index].textContent = '[não capturado]';
+    if (fields.length >= 5) for (const index of [1, 2, 4]) fields[index].textContent = '[não capturado]';
   }
   clone.querySelectorAll('script,style,form,input,textarea,select,button,iframe,object,embed,link,meta,video,audio,img').forEach(n => n.remove());
   for (const n of [clone, ...clone.querySelectorAll('*')]) {
@@ -122,8 +125,31 @@ CAPTURE_JS = """() => {
   }
   const html = '<html><body>' + clone.outerHTML + '</body></html>';
   if (new TextEncoder().encode(html).length > HTML_LIMIT) return {error: 'report_too_large'};
-  return {url: location.href, password_form, html};
+  return {url, password_form, html};
 }""".replace("NODE_LIMIT", str(MAX_NODES)).replace("HTML_LIMIT", str(MAX_HTML_BYTES))
+CAPTURE_JS = "() => (" + CLEAN_JS + ")(document, location.href)"
+# How long the Smecel may take to serve a page: a navigation's limit and a diary request's.
+PAGE_TIMEOUT_MS = 30000
+# A class's diary of the list's session, read without opening it: the same request (same origin,
+# same session), its text parsed by the browser into a document that runs no script, loads nothing
+# and is never laid out, then cleaned exactly as the open page is. Opening the page made the
+# browser build and render 90 thousand nodes and run the page's scripts for every class (3.4 s
+# against 1.8 s on 17/11/2026, with the same captured HTML to the byte). `url` is where the answer
+# came from: the login page when the Smecel session ended.
+DIARY_JS = ("""async target => {
+  const control = new AbortController();
+  const timer = setTimeout(() => control.abort(), PAGE_TIMEOUT);
+  let response, text;
+  try {
+    response = await fetch(target, {credentials: 'same-origin', cache: 'no-store', signal: control.signal});
+    text = await response.text();
+  } catch (error) {
+    return {error: control.signal.aborted ? 'smecel-timeout' : 'network'};
+  } finally {
+    clearTimeout(timer);
+  }
+  return (CLEAN)(new DOMParser().parseFromString(text, 'text/html'), response.url);
+}""".replace("PAGE_TIMEOUT", str(PAGE_TIMEOUT_MS)).replace("CLEAN", CLEAN_JS))
 
 
 # Observed public form of https://www.smecel.com.br/index.php: e-mail #usuario,
@@ -228,7 +254,7 @@ def configure_page(page):
     page.context.on("page", close_other_page)
     page.on("download", cancel_download)
     page.set_default_timeout(15000)
-    page.set_default_navigation_timeout(30000)
+    page.set_default_navigation_timeout(PAGE_TIMEOUT_MS)
 
 
 class BrowserWorker:
@@ -389,7 +415,7 @@ class BrowserWorker:
 
 
 async def browser_session(initial):
-    from .manual_session import matches_source, source_url
+    from .manual_session import allowed_request, matches_source, source_url
     from .class_catalog import list_url, matches_list, catalog_from_observation, CATALOG_JS
     from .class_schedule import grade_url, matches_grade, SCHEDULE_JS, SCHEDULE_LOAD_JS
     from .class_incidents import INCIDENTS_JS, list_url as incidents_url, matches_list as matches_incidents
@@ -547,18 +573,29 @@ async def browser_session(initial):
                             if (catalog["scope"]["context_key"] != command.get("context_key")
                                     or class_id not in {c["class_id"] for c in catalog["classes"]}):
                                 raise ValueError("selected_class_unavailable")
-                            # Our own diary navigation keeps the list valid; a
-                            # redirect (expired login) forgets it on the spot.
-                            await load(source_url(class_id, year))
-                        before = page.url
-                        if not matches_source(before, class_id, year):
-                            payload = {"url": "", "password_form": False, "html": ""}
-                        else:
-                            payload = await page.evaluate(CAPTURE_JS)
-                            if page.url != before or payload.get("url") != before:
+                            # The diary is asked for from the page the worker is on (the list or
+                            # another Smecel page it loaded itself), which stays where it is.
+                            before = page.url
+                            if not allowed_request(before):
+                                raise ValueError("listing_changed")
+                            target = source_url(class_id, year)
+                            payload = await page.evaluate(DIARY_JS, target)
+                            if page.url != before:
                                 payload = {"error": "page_changed"}
-                            elif len(payload.get("html", "").encode("utf-8")) > MAX_HTML_BYTES:
-                                payload = {"error": "report_too_large"}
+                            elif "error" not in payload and payload.get("url") != target:
+                                # The answer came from another address: the Smecel session ended.
+                                forget()
+                                payload = {"url": "", "password_form": False, "html": ""}
+                        else:
+                            before = page.url
+                            if not matches_source(before, class_id, year):
+                                payload = {"url": "", "password_form": False, "html": ""}
+                            else:
+                                payload = await page.evaluate(CAPTURE_JS)
+                                if page.url != before or payload.get("url") != before:
+                                    payload = {"error": "page_changed"}
+                        if len(payload.get("html", "").encode("utf-8")) > MAX_HTML_BYTES:
+                            payload = {"error": "report_too_large"}
                         reply(payload)
                     except Exception as error:
                         forget()

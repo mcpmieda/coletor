@@ -98,9 +98,19 @@ def tls_context():
     return _TLS
 
 
+# A connection is used again only this soon after its last complete answer. The requests of a
+# collection come in bursts (the online check, the status, the concession: a challenge and a signed
+# request each), and every one opened its own TCP and TLS connection: about 270 per run. Within a
+# burst the connection that has just answered is certainly alive; after a pause (a diary being
+# read) a new one is opened, so a connection the network dropped meanwhile is never tried.
+KEEP_SECONDS = 3
+
+
 class OfficialTransport:
-    def __init__(self, *, connection=None):
-        self._connection = connection
+    def __init__(self, *, connection=None, monotonic=time.monotonic):
+        self._connection, self._monotonic = connection, monotonic
+        self._guard = threading.Lock()
+        self._kept, self._kept_at = None, 0.0
 
     def request(self, method, path, value=None):
         if path not in PATHS or method not in {'GET', 'POST'} or (method == 'GET') != (path == PREFIX + 'config'):
@@ -110,8 +120,18 @@ class OfficialTransport:
         payload = canonical_frequency(value) if frequency else compact(value) if value is not None else None
         if payload is not None and len(payload) > (FREQUENCY_BYTES if frequency else 2048):
             raise AccessDenied('INVALID_ACCESS_REQUEST')
-        connection = (self._connection or (lambda: http.client.HTTPSConnection(
-            'admin.escolaieda.com', 443, timeout=10, context=tls_context())))()
+        with self._guard:
+            return self._exchange(method, path, payload, frequency, limit)
+
+    def _exchange(self, method, path, payload, frequency, limit):
+        connection, self._kept = self._kept, None
+        if connection is not None and self._monotonic() - self._kept_at > KEEP_SECONDS:
+            connection.close()
+            connection = None
+        if connection is None:
+            connection = (self._connection or (lambda: http.client.HTTPSConnection(
+                'admin.escolaieda.com', 443, timeout=10, context=tls_context())))()
+        keep = False
         try:
             connection.request(method, path, body=payload,
                                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
@@ -151,13 +171,18 @@ class OfficialTransport:
             raw = reply.read(limit + 1)
             if len(raw) > limit:
                 raise AccessDenied('INVALID_ACCESS_RESPONSE')
+            # Only after a whole 200 answer the server did not close: anything else starts afresh.
+            keep = reply.status == 200 and reply.isclosed() is True and reply.will_close is False
             return OnlineResponse(reply.status, OFFICIAL_ORIGIN + path, raw)
         except AccessDenied:
             raise
         except Exception:
             raise AccessDenied('ACCESS_UNAVAILABLE') from None
         finally:
-            connection.close()
+            if keep:
+                self._kept, self._kept_at = connection, self._monotonic()
+            else:
+                connection.close()
 
 
 class DeviceMetadata:
