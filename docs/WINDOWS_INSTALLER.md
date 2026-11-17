@@ -143,6 +143,13 @@ Pontos de uso:
 - **Trocar o certificado:** rode `installer/new-signing-certificate.ps1` e publique, ainda assinada pelo
   certificado antigo, uma versão que aceite os dois; só depois troque o segredo. Se a chave antiga se
   perder, os computadores precisam ser reinstalados à mão uma vez.
+- **Computador formatado ou trocado:** o mesmo caminho do computador novo. Nada precisa ser guardado: o
+  `Instalar Coletor.exe` e o instalador ficam sempre publicados na Release mais nova, no endereço acima.
+  Depois de instalar, entre no Ecossistema e no Smecel de novo (o vínculo e o acesso salvo ficavam no
+  Windows que foi apagado).
+- **Verificar atualizações na hora:** Ajustes > Verificar atualizações consulta a Release mais nova. Havendo
+  versão nova, ela é baixada, conferida e instalada pelo mesmo caminho da atualização automática, só que
+  sem esperar a agenda ficar livre: espera apenas a coleta em andamento terminar.
 - **Atualização:** confere ao abrir (2 min) e a cada 6 h; instala só fora de coleta, relatório e da janela
   da agenda, com espaço em disco e sem bateria abaixo de 40%. Configurações, fila cifrada e chave ficam em
   `%LOCALAPPDATA%\ColetorFrequenciaSmecel`; o instalador não mexe nelas.

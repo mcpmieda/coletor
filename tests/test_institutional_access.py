@@ -4,8 +4,8 @@ import threading
 import time
 import unittest
 from datetime import datetime, timezone
-from coletor.institutional_access import (AccessDenied, InstitutionalAccess, OnlineResponse,
-    PROPOSED_ACCESS_URL, PROPOSED_CAPABILITY, validate_authorization)
+from coletor.institutional_access import (AccessDenied, COMMAND_REUSE_SECONDS, InstitutionalAccess, OnlineResponse,
+    PROPOSED_ACCESS_URL, PROPOSED_CAPABILITY, STATUS_REUSE_SECONDS, validate_authorization)
 
 NOW = 1791930000
 
@@ -90,12 +90,41 @@ class InstitutionalAccessTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             gate.open_login()
 
-    def test_each_command_checks_online_before_and_after_without_cached_lease(self):
-        provider = Provider([response()] * 4)
-        gate = InstitutionalAccess(provider, clock=lambda: NOW)
-        self.assertEqual(gate.run(lambda: 'preview'), 'preview')
-        self.assertEqual(gate.run(lambda: 'selection'), 'selection')
-        self.assertEqual(provider.reads, 4)
+    def test_a_command_opens_on_the_check_just_made_and_always_closes_on_a_new_one(self):
+        # Owner decision 17/11/2026: a class's send begins as its read ends, and the check that
+        # closed the read opened nothing new when asked again milliseconds later.
+        now = [0.0]
+        provider = Provider([response()] * 5)
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: now[0])
+        self.assertEqual(gate.run(lambda: 'read'), 'read')  # Its own opening and closing checks.
+        now[0] = COMMAND_REUSE_SECONDS
+        self.assertEqual(gate.run(lambda: 'send'), 'send')  # Opens on the read's closing check.
+        self.assertEqual(provider.reads, 3)
+        now[0] += COMMAND_REUSE_SECONDS + 0.1  # After a pause (a diary being read): its own again.
+        self.assertEqual(gate.run(lambda: 'next'), 'next')
+        self.assertEqual(provider.reads, 5)
+
+    def test_a_read_for_the_window_costs_no_check_while_one_is_recent(self):
+        now = [0.0]
+        provider = Provider([response(), response(), AccessDenied('ACCESS_REQUIRED')])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: now[0])
+        self.assertEqual(gate.run_read(lambda: 'history'), 'history')
+        now[0] = STATUS_REUSE_SECONDS
+        self.assertEqual(gate.run_read(lambda: 'state'), 'state')
+        self.assertEqual(provider.reads, 1)
+        now[0] += STATUS_REUSE_SECONDS + 0.1
+        self.assertEqual(gate.run_read(lambda: 'history'), 'history')
+        self.assertEqual(provider.reads, 2)
+        # An access lost: nothing is read, and an answer already on its way is discarded.
+        now[0] += STATUS_REUSE_SECONDS + 0.1
+        ran = []
+        with self.assertRaises(AccessDenied):
+            gate.run_read(lambda: ran.append('history'))
+        self.assertEqual(ran, [])
+        provider = Provider([response()])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: 0.0)
+        with self.assertRaises(AccessDenied):
+            gate.run_read(lambda: gate._invalidate('LOGOUT'))
 
     def test_expired_and_stale_receipts_block_even_successful_status(self):
         for item in [response(expiresAt=stamp(NOW)), response(checkedAt=stamp(NOW-11)),
@@ -197,18 +226,27 @@ class InstitutionalAccessTests(unittest.TestCase):
         self.assertFalse(gate.status()['authorized'])
         self.assertEqual(provider.reads, 2)
 
-    def test_commands_ignore_reusable_grant_and_still_see_revocation(self):
-        locked = []
-        provider = Provider([response(), response(), response(authorized=False)])
+    def test_a_command_still_sees_a_revocation_and_never_returns_its_result(self):
+        locked, ran = [], []
+        provider = Provider([response(), response(authorized=False)])
         gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: 0.0,
                                    on_locked=lambda: locked.append('revoked'))
         self.assertTrue(gate.status()['authorized'])
         with self.assertRaises(AccessDenied):
-            gate.run(lambda: 'synthetic-capture')
-        self.assertEqual(provider.reads, 3)
-        self.assertEqual(locked, ['revoked'])
+            gate.run(lambda: ran.append('synthetic-capture'))  # Opened on the status check just made...
+        # ...and closed on a check of its own, which refused: the result is never returned.
+        self.assertEqual((provider.reads, locked, ran), (2, ['revoked'], ['synthetic-capture']))
         # The denial drops the reusable grant as well.
         self.assertFalse(gate.status()['authorized'])
+        # A confirmation older than the window opens nothing: the work does not even start.
+        now = [0.0]
+        provider = Provider([response(), response(authorized=False)])
+        gate = InstitutionalAccess(provider, clock=lambda: NOW, monotonic=lambda: now[0])
+        self.assertTrue(gate.status()['authorized'])
+        now[0] = COMMAND_REUSE_SECONDS + 0.1
+        with self.assertRaises(AccessDenied):
+            gate.run(lambda: ran.append('second'))
+        self.assertEqual(ran, ['synthetic-capture'])
 
     def test_transient_failure_drops_reusable_grant(self):
         provider = Provider([response(), AccessDenied('ACCESS_UNAVAILABLE'), AccessDenied('ACCESS_UNAVAILABLE')])

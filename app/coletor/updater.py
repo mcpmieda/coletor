@@ -415,10 +415,15 @@ class Attempts:
 
 
 class Updater:
-    def __init__(self, current_version, root, directory, *, safe_now, launch=launch_setup,
+    def __init__(self, current_version, root, directory, *, safe_now, idle_now=None, launch=launch_setup,
                  fetch=fetch_small, download=download_setup, power=power_ok, space=space_ok, clock=time.time,
                  clear_resume=clear_stale_resume, signer=signer):
         self._clear_resume, self._signer = clear_resume, signer
+        # safe_now: nothing running, waiting or due on the agenda soon (an update nobody asked for).
+        # idle_now: no collection or report in progress (one a person asked for in Ajustes).
+        self._idle_now = idle_now or safe_now
+        self._asked = False  # A person asked for the check: installed as soon as nothing is running.
+        self._wake = threading.Event()
         self._current, self._root, self._folder = current_version, root, Path(directory) / 'atualizacao'
         self._safe_now, self._launch, self._fetch, self._download = safe_now, launch, fetch, download
         self._power, self._space, self._clock = power, space, clock
@@ -441,11 +446,34 @@ class Updater:
 
     def stop(self):
         self._stop.set()
+        self._wake.set()
+
+    def _pause(self, seconds):
+        """Wait; True when the program is closing. A check asked for in Ajustes ends the wait."""
+        self._wake.wait(seconds)
+        self._wake.clear()
+        return self._stop.is_set()
+
+    def check_now(self):
+        """Ajustes > Verificar atualizações (owner request 17/11/2026): what the latest Release is.
+
+        {'state': 'unavailable'} for a copy that does not update itself (not installed, or a
+        development one); {'state': 'current' | 'found', 'version'} otherwise. A newer version is
+        downloaded, checked and installed by the updater's own thread exactly as an automatic one,
+        only sooner: it waits for a collection in progress to end, not for a quiet agenda, and a
+        version whose installation failed before is tried again."""
+        if self._thread is None: return {'state': 'unavailable'}
+        manifest = read_manifest(self._fetch(MANIFEST_URL))
+        if parse_version(manifest['versao']) <= parse_version(self._current):
+            return {'state': 'current', 'version': self._current}
+        self._asked = True
+        self._wake.set()
+        return {'state': 'found', 'version': manifest['versao']}
 
     def _loop(self):
         try: remove_other_setups(self._folder, up_to=parse_version(self._current))  # Even offline.
         except OSError: pass
-        if self._stop.wait(FIRST_CHECK_SECONDS): return
+        if self._pause(FIRST_CHECK_SECONDS): return
         # What the version before this one left in the program folder. Not at once: the installer that
         # has just reopened this program is still finishing, and nothing is deleted while one runs.
         folder = installed_folder(self._root)
@@ -456,7 +484,7 @@ class Updater:
             except UpdateError as error: result = str(error)
             except Exception as error: result = type(error).__name__
             self._note(result)
-            if self._stop.wait(CHECK_EVERY_SECONDS): return
+            if self._pause(CHECK_EVERY_SECONDS): return
 
     def _note(self, result):
         """Last check and its result only (no URL, path or content): what a support visit looks at."""
@@ -476,7 +504,7 @@ class Updater:
             remove_other_setups(self._folder)
             self._attempts.clear()
             return False
-        if not self._attempts.allowed(version): raise UpdateError('waiting-after-failed-install')
+        if not self._asked and not self._attempts.allowed(version): raise UpdateError('waiting-after-failed-install')
         check_publisher(self._fetch(RELEASE_URL.format(version=version), RELEASE_LIMIT), manifest)
         remove_other_setups(self._folder, keep=manifest['arquivo'])
         if not self._space(self._folder, manifest['tamanho']): raise UpdateError('disk-full')
@@ -486,8 +514,9 @@ class Updater:
         if self._signer(setup) not in SIGNERS:
             setup.unlink(missing_ok=True)
             raise UpdateError('untrusted-signature')
-        while not (self._safe_now() and self._power()):
-            if self._stop.wait(SAFE_RETRY_SECONDS): return False
+        while not ((self._idle_now() if self._asked else self._safe_now()) and self._power()):
+            if self._pause(SAFE_RETRY_SECONDS): return False
+        self._asked = False
         self._attempts.record(version)
         self._launch(setup)
         return True

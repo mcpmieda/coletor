@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Chip, Modal, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { notify } from './foxSay';
-import { CheckCircle2, KeyRound, ListChecks, LogOut, Monitor, Moon, Sun, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, KeyRound, ListChecks, LogOut, Monitor, Moon, RefreshCw, Sun, Trash2, XCircle } from 'lucide-react';
 import ManualSource from '../components/ManualSource';
 import { paintTheme, type ThemeMode } from '../theme';
 import { call, type Preferences, type Status } from './bridge';
 import { closeProblem, type ManualCloseResult } from './manualClose';
+import { updateMessage } from './update';
 import { SwitchRow, TextInput } from './ui';
 import type { ColetorState } from './useColetor';
 
@@ -32,6 +33,17 @@ export default function SettingsPage({ state, tray }: Readonly<{ state: ColetorS
   useEffect(() => {
     void call(api => api.get_local_settings()).then(r => { if (!prefSaved.current) setPrefs(r.settings); }).catch(() => undefined);
   }, [setPrefs]);
+  const [checking, setChecking] = useState(false);
+  // The Coletor asks GitHub now; a newer version installs itself, as the automatic update does.
+  async function checkUpdate() {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const result = await call(api => api.check_for_update());
+      (result.state === 'unavailable' ? notify : notify.success)(updateMessage(result));
+    } catch (e) { notify.danger(e instanceof Error ? e.message : 'Não foi possível verificar as atualizações.'); }
+    finally { setChecking(false); }
+  }
   const saved = status?.credential?.saved === true;
   const mode = prefs?.classes.mode ?? status?.classesMode ?? 'all';
 
@@ -163,6 +175,9 @@ export default function SettingsPage({ state, tray }: Readonly<{ state: ColetorS
           </div>
           <Chip size="sm" variant="soft" color={status?.active ? 'success' : 'default'}>{status?.active ? 'Coleta ativa' : 'Coleta desligada'}</Chip>
         </Card.Content>
+        <Card.Footer>
+          <Button size="sm" variant="secondary" isPending={checking} onPress={() => { void checkUpdate(); }}><RefreshCw size={15} /> Verificar atualizações</Button>
+        </Card.Footer>
       </Card>
 
       <Modal.Backdrop isOpen={choosing} onOpenChange={open => { if (!open) void finishChoosing(); }} variant="blur">

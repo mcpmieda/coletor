@@ -103,7 +103,13 @@ nunca a partir de argumento JS ou JSON da UI.
 O gate verifica autorização online em cada comando e novamente antes de devolver
 resultado; descarta resultado tardio após logout/revogação/troca de identidade.
 Falhas, ausência de provider, documento malformado, resposta excessiva,
-capacidade incorreta e prova vencida/stale bloqueiam. Não há cache de autorização.
+capacidade incorreta e prova vencida/stale bloqueiam. Não há cache de autorização,
+com três reaproveitamentos curtos e explícitos (`institutional_access.py`): um
+comando abre com a conferência confirmada há no máximo 2 s (na prática, a que
+fechou o passo anterior; decisão do responsável em 17/11/2026) e sempre fecha com
+uma nova; uma leitura de dados locais para a janela (histórico, preferências,
+estado) aceita a de até 5 s e não tem conferência de fechamento; o status de 30 s,
+que o servidor autoriza por conta própria, aceita a de até 5 min.
 O marcador `revocationChecked` não é criptografia nem prova autossuficiente:
 depende do transporte TLS e da implementação correta do backend.
 
