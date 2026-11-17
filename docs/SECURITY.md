@@ -40,3 +40,10 @@ captura exige listagem atual; escolhas ausentes não são revogadas nem autoriza
 leitura. Veja CLASS_DISCOVERY_EVIDENCE.md. Senhas/cookies/tokens continuam fora
 das preferências. O acesso Smecel salvo é opcional, cifrado por DPAPI do usuário,
 nunca volta à janela (só a conta mascarada) e é apagado ao sair da conta. A origem e o proxy/TLS não foram ampliados.
+
+Desde 17/11/2026 (decisão do responsável), o acesso Smecel salvo e a resposta
+"lembrar sessão e fila" são cifrados para o usuário do Windows, sem o
+dispositivo e a geração na entropia: continuam abrindo depois de uma autorização
+nova. Cancelar o acesso de um computador pelo servidor não apaga mais o login do
+Smecel guardado nele; isso só acontece em Sair da conta ou na remoção segura.
+Sessão do Smecel, fila e cópias continuam presas ao dispositivo e à geração.

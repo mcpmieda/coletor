@@ -23,6 +23,7 @@ import webbrowser
 
 from .institutional_access import AccessDenied, OnlineResponse, OFFICIAL_ORIGIN, unique
 from .local_settings import LocalSettings, user_settings_directory
+from .protected_storage import windows_question
 from .windows_device_key import WindowsDeviceKey, DeviceKeyError, TPM_PROVIDER, SOFTWARE_PROVIDER
 
 PREFIX = '/api/frequency-collector/'
@@ -241,24 +242,15 @@ class DeviceMetadata:
             self.path.unlink(missing_ok=True)
 
 
-MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2 = 0x4, 0x20, 0x100
-# In front of every window: with no owner window the box used to open behind the others, and the
-# Coletor sat waiting for an answer nobody saw (17/11/2026).
-MB_SETFOREGROUND, MB_TOPMOST = 0x10000, 0x40000
-
-
 def software_key_confirmation():
     """The only question before the browser, and only on a computer whose Windows offers no key in
     the TPM: the software store is never used without a person's yes (docs/DEVICE_AUTH_DECISION.md).
     With a TPM key the authorization is the click in the Ecossistema alone (owner request 17/11/2026)."""
-    if os.name != 'nt':
-        return False
-    message = ('Este computador não tem o chip de segurança (TPM) disponível para guardar a chave do Coletor.\n\n'
-               'Guardar a chave protegida pelo Windows, neste usuário?\n\n'
-               'Depois do Sim, o navegador abre para você autorizar este computador no Ecossistema.')
-    return ctypes.windll.user32.MessageBoxW(
-        None, message, 'Autorizar este computador — Coletor',
-        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND | MB_TOPMOST) == 6
+    return windows_question(
+        'Este computador não tem o chip de segurança (TPM) disponível para guardar a chave do Coletor.\n\n'
+        'Guardar a chave protegida pelo Windows, neste usuário?\n\n'
+        'Depois do Sim, o navegador abre para você autorizar este computador no Ecossistema.',
+        'Autorizar este computador — Coletor')
 
 
 class DeviceProvider:

@@ -1,7 +1,9 @@
 """Collector-owned DPAPI storage. No plaintext credentials or academic files.
 
-Consent is native, not a JS checkbox. Entropy binds each blob to the application,
-purpose, device and server generation. Windows protects it for this OS user.
+Consent is native, not a JS checkbox. Windows protects every blob for this OS user.
+Entropy binds session, queue and copies to the application, purpose, device and server
+generation; the saved Smecel login and the consent answer to the application and purpose
+alone, so they still open after this computer is authorized again (see USER_PURPOSES).
 """
 import ctypes
 from ctypes import wintypes
@@ -24,6 +26,13 @@ UNREADABLE_GRACE_SECONDS = 10 * 60
 MAX_SESSION_BYTES = 1024 * 1024
 MAX_SMALL_BYTES = 8 * 1024
 PURPOSES = ('session', 'queue', 'consent', 'credential')
+# What belongs to this Windows user, not to one authorization (owner decision 17/11/2026): the
+# saved Smecel login and the answer to "remember session and queue". Every new authorization is a
+# new device on the server (the account that authorized changed its password, left the group, was
+# disabled), and tied to the device these stopped opening: the login had to be typed again and the
+# question was asked again. Only leaving the account or the safe removal forgets them (clear).
+USER_PURPOSES = frozenset({'consent', 'credential'})
+USER_SCOPE = 'windows-user'  # Never a device binding: those are "<uuid>:<generation>".
 # What this computer last sent, one file per class diary and one for the school's weekly grid
 # (owner decision 22/10/2026). Only a comparison aid: lost or unreadable means "send in full".
 COPY_PURPOSE = re.compile(r'copy:(?:frequency-[1-9][0-9]{0,9}|schedule|student-report)')
@@ -39,13 +48,22 @@ class StorageError(ValueError):
         super().__init__(code)
 
 
-def persistence_confirmation():
+def windows_question(message, title):
+    """A Yes/No question from Windows itself, "No" by default, in front of every window: with no
+    owner window it used to open behind the others, and the Coletor sat waiting for an answer
+    nobody saw (17/11/2026)."""
     if os.name != 'nt': return False
-    return ctypes.windll.user32.MessageBoxW(None,
+    yes_no, question_icon, second_button_default, set_foreground, topmost = 0x4, 0x20, 0x100, 0x10000, 0x40000
+    return ctypes.windll.user32.MessageBoxW(
+        None, message, title, yes_no | question_icon | second_button_default | set_foreground | topmost) == 6
+
+
+def persistence_confirmation():
+    return windows_question(
         'Autorizar o Coletor a lembrar a sessão do Smecel e guardar uma fila de frequência neste usuário do Windows?\n\n'
         'A sessão e os dados serão cifrados pelo Windows, usados apenas por este Coletor e removidos ao sair da conta. '
         'A fila tem limite de sete dias. Sem autorização, a sessão e a fila ficam somente na memória.',
-        'Lembrar sessão e proteger fila — Coletor', 0x4 | 0x20 | 0x100) == 6
+        'Lembrar sessão e proteger fila — Coletor')
 
 
 class Dpapi:
@@ -116,15 +134,16 @@ class ProtectedStorage:
                 # The normal queue() expiry policy is already seven days.
                 # Evaluate eligibility without writing: only the ordinary
                 # binding cleanup may now retire previously expired entries.
-                self.clear()
+                # The login and the consent answer are this Windows user's and stay.
+                self._forget(p for p in PURPOSES if p not in USER_PURPOSES)
             self._binding = binding
 
     def enable(self):
         with self._lock:
             if self._binding is None: raise StorageError()
-            # The answer is remembered for this device and server generation,
-            # cifrado like the data it protects: opening with Windows must not
-            # stop at a dialog nobody answers. Logout or revocation forget it.
+            # The answer is remembered for this Windows user, cifrado like the
+            # data it protects: opening with Windows, or a new authorization,
+            # must not stop at a dialog nobody answers. Logout forgets it.
             try:
                 remembered = self._read('consent') == {'persistent': True}
             except StorageError:
@@ -139,9 +158,13 @@ class ProtectedStorage:
     @property
     def persistent(self): return self._enabled
 
-    def _entropy(self, purpose):
-        if self._binding is None or not (purpose in PURPOSES or COPY_PURPOSE.fullmatch(purpose)): raise StorageError()
-        return ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + self._binding).encode('utf-8')
+    def _scope(self, purpose):
+        return USER_SCOPE if purpose in USER_PURPOSES else self._binding
+
+    @staticmethod
+    def _entropy(purpose, scope):
+        if scope is None or not (purpose in PURPOSES or COPY_PURPOSE.fullmatch(purpose)): raise StorageError()
+        return ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + scope).encode('utf-8')
 
     def _path(self, purpose):
         # "copy:frequency-13331" is stored as copy-frequency-13331.dpapi (no colon in Windows names).
@@ -157,8 +180,20 @@ class ProtectedStorage:
         except FileNotFoundError: return None
         if len(raw) > limit + 65536 or not raw.startswith(b'CFV2\0'): raise StorageError()
         try:
-            value = json.loads(self._crypto.unprotect(raw[5:], self._entropy(purpose)))
-            if not isinstance(value, dict) or value.get('version') != 2 or value.get('binding') != self._binding:
+            return self._open(raw, purpose, self._scope(purpose))
+        except StorageError:
+            if purpose not in USER_PURPOSES or self._binding is None: raise
+        # Saved before 17/11/2026, tied to the device: while that device is still the live one it
+        # opens, and is written again for the Windows user so the next authorization keeps it.
+        value = self._open(raw, purpose, self._binding)
+        try: self._write_disk(purpose, value)
+        except (StorageError, OSError): pass  # Still readable as it is: tried again at the next read.
+        return value
+
+    def _open(self, raw, purpose, scope):
+        try:
+            value = json.loads(self._crypto.unprotect(raw[5:], self._entropy(purpose, scope)))
+            if not isinstance(value, dict) or value.get('version') != 2 or value.get('binding') != scope:
                 raise StorageError()
             return value['value']
         except StorageError: raise
@@ -178,14 +213,14 @@ class ProtectedStorage:
         self._write_disk(purpose, value)
 
     def _encode(self, purpose, value):
-        raw = json.dumps({'version': 2, 'binding': self._binding, 'value': value},
+        raw = json.dumps({'version': 2, 'binding': self._scope(purpose), 'value': value},
                          ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
         if len(raw) > self._limit(purpose): raise StorageError('PROTECTED_STORAGE_LIMIT')
         return raw
 
     def _write_disk(self, purpose, value):
         raw = self._encode(purpose, value)
-        encrypted = b'CFV2\0' + self._crypto.protect(raw, self._entropy(purpose))
+        encrypted = b'CFV2\0' + self._crypto.protect(raw, self._entropy(purpose, self._scope(purpose)))
         self.directory.mkdir(parents=True, exist_ok=True)
         if self.directory.is_symlink(): raise StorageError()
         fd, name = tempfile.mkstemp(prefix='.protected-', suffix='.tmp', dir=self.directory)
@@ -413,7 +448,7 @@ class ProtectedStorage:
 
     def save_credential(self, email, password):
         """Explicit operator action: the Smecel login is written cifrado by
-        Windows for this user and device, and never returned to the window."""
+        Windows for this user, and never returned to the window."""
         with self._lock:
             if (not isinstance(email, str) or not 3 <= len(email.strip()) <= 254 or '@' not in email
                     or any(c.isspace() for c in email.strip())
@@ -455,15 +490,21 @@ class ProtectedStorage:
             (self.directory / 'credential.dpapi').unlink(missing_ok=True)
 
     def clear(self):
+        """Leaving the account or the safe removal: everything, the Smecel login included."""
         with self._lock:
-            self._credential_summary = None
-            self._memory.clear()
             self._enabled = False
-            # Only the owned files; no recursive deletion or other app paths.
-            for purpose in PURPOSES:
-                (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)
-            try: copies = [p for p in self.directory.glob('copy-*.dpapi') if not p.is_symlink()]
-            except OSError: copies = []
-            for item in copies: item.unlink(missing_ok=True)
-            # Set-aside queues are NOT removed here: logout is no proof they were
-            # receipted. They come back if readable, or expire with the retention.
+            self._forget(PURPOSES)
+
+    def _forget(self, purposes):
+        """These purposes and every copy, in memory and on disk. Only the owned files; no
+        recursive deletion or other app paths."""
+        self._credential_summary = None
+        for purpose in purposes:
+            self._memory.pop(purpose, None)
+            (self.directory / (purpose + '.dpapi')).unlink(missing_ok=True)
+        for name in [n for n in self._memory if n.startswith('copy:')]: del self._memory[name]
+        try: copies = [p for p in self.directory.glob('copy-*.dpapi') if not p.is_symlink()]
+        except OSError: copies = []
+        for item in copies: item.unlink(missing_ok=True)
+        # Set-aside queues are NOT removed here: logout is no proof they were
+        # receipted. They come back if readable, or expire with the retention.

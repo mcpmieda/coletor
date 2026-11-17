@@ -59,6 +59,8 @@ PROTEÇÃO LOCAL
 Tema, raposa e seleção de turmas usam arquivos próprios, sem alunos ou segredos.
 Com autorização nativa, sessão e fila ficam em blobs cifrados pelo Windows,
 ligados ao dispositivo, geração e propósito. Não se grava storage_state em JSON.
+O acesso do Smecel salvo e essa autorização valem para o usuário do Windows:
+continuam depois de autorizar o computador de novo e só saem em Sair da conta.
 A fila tem limite de 64 lotes, 64 MiB e sete dias. Perda de rede não confirma
 revogação; a fila cifrada consentida pode aguardar reconciliação.
 Troca do computador ativo ou conflito de revisão exige conferir e recapturar,
