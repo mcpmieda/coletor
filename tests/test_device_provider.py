@@ -149,13 +149,16 @@ class DeviceProviderTests(unittest.TestCase):
         self.factory.assert_not_called()
         self.assertFalse(self.root.exists())
 
-    def test_human_denial_never_creates_a_credential(self):
+    def test_tpm_key_goes_straight_to_the_browser_with_no_windows_question(self):
+        # One click (owner request 17/11/2026): the decision is "Autorizar este computador" in the
+        # browser. Even a "no" from the Windows box could not matter: it is never shown.
         self.consent.return_value = False
-        with self.assertRaises(AccessDenied):
-            self.provider.open_official_login()
-        self.factory.assert_not_called()
-        self.assertEqual([p[1] for p in self.transport.calls], ['config'])
-        self.assertFalse(self.root.exists())
+        self.provider.open_official_login()
+        self.consent.assert_not_called()
+        self.assertEqual([p[1] for p in self.transport.calls], ['config', 'pairings'])
+        self.browser.assert_called_once()
+        self.assertEqual(self.provider._state['provider'], TPM_PROVIDER)
+        self.assertEqual(self.provider._state['state'], 'unpaired')
 
     def test_windows_uses_shell_execute_https_association_not_python_webbrowser(self):
         from coletor.device_provider import launch_system_browser
@@ -187,7 +190,7 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(self.provider._pending, first)
         self.assertEqual(self.browser.call_count, 2)
         self.assertEqual(self.browser.call_args_list[0].args, self.browser.call_args_list[1].args)
-        self.consent.assert_called_once()
+        self.consent.assert_not_called()
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 1)
         self.assertTrue(self.crypto.exists)
 
@@ -200,7 +203,7 @@ class DeviceProviderTests(unittest.TestCase):
         self.provider.open_official_login()
         self.assertNotEqual(self.provider._pending['id'], previous_id)
         self.assertEqual(sum(path == 'pairings' for _, path, _ in self.transport.calls), 2)
-        self.assertEqual(self.consent.call_count, 1)
+        self.consent.assert_not_called()
 
     def test_unknown_pending_poll_never_reissues_a_pairing(self):
         self.provider.open_official_login()
@@ -231,7 +234,7 @@ class DeviceProviderTests(unittest.TestCase):
         self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
         self.assertEqual(self.provider._state['state'], 'unpaired')
         self.assertEqual(self.browser.call_count, 2)
-        self.consent.assert_called_once()
+        self.consent.assert_not_called()
 
     def test_retry_with_missing_unpaired_key_never_creates_a_replacement(self):
         self.provider.open_official_login()
@@ -239,7 +242,6 @@ class DeviceProviderTests(unittest.TestCase):
         self.provider._key.close()
         self.provider._key = None
         self.crypto.exists = False
-        self.consent.reset_mock()
         with self.assertRaises(AccessDenied): self.provider.open_official_login()
         self.assertEqual(sum(call[0] == 'create' for call in self.crypto.calls), 1)
         self.consent.assert_not_called()
@@ -408,14 +410,21 @@ class DeviceProviderTests(unittest.TestCase):
                 return key
             return original(**kw)
         self.factory.side_effect = factory
-        self.consent.side_effect = [True, False]
-        with self.assertRaises(AccessDenied):
+        self.consent.return_value = False
+        with self.assertRaises(AccessDenied) as refused:
             self.provider.open_official_login()
+        self.assertEqual(refused.exception.code, 'DEVICE_KEY_UNAVAILABLE')
         self.assertFalse(self.crypto.exists)
-        self.consent.assert_called_with(software=True)
-        self.consent.side_effect = [True, True]
+        self.assertFalse(self.root.exists())
+        self.browser.assert_not_called()
+        self.consent.assert_called_once_with()
+        self.consent.return_value = True
+        self.transport.calls.clear()
         self.provider.open_official_login()
         self.assertEqual(self.provider._state['provider'], SOFTWARE_PROVIDER)
+        # The server's time is read again after the person's answer.
+        self.assertEqual([p[1] for p in self.transport.calls], ['config', 'config', 'pairings'])
+        self.browser.assert_called_once()
 
     def test_logout_revokes_then_deletes_only_its_key_and_metadata(self):
         self.activate()

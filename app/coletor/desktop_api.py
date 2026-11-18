@@ -97,6 +97,7 @@ class DesktopApi(PreviewApi):
         self._updater = None  # Set by desktop.py once the window exists.
         self._confirm_local_discard = native_local_recovery_confirmation
         self._resume = ResumeStore(settings_directory)
+        self._resume_guard, self._resume_thread = threading.Lock(), None
         self._collector = FrequencyRuntime(self._access, self._provider, self._manual_session, settings_directory,
                                            on_started=self._desktop_state.begin_read,
                                            on_finished=self._desktop_state.end_read,
@@ -153,7 +154,11 @@ class DesktopApi(PreviewApi):
         return False
 
     def _start_resume(self):
-        threading.Thread(target=self._resume_collection, name='collector-resume', daemon=True).start()
+        # One at a time: the opening of the program and a new authorization may both ask for it.
+        with self._resume_guard:
+            if self._resume_thread is not None and self._resume_thread.is_alive(): return
+            self._resume_thread = threading.Thread(target=self._resume_collection, name='collector-resume', daemon=True)
+            self._resume_thread.start()
 
     def _access_locked(self):
         # Connectivity loss cancels operational work, but is not a revocation
@@ -354,7 +359,14 @@ class DesktopApi(PreviewApi):
         finally: self._collector._operation.release()
 
     def get_institutional_access_status(self):
-        return self._access.status()
+        status = self._access.status()
+        # Authorized again with the program open (the Ecossistema asked for a new authorization):
+        # collection goes back to how the operator left it, with nothing to click (owner decision
+        # 17/11/2026). A pause or leaving the account cleared that intention: nothing starts then.
+        if (status.get('authenticated') and status.get('authorized')
+                and not self._collector.public_status()['active'] and self._resume.active()):
+            self._start_resume()
+        return status
 
     def _pending_batch_blocker(self):
         """Never revoke or replace the identity of an unreconciled encrypted queue."""

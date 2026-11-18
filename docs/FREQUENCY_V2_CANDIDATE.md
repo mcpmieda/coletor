@@ -66,7 +66,9 @@ Ativar pergunta em diálogo nativo antes de persistir sessão/fila. Recusar mant
 somente memória. Chromium storage_state transita apenas na pipe privada do worker
 e memória; não se cria arquivo JSON/plaintext de perfil autenticado. DPAPI usuário
 cifra os dois blobs próprios, com propósito exclusivo, deviceId e generation na
-entropia. Chave Microsoft/refresh de servidor nunca vai ao PC.
+entropia. Chave Microsoft/refresh de servidor nunca vai ao PC. Desde 17/11/2026 o
+acesso Smecel salvo e a resposta desse diálogo não levam deviceId/generation na
+entropia (veja SECURITY.md); sessão, fila e cópias continuam como acima.
 
 Fila: no máximo 64 lotes / 64 MiB / sete dias. GC toca só os blobs próprios.
 Recebimento confirmado exige receipt servidor; timeout consulta receipt antes

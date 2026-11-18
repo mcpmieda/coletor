@@ -16,9 +16,11 @@ Requer Windows 10/11 x64, Microsoft Edge, WebView2 e .NET Framework 4.8 existent
 Nenhuma dependência, serviço ou tarefa de inicialização é instalada pelo pacote.
 
 ENTRAR E PREPARAR
-1. Entre no Ecossistema, pelo navegador oficial, com uma conta autorizada.
-2. Confirme na janela do Windows a autorização deste computador.
-   A chave fica protegida pelo Windows; TPM é padrão. Software exige outra confirmação.
+1. Clique em Entrar no Ecossistema. O navegador oficial abre: entre com uma
+   conta autorizada.
+2. No navegador, clique em Autorizar este computador. O Coletor continua sozinho.
+   A chave fica protegida pelo Windows, no TPM. Só em computador sem TPM o
+   Windows pergunta antes se pode guardar a chave por software.
    A senha e os tokens Microsoft não ficam no Coletor.
 3. Em Acesso ao Smecel, salve o e-mail e a senha do Smecel; ficam protegidos
    pelo Windows e permitem que o Coletor entre sozinho.
@@ -57,6 +59,8 @@ PROTEÇÃO LOCAL
 Tema, raposa e seleção de turmas usam arquivos próprios, sem alunos ou segredos.
 Com autorização nativa, sessão e fila ficam em blobs cifrados pelo Windows,
 ligados ao dispositivo, geração e propósito. Não se grava storage_state em JSON.
+O acesso do Smecel salvo e essa autorização valem para o usuário do Windows:
+continuam depois de autorizar o computador de novo e só saem em Sair da conta.
 A fila tem limite de 64 lotes, 64 MiB e sete dias. Perda de rede não confirma
 revogação; a fila cifrada consentida pode aguardar reconciliação.
 Troca do computador ativo ou conflito de revisão exige conferir e recapturar,

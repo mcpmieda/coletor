@@ -2,11 +2,13 @@
 
 Synthetic accounts, classes and students only; no real login or network.
 """
+import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from coletor.class_catalog import CONTEXT_KEY, LIST_PATH
@@ -14,13 +16,15 @@ from coletor.desktop_api import DesktopApi
 from coletor.frequency_runtime import class_key, collection_payload
 from coletor.history import CollectorHistory, RETENTION_SECONDS
 from coletor.manual_session import SOURCE_ORIGIN, ManualSession, SessionError
-from coletor.protected_storage import ProtectedStorage, StorageError
+from coletor.protected_storage import ProtectedStorage, StorageError, windows_question
 from coletor.resume_store import ResumeStore
 from coletor.tray_winforms import hides_on_close, tray_text
 from synthetic_access import SyntheticAccess
 import test_frequency_runtime as base
 
 SYNTHETIC_LOGIN = {'email': 'operador@escola.invalid', 'password': 'SYNTHETIC-PASSWORD-ONLY'}
+# The device the Ecossistema creates when this computer is authorized again.
+NEW_DEVICE = '22222222-2222-4222-8222-222222222222'
 
 
 class ClassLinkTests(unittest.TestCase):
@@ -146,6 +150,18 @@ class ClassLinkTests(unittest.TestCase):
         self._wait_idle()
         self.assertEqual(self.runtime.collect.call_count, 1)
 
+    def test_saved_login_survives_a_new_authorization_and_ends_with_logout(self):
+        # 17/11/2026: after "Autorizar este computador" the login had to be typed again.
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        self.provider.storage_binding = lambda: (NEW_DEVICE, 1)
+        self.assertEqual(self.runtime.saved_credential(), SYNTHETIC_LOGIN)
+        self.assertEqual(self.storage._binding, NEW_DEVICE + ':1')
+        self.assertEqual(self.runtime.public_status()['credential'], {'saved': True, 'account': 'op•••@escola.invalid'})
+        self.runtime.cancel(purge=True)  # "Sair da conta".
+        self.assertIsNone(self.storage.load_credential())
+        self.assertFalse((self.storage.directory / 'credential.dpapi').exists())
+        self.assertEqual(self.runtime.public_status()['credential'], {'saved': False})
+
     def test_status_never_returns_the_saved_password(self):
         self.storage.save_credential(**SYNTHETIC_LOGIN)
         status = self.runtime.public_status()
@@ -164,32 +180,165 @@ class ProtectedLoginTests(unittest.TestCase):
         self.storage = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=consent)
         self.storage.bind(base.DEVICE, 1)
 
-    def test_login_is_ciphertext_bound_to_device_and_forgotten_on_clear(self):
+    def reopened(self, device, generation):
+        """The program opened again, with the device and generation the Ecossistema now gives it."""
+        storage = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=self.consent)
+        storage.bind(device, generation)
+        return storage
+
+    def legacy(self, purpose, value, device, generation):
+        """A file as the versions before 17/11/2026 wrote it: tied to the device and its generation."""
+        binding = f'{device}:{generation}'
+        raw = json.dumps({'version': 2, 'binding': binding, 'value': value}).encode('utf-8')
+        entropy = ('Ecossistema.Coletor.Protected.v2\0' + purpose + '\0' + binding).encode('utf-8')
+        self.storage.directory.mkdir(parents=True, exist_ok=True)
+        path = self.storage.directory / (purpose + '.dpapi')
+        path.write_bytes(b'CFV2\0' + base.SyntheticCrypto().protect(raw, entropy))
+        return path
+
+    def test_login_is_ciphertext_and_opens_after_a_new_authorization(self):
         self.storage.save_credential(**SYNTHETIC_LOGIN)
-        raw = (Path(self.directory.name) / 'protected-frequency-v2' / 'credential.dpapi').read_bytes()
-        self.assertNotIn(SYNTHETIC_LOGIN['password'].encode(), raw)
+        path = self.storage.directory / 'credential.dpapi'
+        self.assertNotIn(SYNTHETIC_LOGIN['password'].encode(), path.read_bytes())
+        # The program reopened with a new generation, or with a new device.
+        self.assertEqual(self.reopened(base.DEVICE, 2).load_credential(), SYNTHETIC_LOGIN)
+        self.assertEqual(self.reopened(NEW_DEVICE, 1).load_credential(), SYNTHETIC_LOGIN)
+        # The same with the program open: the new binding keeps the login, on disk too.
+        self.storage.bind(NEW_DEVICE, 1)
+        self.assertTrue(path.exists())
         self.assertEqual(self.storage.load_credential(), SYNTHETIC_LOGIN)
-        other = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=self.consent)
-        other.bind(base.DEVICE, 2)
-        self.assertIsNone(other.load_credential())
-        self.storage.clear()
+        self.assertEqual(self.storage.credential_status(), {'saved': True, 'account': 'op•••@escola.invalid'})
+
+    def test_login_is_forgotten_on_logout_and_when_the_operator_removes_it(self):
+        path = self.storage.directory / 'credential.dpapi'
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        self.storage.clear()  # "Sair da conta" and "Remover acesso deste PC".
+        self.assertFalse(path.exists())
         self.assertIsNone(self.storage.load_credential())
+        self.assertIsNone(self.reopened(NEW_DEVICE, 1).load_credential())
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        self.storage.clear_credential()
+        self.assertFalse(path.exists())
+        self.assertEqual(self.storage.credential_status(), {'saved': False})
+
+    def test_login_saved_by_an_earlier_version_is_kept_while_its_device_is_the_live_one(self):
+        path = self.legacy('credential', SYNTHETIC_LOGIN, base.DEVICE, 1)
+        before = path.read_bytes()
+        # Another device cannot open the old file, and leaves it as it is.
+        self.assertIsNone(self.reopened(NEW_DEVICE, 1).load_credential())
+        self.assertEqual(path.read_bytes(), before)
+        # The device that saved it opens it and writes it again for the Windows user...
+        self.assertEqual(self.storage.load_credential(), SYNTHETIC_LOGIN)
+        self.assertNotEqual(path.read_bytes(), before)
+        self.assertNotIn(SYNTHETIC_LOGIN['password'].encode(), path.read_bytes())
+        # ...so the next authorization still has it.
+        self.assertEqual(self.reopened(NEW_DEVICE, 1).load_credential(), SYNTHETIC_LOGIN)
+
+    def test_session_and_copies_stay_tied_to_the_device(self):
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        self.storage.save_copy('schedule', {'synthetic': True})
+        other = self.reopened(NEW_DEVICE, 1)
+        self.assertIsNone(other.load_session())  # Not this device's: no session, never another's.
+        self.assertIsNone(other.load_copy('schedule'))
+        self.storage.bind(NEW_DEVICE, 1)
+        self.assertFalse((self.storage.directory / 'session.dpapi').exists())
+        self.assertFalse((self.storage.directory / 'copy-schedule.dpapi').exists())
+        self.assertIsNone(self.storage.load_session())
 
     def test_invalid_login_is_refused(self):
         for email, password in (('sem-arroba', 'x'), ('a@b.c', ''), ('a @b.c', 'x'), ('a@b.c', 'x' * 257)):
             with self.subTest(email=email), self.assertRaises(StorageError):
                 self.storage.save_credential(email, password)
 
-    def test_consent_is_asked_once_per_device_and_again_after_logout(self):
-        self.assertTrue(self.storage.enable())
-        reopened = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=self.consent)
-        reopened.bind(base.DEVICE, 1)
-        self.assertTrue(reopened.enable())
-        self.assertEqual(self.asked, 1)
-        reopened.clear()
-        reopened.bind(base.DEVICE, 1)
+    def test_session_of_an_earlier_authorization_is_no_session_and_is_saved_over(self):
+        # 17/11/2026: the old session.dpapi stayed on disk after a new authorization with the
+        # program reopened, did not open, and every run stopped with a storage error.
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        self.storage.save_credential(**SYNTHETIC_LOGIN)
+        path = self.storage.directory / 'session.dpapi'
+        stale = path.read_bytes()
+        reopened = self.reopened(NEW_DEVICE, 1)
         reopened.enable()
+        driver = Catalog(SYNTHETIC_LOGIN['password'])
+        driver.export_state = lambda: {'cookies': [{'domain': 'www.smecel.com.br'}], 'origins': []}
+        source_directory = tempfile.TemporaryDirectory(); self.addCleanup(source_directory.cleanup)
+        source = ManualSession(lambda: driver, source_directory.name)
+        reply = source.operational_catalog(reopened)  # Signs in with the saved login.
+        self.assertEqual(driver.logins, 1)
+        self.assertEqual(reply['catalog']['classes'][0]['class_id'], '13331')
+        self.assertEqual(path.read_bytes(), stale)  # Reading never deletes.
+        source.preserve_and_close(reopened)
+        self.assertNotEqual(path.read_bytes(), stale)
+        self.assertEqual(self.reopened(NEW_DEVICE, 1).load_session(),
+                         {'cookies': [{'domain': 'www.smecel.com.br'}], 'origins': []})
+
+    def test_session_of_an_earlier_authorization_without_a_saved_login_asks_a_person(self):
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        driver = Catalog(SYNTHETIC_LOGIN['password'])
+        source_directory = tempfile.TemporaryDirectory(); self.addCleanup(source_directory.cleanup)
+        with self.assertRaisesRegex(SessionError, 'SOURCE_LOGIN_REQUIRED'):
+            ManualSession(lambda: driver, source_directory.name).operational_catalog(self.reopened(NEW_DEVICE, 1))
+        self.assertIsNone(driver.opened)
+
+    def test_session_errors_that_are_not_an_earlier_authorization_still_show(self):
+        self.storage.enable()
+        self.storage.save_session({'cookies': [], 'origins': []})
+        path = self.storage.directory / 'session.dpapi'
+        saved = path.read_bytes()
+        # Windows protection not answering (a moment at logon): the error stands, to try again.
+        failing = self.reopened(NEW_DEVICE, 1)
+        failing._crypto = Mock(protect=Mock(side_effect=StorageError()), unprotect=Mock(side_effect=StorageError()))
+        with self.assertRaises(StorageError): failing.load_session()
+        # Not one of the Coletor's files, and a storage with no live binding.
+        path.write_bytes(b'not-a-protected-file')
+        with self.assertRaises(StorageError): self.storage.load_session()
+        path.write_bytes(saved)
+        unbound = ProtectedStorage(self.directory.name, crypto=base.SyntheticCrypto(), consent=self.consent)
+        with self.assertRaises(StorageError): unbound.load_session()
+        # A saved session with a cookie of another site is refused, never used.
+        other_site = json.dumps({'version': 2, 'binding': base.DEVICE + ':1',
+                                 'value': {'cookies': [{'domain': 'evil.invalid'}], 'origins': []}}).encode('utf-8')
+        entropy = ('Ecossistema.Coletor.Protected.v2\0session\0' + base.DEVICE + ':1').encode('utf-8')
+        path.write_bytes(b'CFV2\0' + base.SyntheticCrypto().protect(other_site, entropy))
+        with self.assertRaises(StorageError): self.storage.load_session()
+
+    def test_consent_is_asked_once_per_windows_user_and_again_after_logout(self):
+        self.assertTrue(self.storage.enable())
+        self.assertTrue(self.reopened(base.DEVICE, 1).enable())
+        # A new authorization does not ask again, with the program reopened or still open.
+        renewed = self.reopened(NEW_DEVICE, 1)
+        self.assertTrue(renewed.enable())
+        self.storage.bind(NEW_DEVICE, 1)
+        self.assertTrue(self.storage.persistent)
+        self.assertEqual(self.asked, 1)
+        renewed.clear()
+        renewed.bind(NEW_DEVICE, 1)
+        renewed.enable()
         self.assertEqual(self.asked, 2)
+
+    def test_windows_question_opens_in_front_with_no_as_the_default(self):
+        # 17/11/2026: the box opened behind the other windows and nobody answered it.
+        with patch('coletor.protected_storage.os') as system, patch('coletor.protected_storage.ctypes') as native:
+            system.name = 'nt'
+            box = native.windll.user32.MessageBoxW
+            box.return_value = 6  # Yes.
+            self.assertTrue(windows_question('Pergunta sintética?', 'Título sintético'))
+            owner, message, title, flags = box.call_args.args
+            self.assertEqual((owner, message, title), (None, 'Pergunta sintética?', 'Título sintético'))
+            yes_no, no_is_default, set_foreground, topmost = 0x4, 0x100, 0x10000, 0x40000
+            for flag in (yes_no, no_is_default, set_foreground, topmost):
+                self.assertEqual(flags & flag, flag)
+            box.return_value = 7  # No.
+            self.assertFalse(windows_question('Pergunta sintética?', 'Título sintético'))
+
+    def test_consent_answered_in_an_earlier_version_is_not_asked_again(self):
+        self.legacy('consent', {'persistent': True}, base.DEVICE, 1)
+        self.assertTrue(self.storage.enable())
+        self.assertTrue(self.reopened(NEW_DEVICE, 1).enable())
+        self.assertEqual(self.asked, 0)
 
 
 class Catalog:
@@ -299,6 +448,48 @@ class TrayAndResumeTests(unittest.TestCase):
         api._resume.set(True)
         api._access.status = Mock(return_value={'authenticated': True, 'authorized': True})
         self.assertTrue(api._resume_collection(attempts=1, interval=0))
+        api._collector.activate.assert_called_once()
+
+    def test_new_authorization_resumes_a_collection_left_active(self):
+        # 17/11/2026: after "Autorizar este computador" the collection stayed off until "Ativar".
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._start_resume = Mock()
+        active = {'active': False}
+        api._collector.public_status = lambda: dict(active)
+        refused = {'authenticated': False, 'authorized': False, 'code': 'ACCESS_REQUIRED'}
+        authorized = {'authenticated': True, 'authorized': True}
+        api._resume.set(True)
+        api._access.status = Mock(return_value=refused)
+        self.assertEqual(api.get_institutional_access_status(), refused)
+        api._start_resume.assert_not_called()
+        api._access.status = Mock(return_value=authorized)
+        self.assertEqual(api.get_institutional_access_status(), authorized)
+        api._start_resume.assert_called_once()
+        # Already collecting, or left off by a pause or a logout: nothing to start.
+        active['active'] = True
+        api.get_institutional_access_status()
+        active['active'] = False
+        api._resume.set(False)
+        api.get_institutional_access_status()
+        api._start_resume.assert_called_once()
+
+    def test_resume_runs_one_at_a_time(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        api = DesktopApi(Path(directory.name), access=SyntheticAccess())
+        api._resume.set(True)
+        started, finish = threading.Event(), threading.Event()
+        def activate():
+            started.set()
+            finish.wait(5)
+            return {'state': 'reserve'}
+        api._collector.activate = Mock(side_effect=activate)
+        api._start_resume()
+        self.assertTrue(started.wait(5))
+        api._start_resume()  # The opening of the program and a new authorization at once.
+        finish.set()
+        api._resume_thread.join(5)
+        self.assertFalse(api._resume_thread.is_alive())
         api._collector.activate.assert_called_once()
 
     def test_long_offline_boot_keeps_trying_and_activates_without_restart(self):

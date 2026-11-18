@@ -1,7 +1,8 @@
 """Collector-only online provider. Microsoft passwords/tokens never enter the PC.
 
 Construction/status without device state creates no credential and sends no
-request. New activation requires server readiness and a native human decision.
+request. New activation requires server readiness and a person's click on the
+official browser page; a software key (no TPM) also needs a native yes first.
 Production TLS transport has one fixed origin, no redirect/cookie/proxy support.
 """
 import base64
@@ -22,6 +23,7 @@ import webbrowser
 
 from .institutional_access import AccessDenied, OnlineResponse, OFFICIAL_ORIGIN, unique
 from .local_settings import LocalSettings, user_settings_directory
+from .protected_storage import windows_question
 from .windows_device_key import WindowsDeviceKey, DeviceKeyError, TPM_PROVIDER, SOFTWARE_PROVIDER
 
 PREFIX = '/api/frequency-collector/'
@@ -240,19 +242,20 @@ class DeviceMetadata:
             self.path.unlink(missing_ok=True)
 
 
-def native_confirmation(software=False):
-    if os.name != 'nt':
-        return False
-    message = ('Este computador não disponibilizou a chave no TPM. Usar explicitamente o armazenamento protegido por software do Windows?'
-               if software else 'Autorizar este computador para continuar usando o Coletor sem repetir o login?\n\n'
-               'A senha não será salva. Uma chave privada protegida pelo Windows ficará neste perfil. '
-               'O acesso exige conexão e permissão de ADMINISTRADOR. Você poderá sair da conta no coletor.')
-    return ctypes.windll.user32.MessageBoxW(None, message, 'Autorizar este computador — Coletor', 0x4 | 0x20 | 0x100) == 6
+def software_key_confirmation():
+    """The only question before the browser, and only on a computer whose Windows offers no key in
+    the TPM: the software store is never used without a person's yes (docs/DEVICE_AUTH_DECISION.md).
+    With a TPM key the authorization is the click in the Ecossistema alone (owner request 17/11/2026)."""
+    return windows_question(
+        'Este computador não tem o chip de segurança (TPM) disponível para guardar a chave do Coletor.\n\n'
+        'Guardar a chave protegida pelo Windows, neste usuário?\n\n'
+        'Depois do Sim, o navegador abre para você autorizar este computador no Ecossistema.',
+        'Autorizar este computador — Coletor')
 
 
 class DeviceProvider:
     def __init__(self, directory=None, *, transport=None, key_factory=WindowsDeviceKey,
-                 consent=native_confirmation, browser=launch_system_browser, clock=time.time):
+                 consent=software_key_confirmation, browser=launch_system_browser, clock=time.time):
         self._metadata = DeviceMetadata(directory)
         self._transport = transport or OfficialTransport()
         self._key_factory, self._consent, self._browser, self._clock = key_factory, consent, browser, clock
@@ -386,6 +389,13 @@ class DeviceProvider:
                 raise AccessDenied('ACCESS_REQUIRED')
             return self._request('access', self._proof('collector-access'))
 
+    def _server_ready(self):
+        ready = decode(self._request('config'))
+        if (set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['contractVersion'] != 1
+                or ready['ready'] is not True or type(ready['serverTime']) is not int):
+            raise AccessDenied('ACCESS_NOT_CONFIGURED')
+        return ready
+
     def open_official_login(self):
         with self._lock:
             if self._pending:
@@ -423,19 +433,10 @@ class DeviceProvider:
                         or status['state'] not in {'expired', 'cancelled', 'denied'}):
                     raise AccessDenied('INVALID_ACCESS_RESPONSE')
                 self._pending = None
-            ready = decode(self._request('config'))
-            if set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['contractVersion'] != 1 or ready['ready'] is not True:
-                raise AccessDenied('ACCESS_NOT_CONFIGURED')
-            saved_state = self._metadata.read()
-            # Retrying an unpaired key does not create persistent access in
-            # Windows again. Its policy is still validated by _load, and the
-            # browser still requires a fresh account/device confirmation.
-            if (not saved_state or saved_state['state'] != 'unpaired') and not self._consent():
-                raise AccessDenied('DEVICE_ACTIVATION_CANCELLED')
-            # Fetch current server time after a potentially long human decision.
-            ready = decode(self._request('config'))
-            if set(ready) != {'contractVersion', 'ready', 'serverTime'} or ready['ready'] is not True or type(ready['serverTime']) is not int:
-                raise AccessDenied('ACCESS_NOT_CONFIGURED')
+            # The server must be ready before any key exists. The decision itself is the click on
+            # "Autorizar este computador" in the browser: a key the Ecossistema never accepted
+            # authorizes nothing.
+            ready = self._server_ready()
             self._state = self._metadata.read()
             if self._state:
                 if self._state['state'] in {'deletePending', 'revokedLocally'}:
@@ -474,8 +475,10 @@ class DeviceProvider:
                         public = key.create(activation_authorized=True)
                 except DeviceKeyError:
                     key.close()
-                    if not self._consent(software=True):
+                    if not self._consent():
                         raise AccessDenied('DEVICE_KEY_UNAVAILABLE') from None
+                    # The request carries the server's time: read it again after a person's answer.
+                    ready = self._server_ready()
                     provider = SOFTWARE_PROVIDER
                     key = self._key_factory(provider=provider)
                     public = key.create(activation_authorized=True)
