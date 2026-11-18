@@ -420,6 +420,76 @@ class UpdateWindowTests(unittest.TestCase):
         self.assertFalse(item.update_allowed())
 
 
+class UpdateWithoutAccessTests(unittest.TestCase):
+    """What the updater asks of the program: collection left active, with and without access."""
+    def setUp(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        self.now = datetime(2026, 11, 16, 3, 0, tzinfo=ZoneInfo('America/Bahia')).timestamp()
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.directory = folder.name
+
+    def api(self, answers):
+        from coletor.desktop_api import DesktopApi
+        from coletor.institutional_access import InstitutionalAccess
+        from test_institutional_access import NOW, Provider, polls_apart
+        api = DesktopApi(self.directory, access=InstitutionalAccess(Provider(answers), clock=lambda: NOW,
+                                                                    monotonic=polls_apart()))
+        api._collector._clock = lambda: self.now
+        api._resume.set(True)
+        return api
+
+    def agenda(self, time):
+        return {'settings': {'reportSchedule': None, 'schedule': {'timezone': 'America/Bahia', 'rules': [
+            {'weekday': d, 'enabled': True, 'times': [time], 'recheck': None} for d in range(7)]}}}
+
+    def test_a_computer_without_access_updates_even_with_collection_left_active(self):
+        # The school computer stayed on 0.4.344 the day its authorization fell (17/11/2026).
+        from coletor.institutional_access import AccessDenied
+        api = self.api([AccessDenied('ACCESS_REQUIRED')])
+        self.assertFalse(api._update_allowed())  # Nothing asked of the Ecossistema yet.
+        api._access.status()
+        self.assertTrue(api._update_allowed())
+        with api._collector._operation:
+            self.assertFalse(api._update_allowed())  # Never over something running.
+
+    def test_no_connection_is_not_a_lost_authorization(self):
+        from coletor.institutional_access import AccessDenied
+        api = self.api([AccessDenied('ACCESS_UNAVAILABLE'), OSError('synthetic-network')])
+        for _ in range(2):
+            api._access.status()
+            self.assertFalse(api._update_allowed())
+        api._resume.set(False)
+        self.assertTrue(api._update_allowed())  # Collection not left active: as before.
+
+    def test_an_authorization_under_way_is_not_interrupted(self):
+        from coletor.institutional_access import AccessDenied
+        api = self.api([AccessDenied('PAIRING_PENDING')])
+        api._access.status()
+        self.assertFalse(api._update_allowed())
+
+    def test_with_access_the_agenda_decides_as_before(self):
+        from coletor.institutional_access import AccessDenied
+        from test_institutional_access import response
+        api = self.api([response(), AccessDenied('ACCESS_REQUIRED')])
+        api._access.status()
+        self.assertFalse(api._update_allowed())  # Collecting, agenda not known yet.
+        api._collector._status = self.agenda('12:00')
+        self.assertTrue(api._update_allowed())
+        api._collector._status = self.agenda('03:03')
+        self.assertFalse(api._update_allowed())  # In three minutes.
+        # Access lost with the agenda already known in this opening: the agenda still decides.
+        api._access.status()
+        self.assertFalse(api._update_allowed())
+        api._collector._status = self.agenda('12:00')
+        self.assertTrue(api._update_allowed())
+
+    def test_the_updater_is_given_this_rule(self):
+        source = (ROOT / 'app/coletor/desktop.py').read_text(encoding='utf-8')
+        self.assertTrue('safe_now=api._update_allowed,' in source)
+
+
 class LoopTests(unittest.TestCase):
     def test_keeps_checking_after_a_failure(self):
         calls = []

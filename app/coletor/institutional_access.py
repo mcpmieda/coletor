@@ -113,6 +113,10 @@ COMMAND_REUSE_SECONDS = 2.0
 # A status read the server authorizes by itself (signed device request): the online check is
 # reused for this long (issue #1426, 6). A refusal runs the full check at once.
 LIGHT_REUSE_SECONDS = 300.0
+# Failed checks that say nothing about the authorization: no connection, or this computer's clock off.
+TRANSIENT_CODES = frozenset({'ACCESS_UNAVAILABLE', 'CLOCK_OUT_OF_SYNC'})
+# A person is authorizing this computer right now (the browser is open).
+AUTHORIZING_CODES = frozenset({'ACCOUNT_CHANGED', 'PAIRING_PENDING'})
 # Server answers that mean the device or the account lost its access.
 ACCESS_REFUSALS = frozenset({'not-authorized', 'ACCESS_REQUIRED'})
 
@@ -229,7 +233,7 @@ class InstitutionalAccess:
         return proof
 
     def _fence(self, code):
-        transient = code in {'ACCESS_UNAVAILABLE', 'CLOCK_OUT_OF_SYNC'}
+        transient = code in TRANSIENT_CODES
         with self._lock:
             # A concurrent transient heartbeat/status request cannot fence a
             # valid in-flight capture. Its own request still fails closed; the
@@ -326,6 +330,14 @@ class InstitutionalAccess:
             if isinstance(details, dict) and isinstance(details.get("pairingCode"), str) and len(details["pairingCode"]) == 6 and details["pairingCode"].isascii() and details["pairingCode"].isdigit():
                 status["pairingCode"] = details["pairingCode"]
             return status
+
+    def refused(self):
+        """The last check ended in a refusal and none passed since: nothing can be collected here
+        until a person authorizes this computer again. Not a failed connection or a clock off (the
+        access may be whole), nor an authorization a person is finishing in the browser."""
+        with self._lock:
+            return (self._confirmed is None and self._locked_code is not None
+                    and self._locked_code not in TRANSIENT_CODES | AUTHORIZING_CODES)
 
     def open_login(self):
         # Native status checks or the initial account change may fail while
