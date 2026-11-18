@@ -139,8 +139,7 @@ def run_desktop(callback=None, settings_directory=None, *, access=None, backgrou
     from .updater import Updater
     directory = settings_directory or user_settings_directory()
     updater = Updater(__version__, ROOT, directory,
-                      safe_now=lambda: api._collector.update_allowed(collecting=api._resume.active()),
-                      idle_now=api._collector.idle)
+                      safe_now=api._update_allowed, idle_now=api._collector.idle)
     api._updater = updater  # Ajustes > Verificar atualizações.
     quit_requests = QuitRequests()
     ready = threading.Event()  # Set once opened() has finished (clock icon in place or failed).

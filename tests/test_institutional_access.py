@@ -481,6 +481,21 @@ class InstitutionalAccessTests(unittest.TestCase):
         self.assertTrue(gate._cleanup_pending)
         self.assertEqual(gate.status()['code'], 'ACCESS_CLEANUP_PENDING')
 
+    def test_refused_is_a_lost_authorization_never_a_failed_connection_or_a_login_under_way(self):
+        # The updater asks this: a computer the Ecossistema refuses was never updated (17/11/2026).
+        answers = [AccessDenied('ACCESS_REQUIRED'), AccessDenied('ACCESS_UNAVAILABLE'), RuntimeError('synthetic-network'),
+                   AccessDenied('ACCESS_REQUIRED'), AccessDenied('PAIRING_PENDING'), AccessDenied('ACCESS_REQUIRED'),
+                   response(), AccessDenied('CLOCK_OUT_OF_SYNC'), AccessDenied('ACCESS_REQUIRED')]
+        gate = InstitutionalAccess(Provider(answers), clock=lambda: NOW, monotonic=polls_apart())
+        self.assertFalse(gate.refused())  # Nothing asked yet.
+        seen = []
+        for _ in answers:
+            gate.status()
+            seen.append(gate.refused())
+        self.assertEqual(seen, [True, False, False, True, False, True, False, False, True])
+        gate.open_login()  # A person began a new authorization.
+        self.assertFalse(gate.refused())
+
     def test_local_check_cannot_extend_expired_directory_evidence(self):
         with self.assertRaises(AccessDenied):
             validate_authorization(response(directoryCheckedAt=stamp(NOW-301),

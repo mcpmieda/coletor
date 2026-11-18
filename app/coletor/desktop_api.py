@@ -160,6 +160,14 @@ class DesktopApi(PreviewApi):
             self._resume_thread = threading.Thread(target=self._resume_collection, name='collector-resume', daemon=True)
             self._resume_thread.start()
 
+    def _update_allowed(self):
+        """Python-only, for the updater: an update nobody asked for may start now.
+
+        Collection left active on a computer the Ecossistema refuses cannot start, so its agenda
+        is not waited for: waiting kept a computer that lost its authorization from ever installing
+        the version that repaired it (the school's stayed on 0.4.344, 17/11/2026)."""
+        return self._collector.update_allowed(collecting=self._resume.active() and not self._access.refused())
+
     def _access_locked(self):
         # Connectivity loss cancels operational work, but is not a revocation
         # receipt. Retain only the consented encrypted reconciliation queue.
