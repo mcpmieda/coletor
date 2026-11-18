@@ -329,8 +329,12 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
         last = day_lessons.get(record['date'])
         if state == 'planned_unknown' and last is not None and record['lesson'] > last: continue
         if state == 'unknown':
-            # A position without a confirmed meaning: the day is sent, but never as complete.
+            # A position without a confirmed meaning: its day is sent, but never as complete. The
+            # position is listed with the day's lessons, so a day made only of such positions still
+            # reaches the Ecossistema. A day missing from the reading says the diary no longer has
+            # it, and the Ecossistema then removes the absences it held for that day (17/11/2026).
             unresolved_days.add((key, record['date']))
+            coverage.setdefault((key, record['date']), set()).add(record['lesson'])
             continue
         # Lesson days (owner decision 20/10/2026): every position of the Smecel diary with a lesson
         # (a point, an X or a justified mark) up to the capture, so 5- or 6-lesson days, weekends,

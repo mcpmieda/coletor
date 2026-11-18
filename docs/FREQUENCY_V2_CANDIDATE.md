@@ -57,6 +57,12 @@ identidade. As seis posições nativas são preservadas. Apenas X/J conhecidos s
 esparsos; pontos, desconhecidos, vazios e falhas não viram presença. Cobertura e
 roster não são certificados pelo cliente. Captura parcial pode preservar X/J
 alinhados e cabeçalhos conferidos, mantendo `complete:false/rosterComplete:false`.
+Desde 17/11/2026 a posição de símbolo desconhecido entra na lista de aulas do dia, sempre
+com `complete:false`: um dia só com posições desconhecidas é enviado, nunca omitido, porque
+um dia ausente da leitura faz o Ecossistema retirar as faltas que guardava para ele.
+Pelo mesmo motivo, uma grade que o leitor não consegue ler inteira (célula sem as seis posições,
+linha de dia sem os onze meses, linha faltando) faz a turma falhar naquela coleta, em vez de
+seguir sem os dias que não leu; ela é lida de novo no horário seguinte.
 Datas futuras usam o corte civil no fuso da escola. Percentuais e denominadores
 permanecem indisponíveis enquanto não houver evidência suficiente no servidor.
 
