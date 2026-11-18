@@ -1019,6 +1019,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(any(r['state'] == 'absent' for r in result['snapshot']['records']))
         self.assertFalse(result['capture']['roster_complete_verified'])
 
+    def test_a_grid_that_cannot_be_read_whole_fails_the_class_and_drops_no_day(self):
+        # 17/11/2026: the parser skips a cell without its six positions. Tolerated in a collection,
+        # that day went missing from the reading, and the Ecossistema removes the absences it held
+        # for a day the diary no longer has. The class fails this run instead.
+        import re
+        from test_manual_session import raw_fixture
+        from coletor.manual_session import captured_preview, source_url
+        html, removed = re.subn(r'<div[^>]*data-day="2" data-lesson="6"[^>]*></div>', '', raw_fixture(), count=1)
+        self.assertEqual(removed, 1)
+        payload = {'url': source_url('13331', 2026), 'password_form': False, 'html': html}
+        with self.assertRaises(SessionError) as refused:
+            captured_preview(payload, '13331', 2026, allow_partial=True)
+        self.assertEqual(refused.exception.reason, 'diary-structure')
+
     def test_clock_rollback_does_not_freeze_scheduler(self):
         self.runtime._last_tick = NOW + 3600
         self.provider.now = NOW

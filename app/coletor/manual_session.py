@@ -70,7 +70,13 @@ def captured_preview(payload, class_id, year, *, allow_partial=False):
     snapshot = result["snapshot"]
     permitted = {"CLASS_ID_UNVERIFIED", "ROSTER_COMPLETENESS_UNVERIFIED"}
     if allow_partial:
-        permitted |= {'SOURCE_SYMBOL_UNKNOWN', 'GRID_COVERAGE_INVALID', 'TOTALS_ROW_INVALID'}
+        # A grid the parser could not read whole (a cell without its six positions, a day row
+        # without its eleven months, a missing row) is NOT permitted: the parser skips what it could
+        # not read, the day would be missing from the reading, and the Ecossistema removes the
+        # absences it held for a day the diary no longer has (17/11/2026). The class fails this run
+        # and is read again at the next time. An unknown symbol is different: its day is sent as
+        # incomplete (collection_payload).
+        permitted |= {'SOURCE_SYMBOL_UNKNOWN', 'TOTALS_ROW_INVALID'}
     if (snapshot["source_format"] != "smecel-annual-v1" or not snapshot["students"]
             or any(i["severity"] == "error" and i["code"] not in permitted for i in snapshot["issues"])):
         raise SessionError("O diário não passou pela conferência estrutural. Nenhum resultado parcial foi mantido.", "diary-structure")
