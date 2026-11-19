@@ -8,7 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, is_dataclass
 from typing import Literal
 
-AttendanceState = Literal["present", "absent", "excused_absent", "non_school_day", "outside_enrollment", "planned_unknown", "unmarked", "unknown"]
+AttendanceState = Literal["present", "absent", "excused_absent", "non_school_day", "outside_enrollment", "planned_unknown",
+                          "pending", "unmarked", "unknown"]
 Severity = Literal["error", "warning"]
 
 

@@ -465,6 +465,10 @@ def _source_state(symbol, slot, legend):
             span = spans[0]
             if symbol == "X" and _has_class(span, "ls-color-danger") and "falta nao justificada" in legend:
                 return "absent", "X"
+            # FP, "frequência pendente" (Smecel, 18/11/2026): the diary no longer gives presence by
+            # itself; a lesson the teacher has not marked yet (present or absent) shows FP.
+            if symbol == "FP" and _has_class(span, "freq-grade-fp") and "frequencia pendente" in legend:
+                return "pending", "FP"
             if not symbol and _has_class(span, "ls-color-warning") and _has_class(span, "ls-ico-info") and "falta justificada" in legend:
                 return "excused_absent", "icon:ls-color-warning.ls-ico-info"
             # Blue X, "falta com motivo informado" (owner decision 20/10/2026): for the school it is

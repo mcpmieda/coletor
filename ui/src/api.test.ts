@@ -4,7 +4,7 @@ import { STATE_LABELS } from './types';
 afterEach(() => vi.unstubAllGlobals());
 
 test('every observed state has an honest label', () => {
-  expect(Object.keys(STATE_LABELS).sort()).toEqual(['present','absent','planned_unknown','unmarked','unknown','excused_absent','non_school_day','outside_enrollment'].sort());
+  expect(Object.keys(STATE_LABELS).sort()).toEqual(['present','absent','planned_unknown','pending','unmarked','unknown','excused_absent','non_school_day','outside_enrollment'].sort());
   expect(STATE_LABELS.planned_unknown).toContain('sem confirmação');
 });
 test('browser adapter submits only local preview, without credentials or caching', async () => {

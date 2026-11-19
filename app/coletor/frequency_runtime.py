@@ -221,9 +221,17 @@ def report_hash(rows):
 
 
 # Positions of the Smecel diary that had a lesson: a point ("aula prevista/presença", given up to the
-# capture), an absence (red X) or a justified absence (yellow icon or blue X). The calendar icon,
-# "fora do período de matrícula" and blank positions never count as a lesson.
-LESSON_STATES = frozenset({'planned_unknown', 'absent', 'excused_absent'})
+# capture), an absence (red X), a justified absence (yellow icon or blue X) or an FP ("frequência
+# pendente", since 18/11/2026: a lesson the teacher has not marked yet). The calendar icon, "fora do
+# período de matrícula" and blank positions never count as a lesson.
+LESSON_STATES = frozenset({'planned_unknown', 'pending', 'absent', 'excused_absent'})
+# Owner decision 19/11/2026. On 18/11/2026 the Smecel stopped giving presence by itself: the teacher
+# marks each lesson present (the point) or absent (X), and a lesson not marked yet shows FP. From this
+# school day on, an FP goes to the Ecossistema as `pending` ("a confirmar": neither a presence nor an
+# absence until marked). Before it, the Smecel itself had given every one of those lessons presence
+# (the diary showed the point there until 18/11): such an FP, a lesson that never had a roll call,
+# still counts as it did, a lesson without absence, so the Portal shows the past as before.
+PENDING_FROM = '2026-11-19'
 # The whole local history when checking a mark was already logged.
 MAX_HISTORY_SCAN = MAX_ENTRIES
 
@@ -244,14 +252,16 @@ def lessons_per_day(records):
     Only direct evidence drops a position: on that day, or on the same weekday within four weeks
     either side, a student missed every lesson before it (from the first) but has no mark in it,
     and no student of the class has a mark in it. That is the whole-day absence of a five-lesson
-    day ("XXXXX."). A position with any mark always counts. A day whose weekday has no mark at all
+    day ("XXXXX."). An FP marks a real lesson too (the Smecel shows it only on lessons that exist,
+    never on the phantom 6th): a day without any roll call ("PPPPP.") is the same evidence. A
+    position with any mark always counts. A day whose weekday has no mark at all
     nearby takes the class's most common answer; otherwise every position stays (None).
     """
     days, marked = set(), {}
     for record in records:
         if record['state'] in LESSON_STATES:
             days.add(record['date'])
-        if record['state'] in ('absent', 'excused_absent'):
+        if record['state'] in ('absent', 'excused_absent', 'pending'):
             marked.setdefault((record['date'], record['source_student_ref']), set()).add(record['lesson'])
     by_weekday = {}
     for (date, _), slots in marked.items():
@@ -316,12 +326,14 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
         keys[student['source_student_ref']] = 'source:' + hashlib.sha256(canonical_frequency(reference)).hexdigest()
     records = [{'recordKey': keys[s['source_student_ref']], 'originalName': s['display_name'],
                 'originalClass': s['original_class']} for s in students]
-    marks, coverage, unresolved_days = [], {}, set()
+    marks, coverage, unresolved_days, pending = [], {}, set(), {}
     cutoff = datetime.fromtimestamp(stamp(capture['captured_at']), ZoneInfo(timezone_name)).date().isoformat()
     day_lessons = lessons_per_day(snapshot['records'])
     for record in snapshot['records']:
         if record['date'] > cutoff: continue
         state = record['state']
+        # An FP before the Smecel's change is a lesson that never had a roll call: as before.
+        if state == 'pending' and record['date'] < PENDING_FROM: state = 'planned_unknown'
         if state not in LESSON_STATES and state != 'unknown': continue
         if record['source_student_ref'] not in keys or not 1 <= record['lesson'] <= 6: raise FrequencyError('source-invalid')
         key = keys[record['source_student_ref']]
@@ -340,17 +352,22 @@ def collection_payload(preview, source_class, server_class, fencing, request_id,
         # (a point, an X or a justified mark) up to the capture, so 5- or 6-lesson days, weekends,
         # holidays (calendar icon) and days outside the enrolment need no configuration.
         coverage.setdefault((key, record['date']), set()).add(record['lesson'])
+        if state == 'pending':
+            # A lesson the teacher has not marked yet: "a confirmar" until a point or an X replaces it.
+            pending.setdefault((key, record['date']), set()).add(record['lesson'])
         if state in ('absent', 'excused_absent'):
             marks.append({'recordKey': key, 'date': record['date'], 'slot': record['lesson'],
                           'mark': 'X' if state == 'absent' else 'J'})
     version = hashlib.sha256(canonical_frequency({'academicYear': 2026, 'sourceClassId': source_class['class_id'],
-        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v3'})).hexdigest()
+        'observedAt': capture['captured_at'], 'htmlSha256': capture['html_sha256'], 'parserVersion': 'smecel-annual-v4'})).hexdigest()
     return {'operation': 'collect', 'academicYear': 2026, 'requestId': request_id, 'fencingToken': fencing,
             'classId': server_class['classId'], 'expectedRevision': server_class['revision'],
             'sourceVersion': 'sha256:' + version, 'sourceClassId': source_class['class_id'],
             'sourceClassLabel': source_class['name'], 'observedAt': capture['captured_at'], 'rosterComplete': False,
             'records': records, 'marks': marks,
-            'coverage': [{'recordKey': k, 'date': d, 'slots': sorted(slots), 'complete': (k, d) not in unresolved_days}
+            'coverage': [{'recordKey': k, 'date': d, 'slots': sorted(slots), 'complete': (k, d) not in unresolved_days,
+                          # Only when there is one: a day without FP is sent exactly as before.
+                          **({'pending': sorted(pending[(k, d)])} if (k, d) in pending else {})}
                          for (k, d), slots in sorted(coverage.items())]}
 
 
