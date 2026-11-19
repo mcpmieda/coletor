@@ -323,6 +323,28 @@ class AnnualParserTests(unittest.TestCase):
         self.assertEqual(record.state, "unknown")
         self.assertIn("SOURCE_SYMBOL_UNKNOWN", self.codes(snapshot))
 
+    def fp(self, legend_entry):
+        """The clean fixture with its first red X turned into Smecel's FP (18/11/2026) and a legend entry."""
+        red = '<strong><span class="ls-color-danger">X</span></strong>'
+        html = self.clean_html.replace(red, '<strong><span class="ls-color-warning freq-grade-fp">FP</span></strong>', 1)
+        if legend_entry:
+            html = html.replace('X = falta não justificada; ', 'X = falta não justificada; ' + legend_entry, 1)
+        first = next(r for r in self.clean.records if r.state == "absent")
+        snapshot = parse_annual_html(html, "TESTE-A", 2026)
+        return snapshot, next(r for r in snapshot.records
+                              if (r.source_student_ref, r.date, r.lesson) == (first.source_student_ref, first.date, first.lesson))
+
+    def test_fp_is_a_lesson_still_to_be_marked(self):
+        snapshot, record = self.fp('<strong class="ls-color-warning">FP</strong> frequência pendente; ')
+        self.assertEqual((record.state, record.source_symbol), ("pending", "FP"))
+        self.assertNotIn("SOURCE_SYMBOL_UNKNOWN", self.codes(snapshot))
+        self.assertFalse(any(r.state == "present" for r in snapshot.records))
+
+    def test_fp_without_its_legend_is_not_guessed(self):
+        snapshot, record = self.fp(None)
+        self.assertEqual(record.state, "unknown")
+        self.assertIn("SOURCE_SYMBOL_UNKNOWN", self.codes(snapshot))
+
     def test_calendar_icon_is_a_non_school_day_only_with_its_legend(self):
         records = {r.lesson: r for r in self.edge.records if r.source_student_ref == "row:1" and r.date == "2026-02-02"}
         self.assertEqual(records[4].state, "non_school_day")

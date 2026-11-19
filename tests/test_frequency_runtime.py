@@ -1342,8 +1342,51 @@ class LessonsPerDayTests(unittest.TestCase):
     def day(date, marks=None, lessons=6):
         marks = marks or {}
         return [{'source_student_ref': ref, 'date': date, 'lesson': lesson,
-                 'state': {'X': 'absent', 'J': 'excused_absent'}.get(marks.get(ref, {}).get(lesson), 'planned_unknown')}
+                 'state': {'X': 'absent', 'J': 'excused_absent', 'P': 'pending'}.get(marks.get(ref, {}).get(lesson),
+                                                                                    'planned_unknown')}
                 for ref in ('row:1', 'row:2') for lesson in range(1, lessons + 1)]
+
+    def test_a_day_without_roll_call_is_evidence_too(self):
+        # Smecel FP (18/11/2026): only real lessons show FP; the phantom 6th keeps its point.
+        fp = {lesson: 'P' for lesson in range(1, 6)}
+        records = self.day('2026-11-16', {'row:1': fp, 'row:2': fp}) + self.day('2026-11-23')
+        counts = lessons_per_day(records)
+        self.assertEqual(counts['2026-11-16'], 5)
+        self.assertEqual(counts['2026-11-23'], 5)   # the next quiet Monday follows it
+        # A lesson still FP on the 6th position is a real 6th lesson: nothing is cut.
+        self.assertIsNone(lessons_per_day(self.day('2026-11-17', {'row:1': {6: 'P'}}))['2026-11-17'])
+
+    def payload_of(self, records, captured_at='2026-11-20T15:00:00+00:00'):
+        value = preview()
+        value['snapshot']['students'] = [
+            {'source_student_ref': ref, 'display_name': name, 'original_class': 'TURMA SINTÉTICA A'}
+            for ref, name in (('row:1', 'ALUNO UM'), ('row:2', 'ALUNO DOIS'))]
+        value['snapshot']['records'] = records
+        value['capture']['captured_at'] = captured_at
+        return collection_payload(value, {'class_id': '13331', 'name': 'TURMA SINTÉTICA A'},
+                                  {'classId': 10, 'sourceClassLabel': 'TURMA SINTÉTICA A', 'revision': 0}, 1, DEVICE)
+
+    def test_fp_from_the_change_on_is_pending_and_before_it_counts_as_before(self):
+        # Owner decision 19/11/2026: FP from 19/11 on is "a confirmar"; an older FP is a lesson that
+        # never had a roll call and stays a lesson without absence, as the Smecel showed it until 18/11.
+        records = (self.day('2026-11-17', {'row:1': {3: 'P'}, 'row:2': {1: 'X', 3: 'P'}})
+                   + self.day('2026-11-19', {'row:1': {4: 'P', 5: 'P', 6: 'P'}, 'row:2': {1: 'X', 4: 'P', 5: 'P', 6: 'P'}}))
+        payload = self.payload_of(records)
+        days = {(c['recordKey'], c['date']): c for c in payload['coverage']}
+        self.assertTrue(all(c['complete'] for c in payload['coverage']))
+        for (key, date), day in days.items():
+            self.assertEqual(day['slots'], [1, 2, 3, 4, 5, 6])
+            if date == '2026-11-17': self.assertNotIn('pending', day)
+            else: self.assertEqual(day['pending'], [4, 5, 6])
+        # The X stay absences and never sit on a pending lesson.
+        self.assertEqual(sorted((m['date'], m['slot'], m['mark']) for m in payload['marks']),
+                         [('2026-11-17', 1, 'X'), ('2026-11-19', 1, 'X')])
+        self.assertFalse(any(m['slot'] in days[(m['recordKey'], m['date'])].get('pending', [])
+                             for m in payload['marks']))
+
+    def test_fp_after_the_capture_day_is_not_sent(self):
+        payload = self.payload_of(self.day('2026-11-20', {'row:1': {1: 'P'}}), captured_at='2026-11-19T15:00:00+00:00')
+        self.assertEqual(payload['coverage'], [])
 
     def records(self):
         five = {lesson: 'X' for lesson in range(1, 6)}

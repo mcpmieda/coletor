@@ -1,4 +1,4 @@
-export type AttendanceState = 'present' | 'absent' | 'planned_unknown' | 'unmarked' | 'unknown' | 'excused_absent' | 'non_school_day' | 'outside_enrollment';
+export type AttendanceState = 'present' | 'absent' | 'planned_unknown' | 'pending' | 'unmarked' | 'unknown' | 'excused_absent' | 'non_school_day' | 'outside_enrollment';
 interface Student { source_student_ref: string; display_name: string; mat: null }
 interface AttendanceRecord { source_student_ref: string; date: string; lesson: number; state: AttendanceState; source_symbol: string }
 export interface Issue { code: string; severity: 'error' | 'warning'; message: string; source_student_ref?: string; date?: string; lesson?: number }
@@ -16,4 +16,4 @@ interface Snapshot {
   summary: { students: number; records: number; states: Partial<Record<AttendanceState, number>>; blocking_issues: number };
 }
 export interface Preview { snapshot: Snapshot; validation: { allowed: boolean; issues: Issue[] }; mode: 'demo' | 'local' | 'manual'; processed_at: string }
-export const STATE_LABELS: Record<AttendanceState, string> = { present: 'Presença marcada', absent: 'Falta marcada', planned_unknown: 'Ponto / sem confirmação', unmarked: 'Sem marcação', unknown: 'Marca não reconhecida', excused_absent: 'Falta justificada', non_school_day: 'Dia não letivo', outside_enrollment: 'Fora do período de matrícula' };
+export const STATE_LABELS: Record<AttendanceState, string> = { present: 'Presença marcada', absent: 'Falta marcada', planned_unknown: 'Ponto / sem confirmação', pending: 'FP / frequência pendente', unmarked: 'Sem marcação', unknown: 'Marca não reconhecida', excused_absent: 'Falta justificada', non_school_day: 'Dia não letivo', outside_enrollment: 'Fora do período de matrícula' };

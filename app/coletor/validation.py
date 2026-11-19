@@ -71,7 +71,7 @@ def validate_for_transmission(
             valid_date = False
         if not valid_date or type(record.lesson) is not int or not 1 <= record.lesson <= 6:
             block("RECORD_POSITION_INVALID", "A data ou posição de aula é inválida.", record.source_student_ref)
-        if record.state in {"planned_unknown", "unknown"}:
+        if record.state in {"planned_unknown", "pending", "unknown"}:
             # Count one global blocker instead of leaking source tokens in errors.
             if not any(issue.code == "ATTENDANCE_UNRESOLVED" for issue in issues):
                 block("ATTENDANCE_UNRESOLVED", "Há marcações sem significado de frequência confirmado.")
