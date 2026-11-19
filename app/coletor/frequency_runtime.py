@@ -227,8 +227,8 @@ def report_hash(rows):
 LESSON_STATES = frozenset({'planned_unknown', 'pending', 'absent', 'excused_absent'})
 # Owner decision 19/11/2026. On 18/11/2026 the Smecel stopped giving presence by itself: the teacher
 # marks each lesson present (the point) or absent (X), and a lesson not marked yet shows FP. From this
-# school day on, an FP goes to the Ecossistema as `pending` ("a confirmar": neither a presence nor an
-# absence until marked). Before it, the Smecel itself had given every one of those lessons presence
+# school day on, an FP goes to the Ecossistema as `pending`, the raw fact: there it is "a confirmar"
+# on its own day and a lesson without absence once the day is over (pendingTodayV2). Before it, the Smecel itself had given every one of those lessons presence
 # (the diary showed the point there until 18/11): such an FP, a lesson that never had a roll call,
 # still counts as it did, a lesson without absence, so the Portal shows the past as before.
 PENDING_FROM = '2026-11-19'

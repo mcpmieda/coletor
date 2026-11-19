@@ -67,7 +67,8 @@ Desde 18/11/2026 o Smecel não dá mais presença sozinho: o professor marca cad
 (ponto) ou ausente (X), e a aula ainda não marcada mostra **FP** ("frequência pendente", legenda
 própria). O leitor reconhece o FP pelo símbolo, a classe `freq-grade-fp` e a legenda juntos (estado
 `pending`). A partir de 19/11/2026 (`PENDING_FROM`) a posição FP entra na lista de aulas do dia e
-também em `pending`, com o dia completo: no Ecossistema ela fica "a confirmar", fora do percentual.
+também em `pending`, com o dia completo: no Ecossistema ela fica "a confirmar", fora do percentual,
+só no próprio dia; a partir do dia seguinte vira aula sem falta (decisão do dono em 19/11/2026).
 Antes de 19/11 o Smecel mostrava ponto nessas aulas; um FP de lá conta como antes, aula sem falta
 (decisão do dono em 19/11/2026). O FP também serve de evidência da "6ª aula fantasma": ele só aparece
 em aulas que existem. O Ecossistema precisa aceitar `pending` antes desta versão do Coletor.
